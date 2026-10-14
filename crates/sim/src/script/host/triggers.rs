@@ -953,7 +953,22 @@ pub(crate) fn dispatch_triggers(world: &mut World) {
             };
             let look_at = kind == Fires::Use && runtime.require_look_at.contains(&trigger);
             for (client, player) in candidates {
-                if !eligible(&runtime, &frame, trigger, client, kind == Fires::Use) {
+                let ok = eligible(&runtime, &frame, trigger, client, kind == Fires::Use);
+                if kind == Fires::Use && std::env::var_os("IW4L_TRIGGER_DEBUG").is_some() {
+                    let (mins, maxs) = toucher(&mut runtime, &frame, player);
+                    let origin = runtime.object_field(trigger, "origin");
+                    let usable = runtime
+                        .entities
+                        .get(&trigger)
+                        .map(|e| format!("{:?}", e.usable.as_ref().map(|u| u.enabled)));
+                    diag::info!(
+                        Sim,
+                        "trigger debug: use press client={client} trigger={trigger} origin={origin:?} eligible={ok} usable={usable:?} touches={} look_at={look_at} looks={}",
+                        volume.touches(mins, maxs),
+                        looks_into(&frame, client, &volume)
+                    );
+                }
+                if !ok {
                     continue;
                 }
                 let (mins, maxs) = toucher(&mut runtime, &frame, player);

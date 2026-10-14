@@ -76,10 +76,24 @@ fn register_implemented(registry: &mut NativeRegistry) {
 
 macro_rules! stubs {
     ($registry:expr; $($namespace:ident $name:literal),* $(,)?) => {$(
-        $registry.register_absent($namespace, $name, |world, _, _| {
-            unavailable(world, $name, "BO1 zombies builtin not implemented yet")
-        });
+        $registry.register_absent($namespace, $name, |world, _, _| stub(world, $name));
     )*};
+}
+
+/// A yes/no question (is_, has_, can_, may_...) answers no, so a check the runtime cannot
+/// answer does not take its `if` (a failed condition falls into the body); anything
+/// else is `unavailable`. Both count the call.
+fn stub(world: &mut World, name: &'static str) -> Result<Value, String> {
+    let predicate = ["is", "has", "can", "may", "should"]
+        .iter()
+        .any(|prefix| name.starts_with(prefix));
+    if predicate {
+        let mut runtime = world.resource_mut::<Runtime>();
+        let calls = runtime.unsupported.entry(name).or_default();
+        *calls = calls.saturating_add(1);
+        return Ok(Value::Int(0));
+    }
+    unavailable(world, name, "BO1 zombies builtin not implemented yet")
 }
 
 pub(crate) fn register(registry: &mut NativeRegistry) {

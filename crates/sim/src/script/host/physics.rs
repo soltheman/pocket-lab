@@ -24,17 +24,17 @@ fn usable<'a>(
 ) -> Result<&'a mut super::entities::Usable, String> {
     let object = object_of(world, receiver)?;
     let runtime = world.resource_mut::<Runtime>().into_inner();
-    Ok(runtime
-        .entities
-        .get_mut(&object)
-        .unwrap()
-        .usable
-        .get_or_insert_with(|| super::entities::Usable {
-            cursor: 1,
-            hint: -1,
-            enabled: false,
-            barred: Default::default(),
-        }))
+    let entity = runtime.entities.get_mut(&object).unwrap();
+    // A use trigger is usable from the start (giving it a hint or cursor must not turn it
+    // off: BO1's wall buys and doors are trigger_use with a hint string and nothing else);
+    // a script model waits for makeusable.
+    let trigger = entity.classname.starts_with("trigger_");
+    Ok(entity.usable.get_or_insert_with(|| super::entities::Usable {
+        cursor: 1,
+        hint: -1,
+        enabled: trigger,
+        barred: Default::default(),
+    }))
 }
 
 pub(crate) fn register(registry: &mut NativeRegistry) {
