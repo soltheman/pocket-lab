@@ -869,7 +869,9 @@ pub fn find_t5_localized_zones(
     language: Option<&str>,
 ) -> Result<Vec<ZoneFile>, String> {
     let (dir, prefix) = language_archive(anchor, language, crate::ZoneGame::T5)?;
-    Ok(["code_post_gfx_mp", "common_mp", "ui_mp"]
+    // The singleplayer and zombies ones (code_post_gfx, common_zombie) carry the zombies
+    // HUD and hint text; the map's own archive is added by the caller.
+    Ok(["code_post_gfx_mp", "common_mp", "ui_mp", "code_post_gfx", "common_zombie"]
         .into_iter()
         .filter_map(|stem| t5_localized_zone(&dir, &prefix, stem))
         .collect())

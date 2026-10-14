@@ -275,6 +275,8 @@ pub(super) async fn walk_prepared_match(
                 }
             }
         }
+        let (module, source) = crate::map_scripts::ZOMBIES_HUD;
+        scripts.insert_source(module, source.to_owned());
         report.push("GSC: BO1 zombies scripts (IW4L_ZOMBIES=1)".to_owned());
     } else if common_mp
         .as_ref()

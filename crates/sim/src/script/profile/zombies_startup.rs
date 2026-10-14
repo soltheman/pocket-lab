@@ -9,6 +9,7 @@ pub struct ZombiesStartup {
 }
 
 pub const ZOMBIES_CALLBACKS: &str = "maps/_callbacksetup";
+const ZOMBIES_HUD: &str = "iw4l_zombies/hud";
 
 impl ZombiesStartup {
     pub fn new(resolver: &impl SourceResolver, map: &str) -> Option<Self> {
@@ -16,7 +17,7 @@ impl ZombiesStartup {
         if resolver.read_bytes(&level).is_err() || resolver.read_bytes(ZOMBIES_CALLBACKS).is_err() {
             return None;
         }
-        Some(Self {
+        let mut startup = Self {
             roots: vec![
                 "codescripts/delete".to_owned(),
                 "codescripts/struct".to_owned(),
@@ -27,6 +28,12 @@ impl ZombiesStartup {
                 format!("{level}::main"),
                 format!("{ZOMBIES_CALLBACKS}::codecallback_startgametype"),
             ],
-        })
+        };
+        // The runtime's own HUD feed, when the walk installed it.
+        if resolver.read_bytes(ZOMBIES_HUD).is_ok() {
+            startup.roots.push(ZOMBIES_HUD.to_owned());
+            startup.entries.push(format!("{ZOMBIES_HUD}::main"));
+        }
+        Some(startup)
     }
 }

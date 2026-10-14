@@ -1,5 +1,47 @@
 pub(crate) const T6_EQUIPMENT: &str = include_str!("t6_equipment.gsc.txt");
 
+/// BO1 zombies HUD feed: BO1 draws points and the round through script HUD elements and
+/// its own menus, which this runtime does not present, so each player's points and the
+/// round number go out as client dvars (`ui_zm_points`, `ui_zm_round`) for the client's
+/// zombies HUD to draw.
+pub(crate) const ZOMBIES_HUD: (&str, &str) = (
+    "iw4l_zombies/hud",
+    r#"main()
+{
+    level thread hud_feed();
+}
+
+hud_feed()
+{
+    for (;;)
+    {
+        round = 0;
+        if (isdefined(level.round_number))
+            round = level.round_number;
+        players = getplayers();
+        for (i = 0; i < players.size; i++)
+        {
+            p = players[i];
+            score = 0;
+            if (isdefined(p.score))
+                score = p.score;
+            if (!isdefined(p.iw4l_hud_score) || p.iw4l_hud_score != score)
+            {
+                p.iw4l_hud_score = score;
+                p setclientdvar("ui_zm_points", "" + score);
+            }
+            if (!isdefined(p.iw4l_hud_round) || p.iw4l_hud_round != round)
+            {
+                p.iw4l_hud_round = round;
+                p setclientdvar("ui_zm_round", "" + round);
+            }
+        }
+        wait 0.1;
+    }
+}
+"#,
+);
+
 /// Free roam for an install without MW2's gametype scripts: every player who connects is
 /// spawned at the map's first start point, and nothing else runs.
 pub(crate) const FREE_ROAM: [(&str, &str); 4] = [

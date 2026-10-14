@@ -1319,7 +1319,19 @@ pub(super) fn load_localized_strings_beside(
                 if namespace == asset_core::AssetNamespace::T6 {
                     asset_transport::discover::find_t6_localized_zones(&zone.path, language)
                 } else {
-                    asset_transport::discover::find_t5_localized_zones(&zone.path, language)
+                    let mut zones =
+                        asset_transport::discover::find_t5_localized_zones(&zone.path, language)?;
+                    // A T5 map's own language archive (en_zombie_theater: its hints).
+                    if asset_transport::zone_game_for_path(zone_ff)
+                        == Some(asset_core::ZoneGame::T5)
+                        && let Some(stem) = zone_ff.file_stem().and_then(|stem| stem.to_str())
+                        && let Ok(Some(map)) = asset_transport::discover::find_t5_localized_zone(
+                            &zone.path, language, stem,
+                        )
+                    {
+                        zones.push(map);
+                    }
+                    Ok(zones)
                 }
             }) {
                 Ok(zones) => zones,

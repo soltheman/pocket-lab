@@ -129,6 +129,7 @@ impl Plugin for ConsolePlugin {
                 Update,
                 (
                     crate::touch_controls::update_touch_overlay,
+                    crate::zombies_hud::update_zombies_hud,
                     crate::touch_controls::handle_touch_commands.after(ConsoleDispatchSet),
                 ),
             )
@@ -951,6 +952,7 @@ fn setup_console(
     commands.insert_resource(ConsolePrompt(prompt_entity.expect("console prompt entity")));
     commands.insert_resource(ConsoleLog(log_entity.expect("console log entity")));
     crate::touch_controls::spawn_touch_overlay(&mut commands, font.clone(), touch.enabled);
+    crate::zombies_hud::spawn_zombies_hud(&mut commands, font.clone());
     crate::debug_move::spawn_showpos_hud(&mut commands, font);
 }
 

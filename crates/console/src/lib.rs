@@ -37,6 +37,7 @@ mod startup;
 pub mod suggest;
 mod synthetic_input;
 pub mod touch_controls;
+mod zombies_hud;
 mod user_settings;
 mod weapon_dispatch;
 
