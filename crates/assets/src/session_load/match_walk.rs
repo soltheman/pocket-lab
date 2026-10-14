@@ -229,8 +229,9 @@ pub(super) async fn walk_prepared_match(
             "team rows gap: {FACTION_TABLE} lacks {IW4_ALLIES_CHARSET}/{IW4_AXIS_CHARSET}; IW4 scripts show IW4 teams"
         ));
     }
+    let zombies = asset_transport::t5_zombies_scripts(&zone_name);
     let map_scripts = match map_namespace {
-        Some(asset_core::AssetNamespace::T5 | asset_core::AssetNamespace::T6) => {
+        Some(asset_core::AssetNamespace::T5 | asset_core::AssetNamespace::T6) if !zombies => {
             let scripts = t5_map_under_iw4_rules(&map_scripts, &zone_name, &facts);
             report.push(format!(
                 "map script: maps/mp/{zone_name} written from the T5 map's declarations; T5 map scripts left out"
@@ -241,7 +242,46 @@ pub(super) async fn walk_prepared_match(
     };
     let mut scripts = iw4_scripts;
     scripts.overlay(map_scripts);
-    if scripts.read("maps/mp/gametypes/_callbacksetup").is_ok() {
+    if zombies {
+        // BO1 ships its script fixes in patch zones loaded after the commons and the
+        // map: common_zombie_patch and <map>_patch. Their scripts win.
+        if let Ok(map_path) = zone_ff.as_ref() {
+            for patch in [
+                "common_zombie_patch".to_owned(),
+                format!("{zone_name}_patch"),
+            ] {
+                let opened = asset_transport::find_zone_for_tree(map_path, &patch)
+                    .map_err(|error| error.to_string())
+                    .and_then(|found| {
+                        open_zone_shared(&found.path)
+                            .map(|image| (found.path, image))
+                            .map_err(|error| error.to_string())
+                    });
+                match opened {
+                    Ok((path, image)) => {
+                        let pop = lane(image.game).load_material_population(
+                            &path,
+                            &image,
+                            &progress,
+                            MaterialCatalog::default(),
+                        );
+                        report.push(format!(
+                            "GSC patch zone {patch}: {} scripts",
+                            pop.scripts.len()
+                        ));
+                        scripts.overlay(pop.scripts);
+                    }
+                    Err(error) => report.push(format!("GSC patch zone {patch}: {error}")),
+                }
+            }
+        }
+        report.push("GSC: BO1 zombies scripts (IW4L_ZOMBIES=1)".to_owned());
+    } else if common_mp
+        .as_ref()
+        .ok()
+        .and_then(|path| asset_transport::zone_game_for_path(path))
+        == Some(asset_core::ZoneGame::Iw4)
+    {
         scripts.insert_source(
             "iw4l_t6/equipment",
             crate::map_scripts::T6_EQUIPMENT.to_owned(),

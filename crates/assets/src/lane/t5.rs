@@ -690,6 +690,9 @@ impl ZoneLane for T5Lane {
             teamsets: sink.teamsets,
             scene_models: sink.scene_models,
             film_visions: std::collections::BTreeMap::new(),
+            // A T5 runtime common (BO1-only installs) supplies BO1's own scripts: the
+            // zombies scripts run from common_zombie, and free roam overrides the rest.
+            scripts: sink.scripts,
             ..Default::default()
         }
     }

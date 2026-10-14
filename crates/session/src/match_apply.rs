@@ -1099,9 +1099,23 @@ fn preflight_match_install(
             })
             .collect(),
     };
-    let startup = sim::script::Iw4Startup::new(&sources, gametype, zone);
-    let roots: Vec<&str> = startup.roots.iter().map(String::as_str).collect();
-    let scripts = sim::script::Program::load(&sources, &roots, &sim::script::Catalog::iw4())
+    // A BO1 zombies map with IW4L_ZOMBIES=1 runs its own singleplayer scripts.
+    let zombies = asset_transport::t5_zombies_scripts(zone)
+        .then(|| sim::script::ZombiesStartup::new(&sources, zone))
+        .flatten();
+    let (startup_roots, startup_entries, script_catalog) = match zombies {
+        Some(zombies) => (
+            zombies.roots,
+            zombies.entries,
+            sim::script::Catalog::t5_zombies(),
+        ),
+        None => {
+            let startup = sim::script::Iw4Startup::new(&sources, gametype, zone);
+            (startup.roots, startup.entries, sim::script::Catalog::iw4())
+        }
+    };
+    let roots: Vec<&str> = startup_roots.iter().map(String::as_str).collect();
+    let scripts = sim::script::Program::load(&sources, &roots, &script_catalog)
         .map_err(|e| script_refusal(zone, gametype, "compile", &e))?;
     let config = sources
         .0
@@ -1149,7 +1163,7 @@ fn preflight_match_install(
         );
     }
     script_dvars.extend(script_dvar_overrides());
-    let script_entries = startup.entries;
+    let script_entries = startup_entries;
     let authority_models = authority_entity_model_install(&prepared.world);
     let model_spawns = script_model_spawns(&prepared.world.script_model_instances);
     let fx_catalog = PreparedFxCatalog(std::mem::take(&mut prepared.fx));

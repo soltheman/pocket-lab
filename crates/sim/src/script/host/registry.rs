@@ -67,6 +67,8 @@ impl Default for NativeRegistry {
         super::turrets::register(&mut registry);
         super::triggers::register(&mut registry);
         super::spectators::register(&mut registry);
+        // Last: stubs only for the BO1 zombies builtins nothing above implements.
+        natives::t5_zombies::register(&mut registry);
         registry
     }
 }
@@ -74,6 +76,12 @@ impl NativeRegistry {
     pub fn register(&mut self, namespace: Namespace, name: &str, native: Native) {
         self.0
             .insert((namespace, name.to_ascii_lowercase()), native);
+    }
+    /// Registers `native` unless `name` already has one.
+    pub(crate) fn register_absent(&mut self, namespace: Namespace, name: &str, native: Native) {
+        self.0
+            .entry((namespace, name.to_ascii_lowercase()))
+            .or_insert(native);
     }
     pub(crate) fn get(&self, namespace: Namespace, name: &str) -> Option<Native> {
         self.0.get(&(namespace, name.to_owned())).copied()

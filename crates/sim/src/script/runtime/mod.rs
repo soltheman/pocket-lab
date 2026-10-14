@@ -141,9 +141,18 @@ fn entry(world: &World, name: &str) -> Result<(Arc<Program>, usize, Location), F
         .as_ref()
         .ok_or_else(|| Fault::at(&location, "no loaded GSC program"))?
         .clone();
+    let key = name.replace('\\', "/").to_ascii_lowercase();
     let function = *program
         .names
-        .get(&name.replace('\\', "/").to_ascii_lowercase())
+        .get(&key)
+        .or_else(|| {
+            // BO1's singleplayer and zombies scripts keep the code callbacks in
+            // maps/_callbacksetup rather than multiplayer's gametypes folder.
+            let callback = key.strip_prefix("maps/mp/gametypes/_callbacksetup::")?;
+            program
+                .names
+                .get(&format!("{}::{callback}", crate::script::ZOMBIES_CALLBACKS))
+        })
         .ok_or_else(|| Fault::at(&location, "unknown script entry point"))?;
     Ok((program, function, location))
 }

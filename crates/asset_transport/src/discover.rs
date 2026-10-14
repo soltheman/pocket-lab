@@ -476,6 +476,13 @@ pub fn t5_zombies_map_name(key: &str) -> Option<&'static str> {
         .map(|(_, name)| *name)
 }
 
+/// Whether a BO1 zombies map runs BO1's own zombies scripts instead of free roam:
+/// `IW4L_ZOMBIES=1` while the builtins they need are being filled in.
+pub fn t5_zombies_scripts(zone: &str) -> bool {
+    t5_zombies_map_name(zone).is_some()
+        && std::env::var("IW4L_ZOMBIES").is_ok_and(|value| value.trim() == "1")
+}
+
 pub fn map_load_title(key: &str, game: Option<crate::ZoneGame>) -> String {
     let (parsed, stem) = split_zone_key(key);
     if let Some(name) = t5_zombies_map_name(key) {
@@ -605,8 +612,10 @@ pub fn find_runtime_zone(root: &GamesRoot, zone_ff: &Path, zone: &str) -> Result
 /// zones instead of multiplayer's: their weapons, scripts and models are the zombies ones,
 /// and multiplayer's 1700 weapons would only cost memory.
 fn t5_zombies_runtime_zone(zone_ff: &Path, zone: &str) -> Option<&'static str> {
+    // The startup walks anchor on the runtime common itself (common_zombie), the rest on
+    // the map.
     let stem = zone_ff.file_stem()?.to_str()?.to_ascii_lowercase();
-    if !stem.starts_with("zombie_") {
+    if !stem.starts_with("zombie_") && stem != T5_ZOMBIES_COMMON {
         return None;
     }
     Some(match zone {
