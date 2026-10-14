@@ -1110,7 +1110,7 @@ fn preflight_match_install(
             })
             .collect(),
     };
-    // A BO1 zombies map with IW4L_ZOMBIES=1 runs its own singleplayer scripts.
+    // A BO1 zombies map runs its own singleplayer scripts (IW4L_ZOMBIES=0: free roam).
     let zombies = asset_transport::t5_zombies_scripts(zone)
         .then(|| sim::script::ZombiesStartup::new(&sources, zone))
         .flatten();

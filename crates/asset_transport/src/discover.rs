@@ -476,11 +476,11 @@ pub fn t5_zombies_map_name(key: &str) -> Option<&'static str> {
         .map(|(_, name)| *name)
 }
 
-/// Whether a BO1 zombies map runs BO1's own zombies scripts instead of free roam:
-/// `IW4L_ZOMBIES=1` while the builtins they need are being filled in.
+/// Whether a BO1 zombies map runs BO1's own zombies scripts (the default) or free roam
+/// (`IW4L_ZOMBIES=0`, while the builtins the scripts need are being filled in).
 pub fn t5_zombies_scripts(zone: &str) -> bool {
     t5_zombies_map_name(zone).is_some()
-        && std::env::var("IW4L_ZOMBIES").is_ok_and(|value| value.trim() == "1")
+        && !std::env::var("IW4L_ZOMBIES").is_ok_and(|value| value.trim() == "0")
 }
 
 pub fn map_load_title(key: &str, game: Option<crate::ZoneGame>) -> String {
