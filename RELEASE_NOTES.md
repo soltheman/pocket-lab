@@ -1,6 +1,9 @@
-# Pocket Lab 0.3.1
+# Pocket Lab 0.3.2
 
 Kino der Toten plays like Black Ops zombies now: zombies tear in through the windows and come for you, and the map's buyables work.
+
+**New in 0.3.2**
+- Zombies that spawn in a closet with no way to the window they picked now switch to one they can reach (they used to stand stuck outside).
 
 **New in 0.3.1**
 - Sound: Black Ops' own zombie sounds play (zombie groans, the round start music, the box, perks, purchases). Earlier builds looked for them in the wrong place.
