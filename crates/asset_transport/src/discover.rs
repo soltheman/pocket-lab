@@ -452,8 +452,35 @@ pub fn split_zone_key(zone: &str) -> (Option<crate::ZoneGame>, &str) {
     }
 }
 
+/// BO1's zombies maps by their zone names.
+const T5_ZOMBIES_MAP_NAMES: [(&str, &str); 11] = [
+    ("zombie_theater", "Kino der Toten"),
+    ("zombie_pentagon", "\"Five\""),
+    ("zombie_cosmodrome", "Ascension"),
+    ("zombie_coast", "Call of the Dead"),
+    ("zombie_temple", "Shangri-La"),
+    ("zombie_moon", "Moon"),
+    ("zombie_cod5_prototype", "Nacht der Untoten"),
+    ("zombie_cod5_asylum", "Verrückt"),
+    ("zombie_cod5_sumpf", "Shi No Numa"),
+    ("zombie_cod5_factory", "Der Riese"),
+    ("zombietron", "Dead Ops Arcade"),
+];
+
+/// The display name of a BO1 zombies map, or None for any other zone.
+pub fn t5_zombies_map_name(key: &str) -> Option<&'static str> {
+    let (_, stem) = split_zone_key(key);
+    T5_ZOMBIES_MAP_NAMES
+        .iter()
+        .find(|(zone, _)| zone.eq_ignore_ascii_case(stem))
+        .map(|(_, name)| *name)
+}
+
 pub fn map_load_title(key: &str, game: Option<crate::ZoneGame>) -> String {
     let (parsed, stem) = split_zone_key(key);
+    if let Some(name) = t5_zombies_map_name(key) {
+        return name.to_owned();
+    }
     match parsed.or(game) {
         Some(game) => format!("{}:{stem}", game.prefix()),
         None => stem.to_owned(),

@@ -28,6 +28,20 @@ use crate::plugins::{add_runtime_plugins, add_runtime_plugins_with_role};
 /// Where a launch with no map lands when only Black Ops is installed: Kino der Toten.
 const BO1_ONLY_START_ZONE: &str = "t5:zombie_theater";
 
+/// `IW4L_WINDOW_SIZE=844x390` opens the desktop window at a phone's logical size, to check
+/// layouts (the iPhone 16e in landscape is 844x390); 1280x720 otherwise.
+fn window_resolution() -> bevy::window::WindowResolution {
+    std::env::var("IW4L_WINDOW_SIZE")
+        .ok()
+        .and_then(|size| {
+            let (w, h) = size.trim().split_once('x')?;
+            Some((w.parse::<u32>().ok()?, h.parse::<u32>().ok()?))
+        })
+        .filter(|&(w, h)| w >= 320 && h >= 240)
+        .unwrap_or((ACCEPTANCE_WIDTH, ACCEPTANCE_HEIGHT))
+        .into()
+}
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum Role {
     Listen,
@@ -367,7 +381,7 @@ fn run_menu(
         WindowPlugin {
             primary_window: Some(Window {
                 title: "iw4l".into(),
-                resolution: (1280, 720).into(),
+                resolution: window_resolution(),
                 ..default()
             }),
             ..default()
@@ -589,7 +603,11 @@ fn run_map(
                     Role::Listen | Role::Dedicated => format!("iw4l — {}", config.zone),
                     Role::Client => format!("iw4l — join {}", config.zone),
                 },
-                resolution: (ACCEPTANCE_WIDTH, ACCEPTANCE_HEIGHT).into(),
+                resolution: if acceptance_run.is_some() {
+                    (ACCEPTANCE_WIDTH, ACCEPTANCE_HEIGHT).into()
+                } else {
+                    window_resolution()
+                },
                 present_mode,
                 ..default()
             }),
@@ -619,7 +637,11 @@ fn run_map(
         .insert_resource(LoadingScreen::new(
             progress.clone(),
             loading_title,
-            sim::host_game_mode_kind().display_name().to_owned(),
+            if asset_transport::t5_zombies_map_name(&zone_arg_lc).is_some() {
+                "ZOMBIES".to_owned()
+            } else {
+                sim::host_game_mode_kind().display_name().to_owned()
+            },
         ))
         .insert_resource(UiAssetRoot(ui_games_root))
         .insert_resource(StartupCommands {

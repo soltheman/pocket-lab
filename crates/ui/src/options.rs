@@ -46,6 +46,14 @@ pub(crate) fn apply_window_settings(
     let Ok(mut window) = windows.single_mut() else {
         return;
     };
+    // A phone's window is its screen: asking it for the desktop resolution only leaves
+    // the layout and the render target believing in a size the screen does not have.
+    // `IW4L_WINDOW_SIZE` (a phone-sized desktop window for layout checks) keeps its size too.
+    if cfg!(target_os = "ios") || std::env::var_os("IW4L_WINDOW_SIZE").is_some() {
+        window.present_mode = present_mode;
+        *applied = Some(display);
+        return;
+    }
     window
         .resolution
         .set_physical_resolution(settings.resolution.width, settings.resolution.height);
