@@ -242,7 +242,11 @@ fn mw2_not_found(
     steam: &asset_transport::SteamProbe,
 ) -> String {
     use asset_transport::SteamCandidate;
-    let instructions = if cfg!(windows) {
+    let instructions = if cfg!(target_os = "ios") {
+        "Black Ops was not found.\n\n\
+        In the Files app, copy your \"Call of Duty Black Ops\" folder (with its zone and main \
+        folders) into On My iPhone > Pocket Lab > Games, then open Pocket Lab again.\n\nSearched:\n"
+    } else if cfg!(windows) {
         "MW2 Multiplayer was not found.\n\n\
         Put a shortcut to the game folder next to iw4l.exe:\n\
         1. In Steam, right-click Call of Duty: Modern Warfare 2 > Manage > Browse local \
