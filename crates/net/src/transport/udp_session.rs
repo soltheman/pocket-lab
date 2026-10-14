@@ -30,6 +30,9 @@ use crate::transport::wire::WireReader;
 use super::account_wire::{AccountMessage, profile_payload};
 
 const RELAY_MAIL_CAP: usize = 64;
+/// How long a client waits for an action's outcome before sending the action again.
+/// The host's action ledger answers a repeat with the outcome it already decided.
+const ACTION_RESEND: std::time::Duration = std::time::Duration::from_millis(1000);
 pub(crate) const CMDS_PER_PACKET: usize = 16;
 
 #[derive(Clone, Debug)]
@@ -1156,7 +1159,9 @@ pub struct UdpClientLink {
     account_profile: Option<Vec<u8>>,
     account_ack: Option<sim::AccountSnapshot>,
     account_offer: Option<sim::AccountSnapshot>,
-    sent_actions: HashSet<sim::ActionRequestId>,
+    /// When each unresolved action was last sent: re-sent after [`ACTION_RESEND`], since
+    /// a host still finishing the account handshake drops the packet that carried it.
+    sent_actions: HashMap<sim::ActionRequestId, std::time::Instant>,
 }
 
 impl UdpClientLink {
@@ -1182,7 +1187,7 @@ impl UdpClientLink {
             account_profile: None,
             account_ack: None,
             account_offer: None,
-            sent_actions: HashSet::new(),
+            sent_actions: HashMap::new(),
             held_bootstrap: Vec::new(),
             failed: None,
             bootstrap: None,
@@ -1721,10 +1726,15 @@ impl UdpClientLink {
         self.send_bytes(&packet.to_bytes())
     }
 
+    /// Not sent yet, or sent [`ACTION_RESEND`] ago with no outcome back.
+    fn action_due(&self, action: &ClientAction) -> bool {
+        self.sent_actions
+            .get(&sim::action_request_id(action))
+            .is_none_or(|sent| sent.elapsed() >= ACTION_RESEND)
+    }
+
     pub fn has_unsent_actions(&self, actions: &[ClientAction]) -> bool {
-        actions
-            .iter()
-            .any(|action| !self.sent_actions.contains(&sim::action_request_id(action)))
+        actions.iter().any(|action| self.action_due(action))
     }
 
     pub fn send_commands(
@@ -1748,7 +1758,7 @@ impl UdpClientLink {
             self.send_command_packet(connection, chunk, &[], reliable_ack)?;
         }
 
-        self.sent_actions.retain(|id| {
+        self.sent_actions.retain(|id, _| {
             actions
                 .iter()
                 .any(|action| sim::action_request_id(action) == *id)
@@ -1756,12 +1766,13 @@ impl UdpClientLink {
         let fresh: Vec<_> = actions
             .iter()
             .copied()
-            .filter(|action| !self.sent_actions.contains(&sim::action_request_id(action)))
+            .filter(|action| self.action_due(action))
             .collect();
         if !fresh.is_empty() || cmds.is_empty() {
             self.send_command_packet(connection, &[], &fresh, reliable_ack)?;
+            let now = std::time::Instant::now();
             self.sent_actions
-                .extend(fresh.iter().map(sim::action_request_id));
+                .extend(fresh.iter().map(|action| (sim::action_request_id(action), now)));
         }
         Ok(())
     }

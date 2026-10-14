@@ -400,9 +400,11 @@ hud_feed()
             // team, the zombies' hits count as friendly fire and do nothing.
             if (!isdefined(p.ignoreme))
                 p.ignoreme = false;
-            // Counted by BO1's last stand (each down) and its game-over stats.
+            // Counted by BO1's last stand (each down, each revive) and its game-over stats.
             if (!isdefined(p.downs))
                 p.downs = 0;
+            if (!isdefined(p.revives))
+                p.revives = 0;
             if (!isdefined(p.team) || p.team == "")
                 p.team = "allies";
             if (!isdefined(p.iw4l_hud_over))

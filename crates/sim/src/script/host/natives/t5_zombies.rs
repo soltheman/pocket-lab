@@ -132,6 +132,11 @@ fn register_implemented(registry: &mut NativeRegistry) {
     for name in ["disablegrenadesuicide", "setailimit"] {
         registry.register(Function, name, |_, _, _| Ok(Value::Undefined));
     }
+    // The left-hand partner of a dual-wield weapon. The weapon defs' partner name is not
+    // read yet, so every weapon answers "none" (true of the pistol last stand saves).
+    registry.register(Function, "weapondualwieldweaponname", |_, _, _| {
+        Ok(Value::string("none"))
+    });
     // Clip facts from the walk's animations, for the clips the player tree does not hold.
     registry.register(Function, "getanimlength", |world, _, args| {
         let name = anim_name(args, 0)?;
