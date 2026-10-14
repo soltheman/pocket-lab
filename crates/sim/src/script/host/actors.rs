@@ -18,8 +18,35 @@ use crate::script::{Runtime, Value};
 const ACTOR_DAMAGE: &str = "maps/_callbacksetup::codecallback_actordamage";
 const ACTOR_KILLED: &str = "maps/_callbacksetup::codecallback_actorkilled";
 
-/// Walk speed, units per second (BO1's early-round zombies shamble near this).
-const SPEED: f32 = 80.0;
+/// Ground speeds, units per second, for BO1's `zombie_move_speed` (walk, run, sprint):
+/// about what each gait's clips cover.
+const WALK_SPEED: f32 = 55.0;
+const RUN_SPEED: f32 = 115.0;
+const SPRINT_SPEED: f32 = 175.0;
+const WALK_CLIPS: [&str; 8] = [
+    "ai_zombie_walk_v1",
+    "ai_zombie_walk_v2",
+    "ai_zombie_walk_v3",
+    "ai_zombie_walk_v4",
+    "ai_zombie_walk_v6",
+    "ai_zombie_walk_v7",
+    "ai_zombie_walk_v8",
+    "ai_zombie_walk_v9",
+];
+const RUN_CLIPS: [&str; 4] = [
+    "ai_zombie_run_v1",
+    "ai_zombie_run_v2",
+    "ai_zombie_run_v3",
+    "ai_zombie_run_v4",
+];
+const SPRINT_CLIPS: [&str; 2] = ["ai_zombie_sprint_v1", "ai_zombie_sprint_v2"];
+const ATTACK_CLIPS: [&str; 4] = [
+    "ai_zombie_attack_v1",
+    "ai_zombie_attack_v2",
+    "ai_zombie_attack_v4",
+    "ai_zombie_attack_v6",
+];
+const DEATH_CLIPS: [&str; 2] = ["ai_zombie_death_v1", "ai_zombie_death_v2"];
 /// Close enough to swing at a player (from feet to feet, horizontally).
 const REACH: f32 = 52.0;
 const HIT_DAMAGE: i32 = 50;
@@ -35,6 +62,53 @@ pub(crate) struct Actor {
     next_hit_ms: i64,
     fall: f32,
     died_ms: Option<i64>,
+    /// The clip the body plays now (dogs play none yet).
+    clip: Option<&'static str>,
+}
+
+/// One of a set of clips, the same one for an actor every time.
+fn pick(clips: &[&'static str], object: u64) -> &'static str {
+    clips[(object as usize) % clips.len()]
+}
+
+/// The gait BO1's scripts asked for (`self.zombie_move_speed`): its speed and clips.
+fn gait(runtime: &mut Runtime, object: u64) -> (f32, &'static [&'static str]) {
+    let speed = match runtime.object_field(object, "zombie_move_speed") {
+        Value::String(speed) => speed.to_string(),
+        _ => String::new(),
+    };
+    match speed.as_str() {
+        "sprint" => (SPRINT_SPEED, &SPRINT_CLIPS),
+        "run" => (RUN_SPEED, &RUN_CLIPS),
+        _ => (WALK_SPEED, &WALK_CLIPS),
+    }
+}
+
+/// Start `clip` on the actor's body unless it already plays it.
+fn play(world: &mut World, object: u64, state: &mut Actor, clip: &'static str) {
+    if state.clip == Some(clip) {
+        return;
+    }
+    static UNTIMED: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+    let timing = FrameWorld::from_world(world).script_model_anim(clip);
+    if std::env::var_os("IW4L_ACTOR_DEBUG").is_some() {
+        diag::info!(Sim, "actor debug: {object} plays {clip} {timing:?}");
+    }
+    if timing.is_none() && !UNTIMED.swap(true, std::sync::atomic::Ordering::Relaxed) {
+        diag::warn!(
+            Sim,
+            "actor: clip {clip} has no timing in the anim table; it holds its first frame"
+        );
+    }
+    let mut runtime = world.resource_mut::<Runtime>();
+    let Some(entity) = runtime.entities.get_mut(&object) else {
+        return;
+    };
+    if entity.classname.contains("dog") {
+        return;
+    }
+    state.clip = Some(clip);
+    entity.anim_op = Some(Some(clip.into()));
 }
 
 fn vec_field(runtime: &mut Runtime, object: u64, name: &str) -> [f32; 3] {
@@ -89,6 +163,12 @@ pub(crate) fn spawn_from_spawner(
         "zombie"
     };
     runtime.set_object_field(id, "type", Value::string(kind));
+    // Engine-owned actor fields the scripts read before they ever set them.
+    runtime.set_object_field(id, "delayeddeath", Value::Int(0));
+    runtime.set_object_field(id, "allowpain", Value::Int(1));
+    runtime.set_object_field(id, "ignoreall", Value::Int(0));
+    runtime.set_object_field(id, "ignoreme", Value::Int(0));
+    runtime.set_object_field(id, "damagelocation", Value::string("none"));
     if let Some(Value::String(targetname)) = args.get(1) {
         runtime.set_object_field(id, "targetname", Value::String(targetname.clone()));
     }
@@ -116,6 +196,13 @@ pub(crate) fn spawn_from_spawner(
     );
     let now = super::players::now_ms(world);
     let _ = run_now(world, &aitype, Value::Object(id), Vec::new(), now);
+    // Then its init animscript, which builds the `self.a` state the AI scripts read.
+    let init = if kind == "dog" {
+        "animscripts/zombie_dog_init::main"
+    } else {
+        "animscripts/zombie_init::main"
+    };
+    let _ = run_now(world, init, Value::Object(id), Vec::new(), now);
     if std::env::var_os("IW4L_ACTOR_DEBUG").is_some() {
         let mut runtime = world.resource_mut::<Runtime>();
         let model = runtime.object_field(id, "model");
@@ -187,6 +274,14 @@ pub(crate) fn damage(
     {
         return;
     }
+    if std::env::var_os("IW4L_ACTOR_DEBUG").is_some() {
+        diag::info!(
+            Sim,
+            "actor debug: {object} hit for {} by {weapon} ({}) at {part:?}",
+            hit.amount,
+            hit.means
+        );
+    }
     let hitloc = if part.starts_with("j_head") || part.starts_with("j_neck") {
         "head"
     } else {
@@ -242,18 +337,37 @@ fn finish(world: &mut World, object: u64, args: &[Value]) {
         _ => 0,
     };
     let attacker = args.get(1).cloned().unwrap_or(Value::Undefined);
+    let get = |i: usize| args.get(i).cloned().unwrap_or(Value::Undefined);
     let (before, after) = {
         let mut runtime = world.resource_mut::<Runtime>();
         let before = int_field(&mut runtime, object, "health");
         let after = before.saturating_sub(amount.max(0));
         runtime.set_object_field(object, "health", Value::Int(after));
+        // What the engine records of the last hit, for the damage scripts.
+        runtime.set_object_field(object, "damagelocation", get(8));
+        runtime.set_object_field(object, "damageweapon", get(5));
+        runtime.set_object_field(object, "damagemod", get(4));
         (before, after)
     };
+    if std::env::var_os("IW4L_ACTOR_DEBUG").is_some() {
+        diag::info!(Sim, "actor debug: {object} health {before} -> {after}");
+    }
+    // `damage`: amount, attacker, direction, point, means, model, tag, part, flags.
     raise(
         world,
         Value::Object(object),
         "damage",
-        vec![Value::Int(amount), attacker.clone()],
+        vec![
+            Value::Int(amount),
+            attacker.clone(),
+            get(7),
+            get(6),
+            get(4),
+            Value::string(""),
+            Value::string(""),
+            Value::string(""),
+            get(3),
+        ],
     );
     if before > 0 && after <= 0 {
         kill(world, object, args, attacker);
@@ -268,6 +382,16 @@ fn kill(world: &mut World, object: u64, args: &[Value], attacker: Value) {
         }
         actor.died_ms = Some(now);
     }
+    // The killer, as the engine leaves it on a dead actor (`zombie.attacker`).
+    world
+        .resource_mut::<Runtime>()
+        .set_object_field(object, "attacker", attacker.clone());
+    if let Some(mut state) = world.resource::<Runtime>().actors.get(&object).cloned() {
+        play(world, object, &mut state, pick(&DEATH_CLIPS, object));
+        if let Some(slot) = world.resource_mut::<Runtime>().actors.get_mut(&object) {
+            *slot = state;
+        }
+    }
     let get = |i: usize| args.get(i).cloned().unwrap_or(Value::Undefined);
     let killed = vec![
         get(0),
@@ -281,6 +405,18 @@ fn kill(world: &mut World, object: u64, args: &[Value], attacker: Value) {
     ];
     let _ = run_now(world, ACTOR_KILLED, Value::Object(object), killed, now);
     raise(world, Value::Object(object), "death", vec![attacker]);
+    // The death animscript: a zombie's `deathFunction` hands out the kill points there.
+    let dog = world
+        .resource::<Runtime>()
+        .entities
+        .get(&object)
+        .is_some_and(|entity| entity.classname.contains("dog"));
+    let death = if dog {
+        "animscripts/zombie_dog_death::main"
+    } else {
+        "animscripts/zombie_death::main"
+    };
+    let _ = run_now(world, death, Value::Object(object), Vec::new(), now);
 }
 
 /// Each tick: walk every living actor at the nearest living player and swing in reach;
@@ -330,9 +466,14 @@ pub(crate) fn advance(world: &mut World) {
         let to = [target[0] - origin[0], target[1] - origin[1]];
         let distance = (to[0] * to[0] + to[1] * to[1]).sqrt();
         let yaw = to[1].atan2(to[0]).to_degrees();
+        let (speed, clips) = gait(&mut world.resource_mut::<Runtime>(), object);
         let walk = if distance > REACH {
-            [to[0] / distance * SPEED, to[1] / distance * SPEED]
+            play(world, object, &mut state, pick(clips, object));
+            [to[0] / distance * speed, to[1] / distance * speed]
         } else {
+            if !state.clip.is_some_and(|clip| ATTACK_CLIPS.contains(&clip)) {
+                play(world, object, &mut state, pick(&ATTACK_CLIPS, object));
+            }
             [0.0, 0.0]
         };
         let mut slide = super::mechanics::Slide {
@@ -345,9 +486,23 @@ pub(crate) fn advance(world: &mut World) {
         if std::env::var_os("IW4L_ACTOR_DEBUG").is_some()
             && now % 2000 < i64::from(crate::MATCH_TICK_MS)
         {
+            let presence = world.resource::<Runtime>().entities[&object].presence;
+            let frame = FrameWorld::from_world(world);
+            let row = frame
+                .entity_collision_capabilities()
+                .iter()
+                .find(|row| presence.is_some_and(|id| row.owner.script_model() == Some(id)));
+            let flags = row.map(|row| (row.solid, row.hidden));
+            let collision = row.and_then(|row| row.dobj.as_ref()).map(|dobj| {
+                format!(
+                    "solid/hidden={flags:?} hit bones={:?} error={:?}",
+                    dobj.current_collision.as_ref().map(|c| c.bones.len()),
+                    dobj.materialize_error,
+                )
+            });
             diag::info!(
                 Sim,
-                "actor debug: {object} at [{:.0}, {:.0}, {:.0}] -> client {} at {distance:.0}",
+                "actor debug: {object} at [{:.0}, {:.0}, {:.0}] -> client {} at {distance:.0}; {collision:?}",
                 moved[0],
                 moved[1],
                 moved[2],
@@ -361,6 +516,14 @@ pub(crate) fn advance(world: &mut World) {
         }
         if distance <= REACH && (target[2] - moved[2]).abs() < 72.0 && now >= state.next_hit_ms {
             state.next_hit_ms = now + HIT_INTERVAL_MS;
+            // Attack clips play once: each swing starts one again.
+            state.clip = None;
+            play(
+                world,
+                object,
+                &mut state,
+                pick(&ATTACK_CLIPS, object ^ now as u64),
+            );
             super::players::actor_hit_player(world, client, object, HIT_DAMAGE, moved);
         }
         if let Some(slot) = world.resource_mut::<Runtime>().actors.get_mut(&object) {

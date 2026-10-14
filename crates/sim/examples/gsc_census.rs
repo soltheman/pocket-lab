@@ -1,7 +1,7 @@
 //! Lists what a script set still lacks before it can install: modules that fail to parse
 //! and calls nothing resolves, grouped and counted.
 //!
-//!   cargo run -p sim --example gsc_census -- <scripts dir> <iw4|t5> <root module>...
+//!   cargo run -p sim --example gsc_census -- <scripts dir> <iw4|t5|t5_zombies> <root module>...
 //!
 //! The scripts dir holds `<module>.gsc` files, e.g. extracted from a game's zones.
 
@@ -16,6 +16,7 @@ fn main() {
     let catalog = match realm.as_str() {
         "iw4" => Catalog::iw4(),
         "t5" => Catalog::t5(),
+        "t5_zombies" => Catalog::t5_zombies(),
         other => {
             eprintln!("unknown realm {other} (iw4|t5)");
             std::process::exit(2);

@@ -425,6 +425,12 @@ impl FrameWorld<'_> {
             self.client_meta_mut(id).prespawn_angles = Some(viewangles);
             return false;
         };
+        // The view is the client's commanded angles plus `delta_angles`: move the delta
+        // by the same turn, or the next command puts the old view back.
+        for axis in 0..3 {
+            ps.delta_angles[axis] +=
+                math_iw4::angle_subtract(viewangles[axis], ps.viewangles[axis]);
+        }
         ps.viewangles = viewangles;
         true
     }

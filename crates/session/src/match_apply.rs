@@ -361,7 +361,18 @@ pub fn apply_prepared_match(
             .namespace
             .unwrap_or(asset_core::AssetNamespace::Iw4);
         content.set_script_model_anims(xanims.0.names().filter_map(|name| {
-            let parts = &xanims.0.get(anim_namespace, name)?.parts;
+            // The map's game first; a zombies map's clips come from its common zone,
+            // whichever namespace that walk filed them under.
+            let parts = &[
+                anim_namespace,
+                asset_core::AssetNamespace::T5,
+                asset_core::AssetNamespace::Iw4,
+                asset_core::AssetNamespace::Iw5,
+                asset_core::AssetNamespace::T6,
+            ]
+            .into_iter()
+            .find_map(|namespace| xanims.0.get(namespace, name))?
+            .parts;
             let frequency = if parts.numframes > 0 && parts.framerate > 0.0 {
                 parts.framerate / f32::from(parts.numframes)
             } else {
@@ -1168,8 +1179,9 @@ fn preflight_match_install(
         // BO1 sets this for its zombies maps; without it every spawned actor waits for a
         // name and rank that zombies never get.
         script_dvars.push(("zombiemode".into(), "1".into()));
-        if std::env::var_os("IW4L_ZM_WATCH").is_some_and(|v| v == "1") {
-            script_dvars.push(("iw4l_zm_watch".into(), "1".into()));
+        // Debug: 1 puts new zombies in front of the player, aim also aims at them.
+        if let Ok(watch) = std::env::var("IW4L_ZM_WATCH") {
+            script_dvars.push(("iw4l_zm_watch".into(), watch));
         }
     }
     script_dvars.push(("g_gametype".into(), gametype.to_owned()));

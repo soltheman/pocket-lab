@@ -1180,6 +1180,13 @@ pub(crate) fn phase_trace(
         emissions.iter().copied().map(|em| (em, 0u8)).collect();
     while let Some((em, bounces)) = pending.pop_front() {
         let Some(facts) = world.combat_facts_for(em.weapon) else {
+            if std::env::var_os("IW4L_SHOT_DEBUG").is_some() {
+                diag::info!(
+                    Sim,
+                    "shot debug: weapon {:?} has no combat facts",
+                    em.weapon
+                );
+            }
             continue;
         };
         let query = world.lagcomp_query_for(em.attacker, tick);
@@ -1242,6 +1249,21 @@ pub(crate) fn phase_trace(
             },
             Some(&on_glass_hit),
         );
+        if std::env::var_os("IW4L_SHOT_DEBUG").is_some() {
+            diag::info!(
+                Sim,
+                "shot debug: weapon {:?} from {:?} dir {:?}; {} entity rows ({:?}); hits {:?}",
+                em.weapon,
+                em.origin,
+                em.direction,
+                query.entities.rows.len(),
+                query.entities.verdict,
+                segments
+                    .iter()
+                    .map(|segment| segment.collider)
+                    .collect::<Vec<_>>(),
+            );
+        }
         if bounces < 8
             && facts.weap_type == weapon_iw4::WEAPTYPE_BULLET
             && facts.weap_class != weapon_iw4::WEAPCLASS_SPREAD

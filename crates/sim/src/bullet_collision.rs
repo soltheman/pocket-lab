@@ -190,6 +190,10 @@ pub struct AuthorityDObjState {
 
     pub apos: Option<entity_iw4::Trajectory>,
 
+    /// Shots hit the bone boxes even when the model has no collision of its own (an AI
+    /// actor's character model).
+    pub bone_hits: bool,
+
     pub(crate) t5_destructible: Option<crate::t5_destructible::State>,
     /// Capabilities for the models this script model can swap to: husks and
     /// the intermediate stages of a destructible.
@@ -330,6 +334,7 @@ impl AuthorityDObjState {
             materialize_error: None,
             play_anim: None,
             apos: None,
+            bone_hits: false,
             t5_destructible: None,
             swap_capabilities: Vec::new(),
         }
@@ -498,6 +503,7 @@ impl AuthorityDObjState {
             return;
         }
         self.pose_revision = self.pose_revision.wrapping_add(1);
+        let attached = self.attached_composition();
         self.semantic_state = xmodel_runtime::DObjSemanticState {
             hide_part_bits: self.semantic_state.hide_part_bits,
             ..xmodel_runtime::DObjSemanticState::bind_pose(
@@ -506,12 +512,27 @@ impl AuthorityDObjState {
                 self.pose_revision,
             )
         };
+        if let Some(composition) = attached {
+            self.semantic_state.composition = composition;
+        }
         self.pose_request = xmodel_runtime::DObjPoseRequest {
             hide_part_bits: self.semantic_state.hide_part_bits,
             ..xmodel_runtime::DObjPoseRequest::bind_pose()
         };
         self.current_collision = None;
         self.materialized_pose_revision = None;
+    }
+
+    /// The composition, when models are attached to the current one (a zombie's head):
+    /// starting or clearing an animation keeps them.
+    fn attached_composition(&self) -> Option<xmodel_runtime::DObjCompositionDescriptor> {
+        let composition = &self.semantic_state.composition;
+        (composition.models.len() > 1
+            && composition
+                .models
+                .first()
+                .is_some_and(|first| first.model == self.current_model))
+        .then(|| composition.clone())
     }
 
     pub fn set_model(
@@ -533,6 +554,7 @@ impl AuthorityDObjState {
     pub fn begin_script_model_play_anim(&mut self, clip: &str, looping: bool, frequency: f32) {
         self.pose_revision = self.pose_revision.wrapping_add(1);
         self.play_anim = Some(ScriptModelPlayAnim { looping, frequency });
+        let attached = self.attached_composition();
         self.semantic_state = xmodel_runtime::DObjSemanticState::one_leaf(
             self.current_model.clone(),
             clip.to_owned(),
@@ -540,6 +562,9 @@ impl AuthorityDObjState {
             self.pose_revision,
             0.0,
         );
+        if let Some(composition) = attached {
+            self.semantic_state.composition = composition;
+        }
         self.pose_request = xmodel_runtime::DObjPoseRequest::bind_pose();
         self.current_collision = None;
         self.materialized_pose_revision = None;
@@ -625,7 +650,8 @@ impl AuthorityDObjState {
             ));
             return;
         };
-        let uncollidable = capability.contents == Some(0) && capability.coll_surfs.is_empty();
+        let uncollidable =
+            !self.bone_hits && capability.contents == Some(0) && capability.coll_surfs.is_empty();
         if uncollidable || !contents_match_mask(capability.contents, MASK_BULLET_WORLD) {
             self.current_collision = None;
             self.materialized_model_revision = Some(self.model_revision);

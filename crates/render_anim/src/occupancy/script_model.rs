@@ -667,10 +667,16 @@ fn pose_script_models(
             }
             live_ids.insert(id);
             let request = owner.dobj_state.resolve_request(|name| {
-                xanims
-                    .as_ref()?
-                    .0
-                    .clip(asset_core::AssetNamespace::Iw4, name)
+                let xanims = &xanims.as_ref()?.0;
+                // MW2's clip by that name first, then another game's (BO1 zombies).
+                [
+                    asset_core::AssetNamespace::Iw4,
+                    asset_core::AssetNamespace::T5,
+                    asset_core::AssetNamespace::Iw5,
+                    asset_core::AssetNamespace::T6,
+                ]
+                .into_iter()
+                .find_map(|namespace| xanims.clip(namespace, name))
             });
             let index = if let Some(index) =
                 product.asset_index(&owner.current_model, &owner.dobj_state, &camera_lods)

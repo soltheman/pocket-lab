@@ -8,9 +8,14 @@ pub(crate) const ZOMBIES_HUD: (&str, &str) = (
     "iw4l_zombies/hud",
     r#"main()
 {
+    // BO1 zombies has no prematch; this is what moves the match to playing (entity
+    // thinks, model animation and shot history all wait for it).
+    level notify("prematch_over");
     level thread hud_feed();
-    if (getdvar("iw4l_zm_watch") == "1")
+    if (getdvar("iw4l_zm_watch") != "")
         level thread watch_zombie();
+    if (getdvar("iw4l_zm_watch") == "aim")
+        level thread aim_at_zombies();
 }
 
 // Debug (IW4L_ZM_WATCH=1): every new zombie is put a few metres in front of
@@ -31,8 +36,30 @@ watch_zombie()
                 continue;
             zombies[i].iw4l_watched = true;
             forward = anglestoforward(p getplayerangles());
-            zombies[i].origin = p.origin + (forward[0] * 220, forward[1] * 220, 0) + (i * 20, 0, 0);
+            zombies[i].origin = p.origin + (forward[0] * 300, forward[1] * 300, 0) + (i * 20, 0, 0);
         }
+    }
+}
+
+// Debug (IW4L_ZM_WATCH=aim): the first player also keeps aiming at the
+// nearest zombie's chest.
+aim_at_zombies()
+{
+    for (;;)
+    {
+        wait 0.05;
+        players = getplayers();
+        zombies = getaiarray("axis");
+        if (!players.size || !zombies.size)
+            continue;
+        p = players[0];
+        z = zombies[0];
+        for (i = 1; i < zombies.size; i++)
+        {
+            if (distancesquared(zombies[i].origin, p.origin) < distancesquared(z.origin, p.origin))
+                z = zombies[i];
+        }
+        p setplayerangles(vectortoangles(z.origin + (0, 0, 48) - (p.origin + (0, 0, 60))));
     }
 }
 

@@ -20,6 +20,8 @@ pub(crate) struct Shown {
 
 struct Wanted {
     collision_only: bool,
+    /// An AI actor: shots hit its bone boxes.
+    actor: bool,
     object: u64,
     presence: ScriptModelId,
     origin: [f32; 3],
@@ -360,6 +362,7 @@ fn collect_wanted(world: &mut World) -> Vec<Wanted> {
         let anim_op = entity.anim_op.take();
         let attachments = entity.attachments.clone();
         let collision_only = matches!(entity.kind, EntityKind::Missile(_));
+        let actor = entity.kind == EntityKind::Actor;
         let unchanged = part_ops.is_empty()
             && anim_op.is_none()
             && runtime.shown.get(&object).is_some_and(|shown| {
@@ -377,6 +380,7 @@ fn collect_wanted(world: &mut World) -> Vec<Wanted> {
         }
         wanted.push(Wanted {
             collision_only,
+            actor,
             object,
             presence,
             origin,
@@ -426,6 +430,7 @@ fn present_model(frame: &mut FrameWorld, want: &Wanted) {
     let Some(dobj) = row.dobj.as_mut() else {
         return;
     };
+    dobj.bone_hits = want.actor;
     let attachments: Vec<(&str, &str)> = want
         .attachments
         .iter()

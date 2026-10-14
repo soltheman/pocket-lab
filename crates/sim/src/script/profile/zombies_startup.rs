@@ -10,6 +10,14 @@ pub struct ZombiesStartup {
 
 pub const ZOMBIES_CALLBACKS: &str = "maps/_callbacksetup";
 const ZOMBIES_HUD: &str = "iw4l_zombies/hud";
+/// The animscripts the engine runs on every actor: init when it spawns, death when it dies,
+/// for zombies and for dogs.
+pub const ACTOR_ANIMSCRIPTS: &[&str] = &[
+    "animscripts/zombie_init",
+    "animscripts/zombie_dog_init",
+    "animscripts/zombie_death",
+    "animscripts/zombie_dog_death",
+];
 
 impl ZombiesStartup {
     pub fn new(resolver: &impl SourceResolver, map: &str) -> Option<Self> {
@@ -29,6 +37,12 @@ impl ZombiesStartup {
                 format!("{ZOMBIES_CALLBACKS}::codecallback_startgametype"),
             ],
         };
+        // The animscripts the engine runs on the actors it spawns.
+        for script in ACTOR_ANIMSCRIPTS {
+            if resolver.read_bytes(script).is_ok() {
+                startup.roots.push((*script).to_owned());
+            }
+        }
         // The runtime's own HUD feed, when the walk installed it.
         if resolver.read_bytes(ZOMBIES_HUD).is_ok() {
             startup.roots.push(ZOMBIES_HUD.to_owned());
