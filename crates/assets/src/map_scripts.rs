@@ -25,6 +25,8 @@ pub(crate) const ZOMBIES_HUD: (&str, &str) = (
         level thread face_door();
     if (getdvar("iw4l_zm_watch") == "power")
         level thread face_power_switch();
+    if (getdvar("iw4l_zm_watch") == "box")
+        level thread face_box();
 }
 
 // Debug (IW4L_ZM_WATCH=1): every new zombie is put a few metres in front of
@@ -115,6 +117,25 @@ face_power_switch()
     away = vectornormalize((p.origin[0] - target[0], p.origin[1] - target[1], 0));
     p setorigin((target[0], target[1], target[2] - 40) + (away[0] * 48, away[1] * 48, 0));
     p setplayerangles(vectortoangles(target - (p.origin + (0, 0, 60))));
+}
+
+// Debug (IW4L_ZM_WATCH=box): the first player gets 10000 points and stands at the mystery
+// box where it starts, facing it.
+face_box()
+{
+    wait 8;
+    players = getplayers();
+    if (!players.size || !isdefined(level.chests) || !isdefined(level.chest_index))
+        return;
+    p = players[0];
+    p.score = 10000;
+    box = level.chests[level.chest_index];
+    away = anglestoright(box.angles);
+    stand = (box.origin[0], box.origin[1], p.origin[2]) + (away[0] * 56, away[1] * 56, 0);
+    if (distancesquared(stand, p.origin) > distancesquared(stand - (away[0] * 112, away[1] * 112, 0), p.origin))
+        stand = stand - (away[0] * 112, away[1] * 112, 0);
+    p setorigin((stand[0], stand[1], box.origin[2] - 10));
+    p setplayerangles(vectortoangles(box.origin - (p.origin + (0, 0, 60))));
 }
 
 // Debug (IW4L_ZM_WATCH=die): the first player takes a killing blow after 35 seconds.
