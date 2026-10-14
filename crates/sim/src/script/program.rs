@@ -49,6 +49,14 @@ impl Program {
     ) -> Result<Self, Fault> {
         super::compiler::compile(resolver, roots, catalog)
     }
+    /// Every fault `load` would stop at, collected in one pass; see `Census`.
+    pub fn census(
+        resolver: &impl SourceResolver,
+        roots: &[&str],
+        catalog: &Catalog,
+    ) -> super::compiler::Census {
+        super::compiler::census(resolver, roots, catalog)
+    }
     pub fn modules(&self) -> &[ModuleIdentity] {
         &self.modules
     }

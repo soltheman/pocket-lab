@@ -498,3 +498,98 @@ fn link(
         }),
     }
 }
+
+/// What a realm still lacks before its scripts can install: every module that fails to
+/// read, lex or parse, and every call the linker cannot resolve, collected in one pass
+/// instead of stopping at the first fault. A module that fails is skipped; calls into it
+/// then show up as unresolved.
+#[derive(Debug, Default)]
+pub struct Census {
+    pub modules: usize,
+    pub functions: usize,
+    pub module_faults: Vec<String>,
+    /// Link fault text (e.g. "unresolved method or unknown builtin animscripted") → sites.
+    pub unresolved: std::collections::BTreeMap<String, usize>,
+}
+
+pub(super) fn census(resolver: &impl SourceResolver, roots: &[&str], catalog: &Catalog) -> Census {
+    let mut out = Census::default();
+    let mut pending = BTreeSet::new();
+    for root in roots {
+        match normalize_module(root) {
+            Ok(module) => {
+                pending.insert(module);
+            }
+            Err(fault) => out.module_faults.push(format!("{root}: {fault}")),
+        }
+    }
+    let mut names = BTreeMap::new();
+    let mut tables = Tables::default();
+    let mut imports: BTreeMap<String, Vec<String>> = BTreeMap::new();
+    while let Some(module) = pending.pop_first() {
+        if imports.contains_key(&module) {
+            continue;
+        }
+        let bytes = match resolver.read_bytes(&module) {
+            Ok(bytes) => bytes,
+            Err(fault) => {
+                out.module_faults.push(format!("{module}: {fault}"));
+                imports.insert(module, Vec::new());
+                continue;
+            }
+        };
+        let source = decode_source(&bytes);
+        let tokens = match lex(&module, &source) {
+            Ok(tokens) => tokens,
+            Err(fault) => {
+                out.module_faults.push(format!("{module}: {fault}"));
+                imports.insert(module, Vec::new());
+                continue;
+            }
+        };
+        let before = tables.pending.len();
+        let mut parser = Parser {
+            tables: std::mem::take(&mut tables),
+            slots: BTreeMap::new(),
+            module: module.clone(),
+            function: String::new(),
+            tokens,
+            pos: 0,
+            code: Vec::new(),
+            includes: Vec::new(),
+            dependencies: BTreeSet::new(),
+            loops: Vec::new(),
+            constants: BTreeMap::new(),
+            animtree: None,
+            single_byte_source: std::str::from_utf8(&bytes).is_err(),
+        };
+        match parser.module() {
+            Ok(functions) => {
+                for function in functions {
+                    let key = format!("{}::{}", module, function.location.function);
+                    if names.insert(key, out.functions).is_some() {
+                        out.module_faults
+                            .push(format!("{module}: duplicate function {}", function.location.function));
+                    }
+                    out.functions += 1;
+                }
+                tables = parser.tables;
+                imports.insert(module.clone(), parser.includes);
+                pending.extend(parser.dependencies);
+                out.modules += 1;
+            }
+            Err(fault) => {
+                out.module_faults.push(format!("{module}: {fault}"));
+                tables = parser.tables;
+                tables.pending.truncate(before);
+                imports.insert(module, Vec::new());
+            }
+        }
+    }
+    for pending in &tables.pending {
+        if let Err(fault) = link(pending, &names, &imports, catalog) {
+            *out.unresolved.entry(fault).or_default() += 1;
+        }
+    }
+    out
+}
