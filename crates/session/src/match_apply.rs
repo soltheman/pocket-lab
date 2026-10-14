@@ -534,10 +534,7 @@ pub fn apply_prepared_match(
             script_level,
         )
         .map_err(|e| script_refusal(&zone, gametype, "install", &e))?;
-        if *role == frame::RuntimeRole::Listen
-            && account.is_some()
-            && account_defaults.is_none()
-        {
+        if *role == frame::RuntimeRole::Listen && account.is_some() && account_defaults.is_none() {
             // MW2's player-data schema supplies the defaults; without MW2 nothing persists.
             diag::warn!(
                 World,
@@ -1114,12 +1111,24 @@ fn preflight_match_install(
     let zombies = asset_transport::t5_zombies_scripts(zone)
         .then(|| sim::script::ZombiesStartup::new(&sources, zone))
         .flatten();
+    let zombies_scripts = zombies.is_some();
     let (startup_roots, startup_entries, script_catalog) = match zombies {
-        Some(zombies) => (
-            zombies.roots,
-            zombies.entries,
-            sim::script::Catalog::t5_zombies(),
-        ),
+        Some(mut zombies) => {
+            // The engine runs aitype/<type>::main on every actor it spawns, so nothing
+            // in the scripts reaches those modules: compile them as roots.
+            zombies.roots.extend(
+                sources
+                    .0
+                    .modules()
+                    .filter(|module| module.starts_with("aitype/"))
+                    .map(str::to_owned),
+            );
+            (
+                zombies.roots,
+                zombies.entries,
+                sim::script::Catalog::t5_zombies(),
+            )
+        }
         None => {
             let startup = sim::script::Iw4Startup::new(&sources, gametype, zone);
             (startup.roots, startup.entries, sim::script::Catalog::iw4())
@@ -1155,6 +1164,14 @@ fn preflight_match_install(
         script_dvars.push(("onlinegame".into(), "1".into()));
     }
     script_dvars.push(("mapname".into(), zone.to_owned()));
+    if zombies_scripts {
+        // BO1 sets this for its zombies maps; without it every spawned actor waits for a
+        // name and rank that zombies never get.
+        script_dvars.push(("zombiemode".into(), "1".into()));
+        if std::env::var_os("IW4L_ZM_WATCH").is_some_and(|v| v == "1") {
+            script_dvars.push(("iw4l_zm_watch".into(), "1".into()));
+        }
+    }
     script_dvars.push(("g_gametype".into(), gametype.to_owned()));
     script_dvars.push(("sv_maxclients".into(), "18".into()));
     for (name, value) in rules.map_or(&[][..], |rules| &rules.0) {

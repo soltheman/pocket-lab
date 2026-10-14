@@ -44,6 +44,11 @@ impl ScriptSources {
         self.sources.get(module).map(|source| source.origin)
     }
 
+    /// Every script module held, by normalized name.
+    pub fn modules(&self) -> impl Iterator<Item = &str> {
+        self.sources.keys().map(String::as_str)
+    }
+
     pub fn len(&self) -> usize {
         self.sources.len()
     }

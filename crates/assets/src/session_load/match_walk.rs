@@ -2,6 +2,51 @@ use super::*;
 
 static NEXT_PRODUCTS_ID: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(1);
 
+/// BO1 keeps some of a zombies map's character materials in the map's language archive
+/// (en_zombie_theater holds the zombie body materials the map zone names as references),
+/// so that archive's materials join the seed before the map walk links against it.
+fn walk_map_language_materials(
+    map_path: &std::path::Path,
+    progress: &LoadProgress,
+    seed: MaterialCatalog,
+    report: &mut Vec<String>,
+) -> MaterialCatalog {
+    let Some(stem) = map_path.file_stem().and_then(|stem| stem.to_str()) else {
+        return seed;
+    };
+    let found = match asset_transport::discover::find_t5_localized_zone(map_path, None, stem) {
+        Ok(Some(found)) => found,
+        Ok(None) => {
+            report.push(format!(
+                "map language materials: no language archive for {stem}"
+            ));
+            return seed;
+        }
+        Err(error) => {
+            report.push(format!("map language materials: {error}"));
+            return seed;
+        }
+    };
+    let image = match open_zone_shared(&found.path) {
+        Ok(image) => image,
+        Err(error) => {
+            report.push(format!(
+                "map language materials: {}: {error}",
+                found.zone_name
+            ));
+            return seed;
+        }
+    };
+    let before = seed.materials.len();
+    let pop = lane(image.game).load_material_population(&found.path, &image, progress, seed);
+    report.push(format!(
+        "map language materials: {} added {} materials",
+        found.zone_name,
+        pop.materials.materials.len().saturating_sub(before),
+    ));
+    pop.materials
+}
+
 pub(super) async fn walk_prepared_match(
     zone_ff: Result<PathBuf, String>,
     common_mp: Result<PathBuf, String>,
@@ -127,12 +172,20 @@ pub(super) async fn walk_prepared_match(
         );
         return (MatchLoadOutcome::Canceled, None);
     }
+    let mut language_report = Vec::new();
     let (loaded, map_namespace) = match opened_map {
         Ok((path, image)) => {
             let game = image.game;
             let shared_surfaces = match game {
                 asset_core::ZoneGame::Iw5 => iw5_shared_surfaces,
                 _ => shared_surfaces,
+            };
+            let material_seed = if game == asset_core::ZoneGame::T5
+                && zone_name.starts_with("zombie_")
+            {
+                walk_map_language_materials(&path, &progress, material_seed, &mut language_report)
+            } else {
+                material_seed
             };
             (
                 lane(game).load_world(
@@ -176,6 +229,7 @@ pub(super) async fn walk_prepared_match(
         gaps,
     } = loaded;
     report.append(&mut common_report);
+    report.append(&mut language_report);
 
     if facts.team_settings.allies.is_none() && facts.team_settings.axis.is_none() {
         if let Some(name) = facts.t5_teamset.as_ref() {
@@ -294,7 +348,9 @@ pub(super) async fn walk_prepared_match(
         }
         // The map script written for IW4 rules includes IW4 modules; free roam runs none.
         scripts.insert_source(&format!("maps/mp/{zone_name}"), "main()\n{\n}\n".to_owned());
-        report.push("GSC: no IW4 gametype scripts (MW2 not installed); built-in free roam".to_owned());
+        report.push(
+            "GSC: no IW4 gametype scripts (MW2 not installed); built-in free roam".to_owned(),
+        );
     }
     report.push(format!(
         "GSC source assets: {} (map overrides common_mp)",
@@ -496,6 +552,30 @@ pub(super) async fn walk_prepared_match(
             shader_refs.n, shader_refs.real, shader_refs.reference,
             decl_refs.n, decl_refs.real, decl_refs.reference,
         ));
+    let dropped_scene_materials: std::collections::BTreeSet<String> = world
+        .map_xmodel_scene_assets
+        .iter()
+        .filter_map(|(_, asset)| match asset {
+            asset_world::MapXModelSceneAsset::T5(skel) => Some(skel),
+            _ => None,
+        })
+        .flat_map(|skel| skel.surface_materials.iter().flatten())
+        .filter_map(|local| global.materials.get(local.get()))
+        .filter(|material| material.name.is_reference())
+        .map(|material| material.name.as_str().to_owned())
+        .collect();
+    if !dropped_scene_materials.is_empty() {
+        report.push(format!(
+            "scene model materials left as zone references ({}): {}",
+            dropped_scene_materials.len(),
+            dropped_scene_materials
+                .iter()
+                .take(24)
+                .cloned()
+                .collect::<Vec<_>>()
+                .join(" "),
+        ));
+    }
     let (mut global, finalized_ids) = global.publish();
     let map_ids = provisional_map_ids
         .into_iter()
@@ -580,9 +660,13 @@ pub(super) async fn walk_prepared_match(
         // The copy shares Arcs only; disabled mode adds no extra owner at all.
         let retention_batch = (budget != 0).then(|| batch.share());
         merge_image_batch(&mut global, label, batch, job, &mut report);
-        let mut retained = common.fpv_retained.lock()
+        let mut retained = common
+            .fpv_retained
+            .lock()
             .unwrap_or_else(|poison| poison.into_inner());
-        let kept = retention_batch.as_ref().map_or(0, |batch| retained.keep_bounded(batch, budget));
+        let kept = retention_batch
+            .as_ref()
+            .map_or(0, |batch| retained.keep_bounded(batch, budget));
         report.push(format!(
             "{label} optional FPV next-map cache: +{:.1}MiB ({} payloads, {:.1}MiB; budget_bytes={budget}; donor batches excluded)",
             kept as f64 / (1024.0 * 1024.0),

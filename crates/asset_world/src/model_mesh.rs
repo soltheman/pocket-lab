@@ -417,6 +417,27 @@ impl MapXModelSceneCatalog {
         census
     }
 
+    /// Models with an authored surface material the match population lacks.
+    pub fn unbound_material_models(&self) -> Vec<&str> {
+        self.assets
+            .iter()
+            .filter_map(|(key, asset)| {
+                let (MapXModelSceneAsset::Iw4(skel)
+                | MapXModelSceneAsset::Iw5(skel)
+                | MapXModelSceneAsset::T5(skel)) = asset
+                else {
+                    return None;
+                };
+                let row = self.surface_materials.get(key)?;
+                skel.surface_materials
+                    .iter()
+                    .zip(row)
+                    .any(|(local, bound)| local.is_some() && bound.is_none())
+                    .then_some(key.0.as_str())
+            })
+            .collect()
+    }
+
     pub fn materials_resolved(&self) -> bool {
         self.resolved
     }

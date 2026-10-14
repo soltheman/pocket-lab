@@ -2149,6 +2149,42 @@ pub(crate) fn script_slide(
     origin: [f32; 3],
     slide: &mut crate::script::host::mechanics::Slide,
 ) -> [f32; 3] {
+    slide_masked(
+        world,
+        object,
+        origin,
+        slide,
+        crate::bullet_collision::MASK_PLAYER_SOLID,
+    )
+}
+
+/// Player clip: brushes that stop players and let monsters through (BO1's zombie window
+/// frames are player clip, so zombies climb in where players cannot climb out).
+const CONTENTS_PLAYERCLIP: u32 = 0x0001_0000;
+
+/// An AI actor's walk: the slide with monster solidity, so player clip does not stop it.
+pub(crate) fn actor_slide(
+    world: &mut World,
+    object: u64,
+    origin: [f32; 3],
+    slide: &mut crate::script::host::mechanics::Slide,
+) -> [f32; 3] {
+    slide_masked(
+        world,
+        object,
+        origin,
+        slide,
+        crate::bullet_collision::MASK_PLAYER_SOLID & !CONTENTS_PLAYERCLIP,
+    )
+}
+
+fn slide_masked(
+    world: &mut World,
+    object: u64,
+    origin: [f32; 3],
+    slide: &mut crate::script::host::mechanics::Slide,
+    base_mask: u32,
+) -> [f32; 3] {
     let runtime = world.resource::<crate::script::Runtime>();
     let linked = |mut child: u64| {
         for _ in 0..runtime.entities.len() {
@@ -2184,7 +2220,7 @@ pub(crate) fn script_slide(
         .filter(|(_, player)| linked(player.object))
         .map(|(client, _)| *client as u16)
         .collect();
-    let mut mask = crate::bullet_collision::MASK_PLAYER_SOLID;
+    let mut mask = base_mask;
     let mut parent = runtime
         .entities
         .get(&object)

@@ -1,5 +1,5 @@
-// @generated from `gsc_census` over Kino der Toten's scripts (maps/zombie_theater and the
-// singleplayer callbacks): the builtins BO1's zombies scripts call that the T5 multiplayer
+// @generated from `gsc_census` over Kino der Toten's scripts (maps/zombie_theater, the aitype
+// modules and the singleplayer callbacks): the builtins BO1's zombies scripts call that the T5
 // catalog lacks. Regenerate rather than edit.
 use super::catalog::{Builtin, Namespace::*, Owner::*};
 
@@ -224,6 +224,8 @@ pub(super) const T5_ZOMBIES: &[Builtin] = &[
     Builtin::new(Function, "setdebugorigin", Script, false),
     Builtin::new(Method, "setdoublevision", Entity, false),
     Builtin::new(Method, "setelectrified", Entity, false),
+    Builtin::new(Method, "setengagementmaxdist", Entity, false),
+    Builtin::new(Method, "setengagementmindist", Entity, false),
     Builtin::new(Method, "setenginevolume", Entity, false),
     Builtin::new(Method, "setentitytarget", Entity, false),
     Builtin::new(Function, "setexpfog", Script, false),
@@ -250,6 +252,7 @@ pub(super) const T5_ZOMBIES: &[Builtin] = &[
     Builtin::new(Method, "setscripthintstring", Entity, false),
     Builtin::new(Method, "setshadowhint", Entity, false),
     Builtin::new(Method, "setsoundblend", Entity, false),
+    Builtin::new(Method, "setspawnerteam", Entity, false),
     Builtin::new(Method, "setstance", Entity, false),
     Builtin::new(Method, "setswitchnode", Entity, false),
     Builtin::new(Method, "settalktospecies", Entity, false),

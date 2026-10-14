@@ -1484,6 +1484,20 @@ pub fn world_scene_from_draw(
         map_xmodel_materials.unbound,
         map_xmodel_materials.absent,
     );
+    if map_xmodel_materials.unbound > 0 {
+        let models = map_xmodel_scene_assets.unbound_material_models();
+        diag::info!(
+            World,
+            "map xmodels with unbound surface materials ({}): {}",
+            models.len(),
+            models
+                .iter()
+                .take(24)
+                .copied()
+                .collect::<Vec<_>>()
+                .join(" "),
+        );
+    }
 
     let bmodel_world_from_local = authored_bmodel_world_from_local(
         draw.brush_models.len(),

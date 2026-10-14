@@ -159,10 +159,15 @@ pub(crate) enum EntityKind {
     Spawned,
     HudElem,
     Player,
-    Corpse { slot: u8, anim: Option<Arc<str>> },
+    Corpse {
+        slot: u8,
+        anim: Option<Arc<str>>,
+    },
     Item(i32),
     Missile(crate::ProjectileId),
     Vehicle,
+    /// A BO1 AI actor (a zombie), spawned from an actor_* spawner.
+    Actor,
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -394,7 +399,10 @@ impl Runtime {
                 presence,
                 matches!(
                     entity.kind,
-                    EntityKind::Spawned | EntityKind::Vehicle | EntityKind::Missile(_)
+                    EntityKind::Spawned
+                        | EntityKind::Vehicle
+                        | EntityKind::Actor
+                        | EntityKind::Missile(_)
                 ),
             ));
         }

@@ -33,10 +33,30 @@ fn register_implemented(registry: &mut NativeRegistry) {
     registry.register(Function, "getnumexpectedplayers", |world, _, _| {
         Ok(Value::Int(player_objects(world).len() as i32))
     });
-    // No AI actors exist yet: every AI query is empty.
-    registry.register(Function, "getaiarray", |world, _, _| new_array(world, Vec::new()));
-    registry.register(Function, "getaispeciesarray", |world, _, _| {
-        new_array(world, Vec::new())
+    // AI: the living actors, optionally one team's (getaiarray("axis")).
+    registry.register(Function, "getaiarray", |world, _, args| {
+        let team = match args.first() {
+            Some(Value::String(team)) if team.to_string() != "all" => Some(team.to_string()),
+            _ => None,
+        };
+        let actors = crate::script::host::actors::living(world, team.as_deref());
+        new_array(world, actors)
+    });
+    registry.register(Function, "getaispeciesarray", |world, _, args| {
+        let team = match args.first() {
+            Some(Value::String(team)) if team.to_string() != "all" => Some(team.to_string()),
+            _ => None,
+        };
+        let actors = crate::script::host::actors::living(world, team.as_deref());
+        new_array(world, actors)
+    });
+    for name in ["codespawnerspawn", "codespawnerforcespawn"] {
+        registry.register(Method, name, |world, receiver, args| {
+            crate::script::host::actors::spawn_from_spawner(world, receiver, args)
+        });
+    }
+    registry.register(Method, "finishactordamage", |world, receiver, args| {
+        crate::script::host::actors::finish_damage(world, receiver, args)
     });
     // Spawners are the map's `actor_*` entities.
     registry.register(Function, "getspawnerarray", |world, _, _| {
@@ -49,6 +69,9 @@ fn register_implemented(registry: &mut NativeRegistry) {
             .collect();
         new_array(world, spawners)
     });
+    // wait_network_frame() waits on snapshot acknowledgements while remote clients exist;
+    // the listen host's own players are local, so it waits a tenth of a second instead.
+    registry.register(Function, "numremoteclients", |_, _, _| Ok(Value::Int(0)));
     registry.register(Function, "setsaveddvar", |world, _, args| {
         let name = crate::script::host::args::string(args, 0)?;
         let value = match args.get(1) {
@@ -70,7 +93,8 @@ fn register_implemented(registry: &mut NativeRegistry) {
             .players
             .values()
             .any(|slot| slot.object == *id);
-        Ok(Value::Int(i32::from(is_player)))
+        let sentient = is_player || crate::script::host::actors::is_actor(world, *id);
+        Ok(Value::Int(i32::from(sentient)))
     });
 }
 
@@ -319,6 +343,8 @@ pub(crate) fn register(registry: &mut NativeRegistry) {
         Function "setdebugorigin",
         Method "setdoublevision",
         Method "setelectrified",
+        Method "setengagementmaxdist",
+        Method "setengagementmindist",
         Method "setenginevolume",
         Method "setentitytarget",
         Function "setexpfog",
@@ -345,6 +371,7 @@ pub(crate) fn register(registry: &mut NativeRegistry) {
         Method "setscripthintstring",
         Method "setshadowhint",
         Method "setsoundblend",
+        Method "setspawnerteam",
         Method "setstance",
         Method "setswitchnode",
         Method "settalktospecies",

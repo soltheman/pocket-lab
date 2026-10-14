@@ -187,9 +187,18 @@ impl DObj {
                             ),
                         })?;
                     let range = slot.base..slot.base + slot.bone_count;
+                    // `attach(model, "")` shares the parent's skeleton: the
+                    // attached root sits on the parent bone of the same name
+                    // (a BO1 zombie head on its body), else the parent root.
+                    let tag = if a.tag.is_empty() {
+                        model.bone_names.first().map(String::as_str).unwrap_or("")
+                    } else {
+                        a.tag.as_str()
+                    };
                     let found = bones[range.clone()]
                         .iter()
-                        .position(|b| b.name == a.tag)
+                        .position(|b| b.name == tag)
+                        .or_else(|| a.tag.is_empty().then_some(0))
                         .map(|i| slot.base + i);
                     Some(found.ok_or_else(|| DObjError::AttachTag {
                         model: model.name.clone(),

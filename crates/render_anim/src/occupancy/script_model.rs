@@ -75,6 +75,16 @@ struct ScriptModelPoseLocals<'w, 's> {
     remap: Local<'s, Vec<Option<usize>>>,
     lod_skinned: Res<'w, render_scene::LodRampSkinnedDvar>,
     gfx_scene: Res<'w, HostGfxScene>,
+    skipped: Local<'s, std::collections::HashSet<String>>,
+}
+
+/// One boot note per model and reason, so a script model that never draws
+/// says why without a focus session.
+fn note_skip(skipped: &mut std::collections::HashSet<String>, model: &str, why: &str) {
+    let key = format!("{model}: {why}");
+    if skipped.len() < 64 && skipped.insert(key.clone()) {
+        diag::boot_note(&format!("script model not drawn, {key}"));
+    }
 }
 
 #[derive(SystemParam)]
@@ -568,6 +578,7 @@ fn pose_script_models(
         mut remap,
         lod_skinned,
         gfx_scene,
+        mut skipped,
     } = locals;
     live_assets.clear();
     live_ids.clear();
@@ -618,12 +629,14 @@ fn pose_script_models(
             if let Some(id) = focused_owner_id {
                 focus.refuse(id, &owner.current_model.0, why);
             }
+            note_skip(&mut skipped, &owner.current_model.0, why);
             continue;
         }
         let Some(skels) = presented_skels(&assets, &owner.dobj_state) else {
             if let Some(id) = focused_owner_id {
                 focus.refuse(id, &owner.current_model.0, "skeleton_unavailable");
             }
+            note_skip(&mut skipped, &owner.current_model.0, "skeleton_unavailable");
             continue;
         };
         let origin = transform.translation.to_array();
@@ -648,6 +661,7 @@ fn pose_script_models(
             if compose_or_reuse_script_dobj(&mut persist, id, &assets, &owner.dobj_state, &prepared)
                 .is_none()
             {
+                note_skip(&mut skipped, &owner.current_model.0, "compose_failed");
                 persist.by_id.remove(&id);
                 continue;
             }
@@ -667,6 +681,7 @@ fn pose_script_models(
                     continue;
                 };
                 let Ok(request) = request else {
+                    note_skip(&mut skipped, &owner.current_model.0, "anim_request_failed");
                     continue;
                 };
                 let skin_entries = slot.as_ref().map(|slot| slot.skin_entries).unwrap_or(&[]);
@@ -678,6 +693,7 @@ fn pose_script_models(
                     lod_view,
                     skin_entries,
                 ) else {
+                    note_skip(&mut skipped, &owner.current_model.0, "pose_failed");
                     continue;
                 };
                 for (surface, authored) in surfaces.iter().zip(surface_materials.iter()) {

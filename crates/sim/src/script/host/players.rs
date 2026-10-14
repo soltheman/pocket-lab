@@ -74,6 +74,53 @@ pub(crate) fn player_damage(world: &mut World, tick: crate::Tick, hit: &crate::s
     }
 }
 
+/// An AI actor's melee swing landing on a player: the player damage callback runs with the
+/// actor as inflictor and attacker (BO1's scripts then call finishPlayerDamage, which
+/// leads to last stand or death).
+pub(crate) fn actor_hit_player(
+    world: &mut World,
+    victim: ClientId,
+    actor: u64,
+    amount: i32,
+    from: [f32; 3],
+) {
+    if crate::script_player::god_mode(&FrameWorld::from_world(world), victim) {
+        return;
+    }
+    let target = player_object(world, victim.0);
+    let Value::Object(object) = target else {
+        return;
+    };
+    let runtime = world.resource::<Runtime>();
+    if !runtime.entities[&object].accepts_damage(0) || !runtime.entities.contains_key(&actor) {
+        return;
+    }
+    let point = FrameWorld::from_world(world)
+        .player(victim)
+        .map_or(from, |ps| [ps.origin[0], ps.origin[1], ps.origin[2] + 48.0]);
+    let dir = {
+        let d = [point[0] - from[0], point[1] - from[1], 0.0];
+        let len = (d[0] * d[0] + d[1] * d[1]).sqrt().max(1.0);
+        [d[0] / len, d[1] / len, 0.0]
+    };
+    let args = vec![
+        Value::Object(actor),
+        Value::Object(actor),
+        Value::Int(amount),
+        Value::Int(0),
+        Value::string("MOD_MELEE"),
+        Value::string("none"),
+        Value::Vector(point),
+        Value::Vector(dir),
+        Value::string("torso_upper"),
+        Value::Int(0),
+    ];
+    let now = now_ms(world);
+    if run_now(world, DAMAGE, target, args, now).is_ok() {
+        settle_deaths(world);
+    }
+}
+
 pub(crate) fn crush_player(world: &mut World, victim: ClientId, pusher: u64, point: [f32; 3]) {
     if crate::script_player::god_mode(&FrameWorld::from_world(world), victim) {
         return;

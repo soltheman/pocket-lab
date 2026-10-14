@@ -9,6 +9,31 @@ pub(crate) const ZOMBIES_HUD: (&str, &str) = (
     r#"main()
 {
     level thread hud_feed();
+    if (getdvar("iw4l_zm_watch") == "1")
+        level thread watch_zombie();
+}
+
+// Debug (IW4L_ZM_WATCH=1): every new zombie is put a few metres in front of
+// the first player, so a screenshot shows one.
+watch_zombie()
+{
+    for (;;)
+    {
+        wait 0.5;
+        players = getplayers();
+        zombies = getaiarray("axis");
+        if (!players.size)
+            continue;
+        p = players[0];
+        for (i = 0; i < zombies.size; i++)
+        {
+            if (isdefined(zombies[i].iw4l_watched))
+                continue;
+            zombies[i].iw4l_watched = true;
+            forward = anglestoforward(p getplayerangles());
+            zombies[i].origin = p.origin + (forward[0] * 220, forward[1] * 220, 0) + (i * 20, 0, 0);
+        }
+    }
 }
 
 hud_feed()
