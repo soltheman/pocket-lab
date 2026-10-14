@@ -1,6 +1,10 @@
-# Pocket Lab 0.3.5
+# Pocket Lab 0.3.6
 
 Smoother on the phone, every touch button does its job, and co-op over Wi-Fi.
+
+**New in 0.3.6**
+- Another big memory cut: the game kept the full source of every compiled shader (around 1.2 GB on the iPhone) after it no longer needed it.
+- No more doubled HUD (two hint texts, two stick knobs on top of each other) or pink frames: on a frame where the 3D view wasn't drawn, the buttons and text were drawn over an older frame or leftover memory. That frame is now black, and the log counts how often it happens.
 
 **New in 0.3.5**
 - Much less memory, and the end of the black and pink flashes mid-game they most likely caused. Your 0.3.3 session ran within about 0.1 GB of the iPhone's limit. Two things were eating it:

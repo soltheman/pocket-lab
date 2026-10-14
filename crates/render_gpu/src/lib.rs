@@ -1,6 +1,7 @@
 pub mod diag;
 pub mod drawsurf;
 mod plugin;
+mod screen_guard;
 
 pub use drawsurf::{
     AdmittedExactPort, CODE_BASE_LIGHTING_COORDS, CODE_SHADOWMAP_POLYGON_OFFSET,

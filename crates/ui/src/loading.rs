@@ -29,6 +29,15 @@ fn spawn_overlay_ui_camera(commands: &mut Commands) {
             order: 200,
 
             clear_color: ClearColorConfig::Custom(Color::NONE),
+            // The screen image is cleared only by the first camera to write it in a
+            // frame; behind the world camera this clear never applies. On a frame the
+            // world camera did not write the screen, the UI would otherwise blend over
+            // whatever the image last held: an older frame (a doubled HUD) or, on Apple
+            // GPUs, uninitialised memory (magenta). Black instead.
+            output_mode: bevy::camera::CameraOutputMode::Write {
+                blend_state: None,
+                clear_color: ClearColorConfig::Custom(Color::BLACK),
+            },
             ..default()
         },
         // Flat UI: the default 4x MSAA is a full-resolution multisampled

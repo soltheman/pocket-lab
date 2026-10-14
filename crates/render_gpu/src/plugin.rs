@@ -28,5 +28,6 @@ impl Plugin for RenderGpuPlugin {
             .init_resource::<crate::GpuSubmitReady>()
             .init_resource::<crate::ColourWorkingSet>()
             .init_resource::<crate::WorldPipelineWarmup>();
+        crate::screen_guard::register(render_app);
     }
 }
