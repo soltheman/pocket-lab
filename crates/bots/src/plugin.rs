@@ -532,6 +532,12 @@ fn prepare_navigation(
     let Some(world) = world else {
         return;
     };
+    // A map with its own AI path graph (BO1 zombies) is played by AI actors routing over
+    // it, not by bots: the grid walk cost the phone 148 s of loading and 1.4 GB.
+    if world.0.has_map_ai_nav() {
+        ready.0.state = frame::ReadinessState::Ready;
+        return;
+    }
     if refresh_nav(&world.0, &mut nav, load.as_deref()) {
         ready.0.state = frame::ReadinessState::Ready;
     }

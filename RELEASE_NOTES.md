@@ -1,6 +1,12 @@
-# Pocket Lab 0.3.4
+# Pocket Lab 0.3.5
 
 Smoother on the phone, every touch button does its job, and co-op over Wi-Fi.
+
+**New in 0.3.5**
+- Much less memory, and the end of the black and pink flashes mid-game they most likely caused. Your 0.3.3 session ran within about 0.1 GB of the iPhone's limit. Two things were eating it:
+  - With sound on, the game retried building a menu sound bank that Black Ops doesn't have about every 2 seconds, re-indexing all 29,000 sound files each time. Now it tries once.
+  - Kino loaded a bot path map it doesn't use (zombies follow Black Ops' own paths). That cost up to 2.5 minutes of loading and about 1.4 GB. It's skipped now.
+- Loading Kino should be much faster.
 
 **New in 0.3.4**
 - No pink flash before the loading screen: the screen behind the game is now black while the game starts.

@@ -31,6 +31,13 @@ const FRONTEND_SOUND_ZONE: &str = "iw4:code_post_gfx_mp";
 #[derive(Resource)]
 struct FrontendAudioPrepare(Task<FrontendAudioWalked>);
 
+/// The menu bank could not be built (a BO1-only install has no MW2 menu zone). Not
+/// retried: each try re-indexed every IWD sound (tens of thousands of paths) every
+/// couple of seconds for the whole session, which on the phone churned memory up to
+/// iOS's limit and hitched frames.
+#[derive(Resource)]
+struct FrontendAudioUnavailable;
+
 struct FrontendAudioWalked {
     bank: Option<Arc<SoundCatalog>>,
     iwd: Arc<NamespaceSoundIwd>,
@@ -68,6 +75,7 @@ pub(crate) fn register_frontend_audio(app: &mut App) {
 fn start_frontend_audio_prepare(
     frontend: Option<Res<FrontendAudio>>,
     running: Option<Res<FrontendAudioPrepare>>,
+    unavailable: Option<Res<FrontendAudioUnavailable>>,
     identity: Option<Res<LaunchIdentity>>,
     silent: Option<Res<crate::AudioSilent>>,
     loading: (
@@ -79,7 +87,7 @@ fn start_frontend_audio_prepare(
     ),
     mut commands: Commands,
 ) {
-    if frontend.is_some() || running.is_some() || silent.is_some() {
+    if frontend.is_some() || running.is_some() || unavailable.is_some() || silent.is_some() {
         return;
     }
     let (busy, request, accepted, ready, walk) = loading;
@@ -141,6 +149,7 @@ fn install_frontend_audio_prepare(
             Audio,
             "audio: frontend sound bank did not build — the menu stays silent (typed gap)"
         );
+        commands.insert_resource(FrontendAudioUnavailable);
         return;
     };
     commands.insert_resource(FrontendAudio {

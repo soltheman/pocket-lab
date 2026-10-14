@@ -3027,6 +3027,12 @@ impl SimState {
         self.content.data.ai_nav.clone()
     }
 
+    /// The map brought its own AI path graph (BO1's path nodes), which actors route
+    /// over instead of a baked walk graph.
+    pub fn has_map_ai_nav(&self) -> bool {
+        self.content.data.ai_nav.is_some()
+    }
+
     pub(crate) fn anim_notes(&self, name: &str) -> Arc<[crate::AnimNote]> {
         self.content
             .data
