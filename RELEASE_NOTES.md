@@ -1,6 +1,10 @@
-# Pocket Lab 0.3.12
+# Pocket Lab 0.3.13
 
 Smoother on the phone, every touch button does its job, and co-op over Wi-Fi.
+
+**New in 0.3.13**
+- Likely fix for the shaking, flashing and doubled HUD. 0.3.12's self-test separated the batches of GPU work that really fail from the ones that only failed alongside them. The failing ones carry nothing but GPU timestamps. A built-in timing tool was writing timestamps into the GPU's work around every rendering step, every frame, and the iPhone rejects that work with "Insufficient Memory". Each rejection also took the rest of that frame's work with it, which showed as old, black or doubled frames. The timing tool no longer uses GPU timestamps on iPhone.
+- If GPU work still fails 8 seconds into a match, the self-test from 0.3.12 runs again and keeps the best setting. Otherwise it doesn't run.
 
 **New in 0.3.12**
 - A self-test for the shaking. 0.3.11's log shows about 11 of the roughly 41 batches of GPU work the game sends each frame failing with "Insufficient Memory", even batches with nothing in them. So the problem is in how the work is handed to the GPU, not in what is drawn. Starting 8 seconds into a match, the game tries five changes to that hand-off for 10 seconds each (no pacing; not sending empty batches; sending each batch on its own; one frame on the GPU at a time; all of them together), logs how many batches fail under each, then keeps the best one. The picture may stutter or slow down during that minute.

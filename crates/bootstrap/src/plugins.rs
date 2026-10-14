@@ -219,6 +219,21 @@ pub fn default_plugins_with_quiet_log(mut window: WindowPlugin) -> bevy::app::Pl
         | WgpuFeatures::TEXTURE_BINDING_ARRAY
         | WgpuFeatures::SAMPLED_TEXTURE_AND_STORAGE_BUFFER_ARRAY_NON_UNIFORM_INDEXING
         | WgpuFeatures::PARTIALLY_BOUND_BINDING_ARRAY;
+    // No GPU timestamps on iOS. With them, Bevy's render diagnostics sample
+    // Metal's timestamp counters around every graph node each frame, and on the
+    // phone (A18, iOS 26) those command buffers fail with "Insufficient Memory"
+    // (kIOGPUCommandBufferCallbackErrorOutOfMemory), taking the rest of their
+    // kernel submission with them: about 11 of 41 command buffers a frame, which
+    // showed as old, black or doubled frames. The diagnostics keep CPU timings.
+    #[cfg(target_os = "ios")]
+    {
+        wgpu.disabled_features = Some(
+            WgpuFeatures::TIMESTAMP_QUERY
+                | WgpuFeatures::TIMESTAMP_QUERY_INSIDE_ENCODERS
+                | WgpuFeatures::TIMESTAMP_QUERY_INSIDE_PASSES
+                | WgpuFeatures::PIPELINE_STATISTICS_QUERY,
+        );
+    }
     let plugins = DefaultPlugins
         .set(window)
         .set(LogPlugin {

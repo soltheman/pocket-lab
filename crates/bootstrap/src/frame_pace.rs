@@ -199,6 +199,12 @@ mod ios {
         let Some((index, started, failed0, ok0, skipped0)) = trial.running else {
             if now.duration_since(entered).as_secs() >= TRIAL_SETTLE_SECS {
                 let (failed, ok, skipped) = counters();
+                if failed == 0 {
+                    // Nothing to fix: leave submission as it is.
+                    trial.done = true;
+                    diag::info!(World, "gpu test: not needed, no command buffer has failed");
+                    return;
+                }
                 apply_trial(0, paced_us);
                 pacing::FAILED_SAMPLE_BUDGET.store(4, Ordering::Relaxed);
                 trial.running = Some((0, now, failed, ok, skipped));
