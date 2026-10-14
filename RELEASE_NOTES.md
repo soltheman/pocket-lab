@@ -1,6 +1,11 @@
-# Pocket Lab 0.3.6
+# Pocket Lab 0.3.7
 
 Smoother on the phone, every touch button does its job, and co-op over Wi-Fi.
+
+**New in 0.3.7**
+- Fixes the old frames showing up, stacked stick knobs, and doubled text (most likely also the "shaky" look). The 3D view now always replaces the whole screen each frame. Before, on the phone it could be blended over the screen instead, so older frames and the HUD from several frames back showed through.
+- The log now lists which cameras draw the screen, and notes any frame where the 3D view failed to copy to the screen, with the reason.
+- Still to do: memory. The game still uses about 3 GB on an iPhone 16e. It hasn't crashed in any of the logs, but it's close to the limit.
 
 **New in 0.3.6**
 - Another big memory cut: the game kept the full source of every compiled shader (around 1.2 GB on the iPhone) after it no longer needed it.

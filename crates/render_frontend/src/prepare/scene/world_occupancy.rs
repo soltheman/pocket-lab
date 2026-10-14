@@ -309,6 +309,17 @@ pub fn place(
                 .into(),
             ..default()
         },
+        // The world always replaces the whole screen image. Left to Bevy, it does so
+        // only when no other camera writes the window first; behind one it alpha-blends,
+        // and the world's alpha is not coverage, so earlier frames showed through (on
+        // the phone: an old view with the HUD of several frames stacked on it).
+        Camera {
+            output_mode: bevy::camera::CameraOutputMode::Write {
+                blend_state: Some(bevy::render::render_resource::BlendState::REPLACE),
+                clear_color: ClearColorConfig::Default,
+            },
+            ..default()
+        },
         CompositingSpace::Srgb,
         Tonemapping::None,
         Msaa::Off,
