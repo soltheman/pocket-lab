@@ -129,6 +129,10 @@ fn walk_t5_leftover_materials(
         ));
         return seed;
     }
+    if runtime_common.is_some_and(asset_transport::is_t5_zombies_common) {
+        report.push("t5 leftover common: zombies runtime — multiplayer common left out".to_owned());
+        return seed;
+    }
     let (leftover_startup, _, leftover_startup_report) =
         leftover_walk_t5_startup_materials(progress);
     report.extend(leftover_startup_report);
@@ -720,6 +724,10 @@ pub(super) fn t5_weapon_common_prep(
             "t5 weapon common: runtime path is already {} — skip absorb",
             donor.path.display()
         ));
+        return T5CommonPrep::Skip(report);
+    }
+    if runtime_common.is_some_and(asset_transport::is_t5_zombies_common) {
+        report.push("t5 weapon common: zombies runtime — multiplayer weapons left out".to_owned());
         return T5CommonPrep::Skip(report);
     }
     let (leftover_startup, leftover_stats, leftover_startup_report) =

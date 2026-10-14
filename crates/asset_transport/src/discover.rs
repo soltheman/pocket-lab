@@ -552,7 +552,9 @@ pub fn find_runtime_zone(root: &GamesRoot, zone_ff: &Path, zone: &str) -> Result
             if game == crate::ZoneGame::T5
                 && !matches!(&found, Ok(f) if peek_zone_version(&f.path) == Some(IW4_ZONE_VERSION))
             {
-                // A BO1-only install: the T5 map runs on BO1's own runtime zones.
+                // A BO1-only install: the T5 map runs on BO1's own runtime zones, a
+                // zombies map on the zombies and singleplayer ones.
+                let zone = t5_zombies_runtime_zone(zone_ff, zone).unwrap_or(zone);
                 return find_zone_for_tree(zone_ff, zone);
             }
             let found = found?;
@@ -570,6 +572,31 @@ pub fn find_runtime_zone(root: &GamesRoot, zone_ff: &Path, zone: &str) -> Result
             }
         }
     }
+}
+
+/// A BO1 zombies map (`zombie_*`) runs on `common_zombie` and the singleplayer startup
+/// zones instead of multiplayer's: their weapons, scripts and models are the zombies ones,
+/// and multiplayer's 1700 weapons would only cost memory.
+fn t5_zombies_runtime_zone(zone_ff: &Path, zone: &str) -> Option<&'static str> {
+    let stem = zone_ff.file_stem()?.to_str()?.to_ascii_lowercase();
+    if !stem.starts_with("zombie_") {
+        return None;
+    }
+    Some(match zone {
+        "common_mp" => T5_ZOMBIES_COMMON,
+        "code_post_gfx_mp" => "code_post_gfx",
+        "patch_mp" => "patch",
+        _ => return None,
+    })
+}
+
+const T5_ZOMBIES_COMMON: &str = "common_zombie";
+
+/// Whether a runtime common is BO1's zombies common, so multiplayer donors stay out.
+pub fn is_t5_zombies_common(path: &Path) -> bool {
+    path.file_stem()
+        .and_then(|stem| stem.to_str())
+        .is_some_and(|stem| stem.eq_ignore_ascii_case(T5_ZOMBIES_COMMON))
 }
 
 pub fn find_runtime_common_mp(root: &GamesRoot, zone_ff: &Path) -> Result<ZoneFile, String> {
