@@ -234,6 +234,16 @@ revive_test()
         logprint("revive test t+" + i + ": victim down " + victim maps\_laststand::player_is_in_laststand() + " health " + victim.health + " state " + victim.sessionstate + " | reviver can " + reviver maps\_laststand::can_revive(victim) + " touching " + touching + " facing " + reviver maps\_laststand::is_facing(victim) + " sight " + sight + " bullet " + bullet + " use " + reviver usebuttonpressed() + " at " + reviver.origin);
         wait 1;
     }
+    // Left down (no one holds USE), BO1 bleeds the player out after 45 s into a
+    // spectator, back at the next round.
+    for (i = 15; i < 120; i += 5)
+    {
+        wait 5;
+        round = 0;
+        if (isdefined(level.round_number))
+            round = level.round_number;
+        logprint("revive test t+" + i + ": victim down " + victim maps\_laststand::player_is_in_laststand() + " state " + victim.sessionstate + " round " + round);
+    }
 }
 
 // Debug (IW4L_ZM_WATCH=volumes): logs which playable-area volumes the first player touches.
