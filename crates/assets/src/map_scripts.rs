@@ -13,7 +13,7 @@ pub(crate) const ZOMBIES_HUD: (&str, &str) = (
     level notify("prematch_over");
     level thread hud_feed();
     level thread game_over();
-    if (getdvar("iw4l_zm_watch") != "")
+    if (getdvar("iw4l_zm_watch") == "1")
         level thread watch_zombie();
     if (getdvar("iw4l_zm_watch") == "aim")
         level thread aim_at_zombies();
