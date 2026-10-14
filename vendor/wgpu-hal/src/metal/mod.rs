@@ -155,6 +155,32 @@ pub mod pacing {
 
     /// Unset: no presented handler is added and nothing is timed.
     pub static HOOKS: OnceLock<Hooks> = OnceLock::new();
+
+    /// Command buffers Metal finished with `MTLCommandBufferStatusError`, counted
+    /// while `HOOKS` is set, and the last one's `NSError` code
+    /// (`MTLCommandBufferError`: 1 internal, 2 timeout, 3 page fault, 4 blacklisted,
+    /// 5 not permitted, 7 out of memory, 8 invalid resource, 9 memoryless, 11 stack
+    /// overflow).
+    pub static GPU_ERRORS: AtomicU32 = AtomicU32::new(0);
+    pub static LAST_GPU_ERROR: core::sync::atomic::AtomicI64 =
+        core::sync::atomic::AtomicI64::new(0);
+
+    pub(super) fn note_completed(
+        buffer: &objc2::runtime::ProtocolObject<dyn objc2_metal::MTLCommandBuffer>,
+    ) {
+        use core::sync::atomic::Ordering;
+        const STATUS_ERROR: isize = 5;
+        // Untyped: the typed `status`/`error` need features this build leaves off.
+        let status: isize = unsafe { objc2::msg_send![buffer, status] };
+        if status != STATUS_ERROR {
+            return;
+        }
+        let error: Option<objc2::rc::Retained<objc2::runtime::NSObject>> =
+            unsafe { objc2::msg_send![buffer, error] };
+        let code: isize = error.map_or(-1, |error| unsafe { objc2::msg_send![&*error, code] });
+        LAST_GPU_ERROR.store(code as i64, Ordering::Relaxed);
+        GPU_ERRORS.fetch_add(1, Ordering::Relaxed);
+    }
 }
 
 pub struct Instance {}
@@ -609,6 +635,21 @@ impl crate::Queue for Queue {
             };
 
             for cmd_buffer in command_buffers {
+                // IW4 Pocket: count command buffers Metal fails (with the timing hooks on).
+                // A failed frame's drawable is still presented by the present command
+                // buffer, showing whatever it last held.
+                if pacing::HOOKS.get().is_some() {
+                    let block = block2::RcBlock::new(
+                        |buffer: NonNull<ProtocolObject<dyn MTLCommandBuffer>>| {
+                            pacing::note_completed(unsafe { buffer.as_ref() });
+                        },
+                    );
+                    unsafe {
+                        cmd_buffer
+                            .raw
+                            .addCompletedHandler(block2::RcBlock::as_ptr(&block))
+                    };
+                }
                 cmd_buffer.raw.commit();
                 // One command buffer per `end_encoding` call moves from the
                 // "created but not yet submitted" bucket into the submitted

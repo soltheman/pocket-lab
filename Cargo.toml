@@ -12,6 +12,11 @@ quinn-proto = { git = "https://github.com/quinn-rs/quinn", rev = "f650e0f213b01e
 # crates/bootstrap/src/frame_pace.rs sets them). Remove once on wgpu 30+, after
 # re-applying the pacing hook there.
 wgpu-hal = { path = "vendor/wgpu-hal" }
+# vendor/wgpu-core is 29.0.4 with one change (src/device/resource.rs,
+# create_render_pipeline): on Metal a render pipeline does not keep its shader
+# modules alive. Each IW4 shader port's naga IR is ~600 KB and Metal needs none of
+# it once the pipeline exists; kept, it held over 1 GB on an iPhone.
+wgpu-core = { path = "vendor/wgpu-core" }
 
 [workspace]
 resolver = "3"

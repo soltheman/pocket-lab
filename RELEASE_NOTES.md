@@ -1,6 +1,10 @@
-# Pocket Lab 0.3.7
+# Pocket Lab 0.3.8
 
 Smoother on the phone, every touch button does its job, and co-op over Wi-Fi.
+
+**New in 0.3.8**
+- About 1.2 GB less memory, measured rather than guessed: each of the game's ~2,000 shader programs kept a 600 KB parsed copy of its source alive (23x the source) after the GPU no longer needed it. The graphics library held it for the life of every pipeline; on iPhone it now lets go once the pipeline is built.
+- The log now counts GPU frames that failed, and why (out of memory, timeout and so on). A failed frame is what shows an older frame again, or black: the shaking you see.
 
 **New in 0.3.7**
 - Fixes the old frames showing up, stacked stick knobs, and doubled text (most likely also the "shaky" look). The 3D view now always replaces the whole screen each frame. Before, on the phone it could be blended over the screen instead, so older frames and the HUD from several frames back showed through.

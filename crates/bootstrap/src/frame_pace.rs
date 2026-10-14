@@ -43,6 +43,7 @@ mod ios {
                 presented: stats::on_presented,
             });
             stats::register(app, pace);
+            app.add_systems(Last, log_gpu_errors);
         }
         if pace.snap_active() {
             app.insert_resource(PaceTime(PaceClock::new(pace.hz)))
@@ -53,6 +54,22 @@ mod ios {
             "{}",
             pace.boot_line(crate::plugins::frame_latency())
         );
+    }
+
+    /// A GPU command buffer that failed leaves its frame's drawable showing what it
+    /// last held (an older frame, or black). Logged as the count grows: the first
+    /// failure, then at most once a second.
+    fn log_gpu_errors(mut logged: Local<(u32, Option<Instant>)>) {
+        let count = pacing::GPU_ERRORS.load(Ordering::Relaxed);
+        if count == logged.0 || logged.1.is_some_and(|at| at.elapsed().as_secs() < 1) {
+            return;
+        }
+        let code = pacing::LAST_GPU_ERROR.load(Ordering::Relaxed);
+        diag::warn!(
+            World,
+            "gpu: {count} command buffer(s) failed so far; last MTLCommandBufferError code {code} (7 = out of memory, 3 = page fault, 2 = timeout)"
+        );
+        *logged = (count, Some(Instant::now()));
     }
 
     #[derive(Resource)]
