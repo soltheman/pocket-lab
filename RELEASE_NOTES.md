@@ -18,8 +18,9 @@ Smoother on the phone, every touch button does its job, and co-op over Wi-Fi.
 **Co-op (up to 4 players on the same Wi-Fi)**
 1. On a Windows PC on the same Wi-Fi, run `Pocket-Lab-Co-op-Server.exe` (from this release). The first time, Windows may ask to allow it on private networks; allow it. Leave the window open.
 2. It makes a file called `Pocket Lab Co-op.iw4l-server` in a `co-op` folder next to it. Copy that file to every phone that will play: Apple Devices → Files → Pocket Lab, next to the `Games` folder (or AirDrop it and save it to On My iPhone → Pocket Lab).
-3. Open Pocket Lab on the first phone. When it asks to find devices on your local network, allow it. With no game running yet, it hosts one.
-4. Open Pocket Lab on the next phone. It finds that game and joins it.
+3. Open Pocket Lab on the first phone. The first time, iPhone asks to let it find devices on your local network: allow it, then close Pocket Lab and open it again (that first try plays solo). With no game running yet, it hosts one.
+4. Open Pocket Lab on the next phone (same "allow, then reopen" the first time). It finds that game and joins it.
+5. To play from the PC instead of a second phone: run `scripts\play-kino-on-pc.cmd` from the source folder, with the co-op file next to `target\play\iw4l.exe`.
 
 Without the file, Pocket Lab plays solo as before. If the PC server isn't running, it waits about 4 seconds, then plays solo.
 
