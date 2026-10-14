@@ -196,8 +196,9 @@ face_juggernog()
     }
 }
 
-// Debug (IW4L_ZM_WATCH=revive, co-op): once a second player is in, they go down; the
-// first player then stands beside them, facing them (hold USE on that client to revive).
+// Debug (IW4L_ZM_WATCH=revive, co-op): once a second player is in, the first player goes
+// down and the second stands beside them, facing them (hold USE on the second client,
+// whose window has focus when both run on one PC, to revive).
 revive_test()
 {
     for (waited = 0; ; waited++)
@@ -212,8 +213,8 @@ revive_test()
     level thread kill_all_zombies();
     wait 8;
     players = getplayers();
-    victim = players[1];
-    reviver = players[0];
+    victim = players[0];
+    reviver = players[1];
     victim dodamage(victim.health + 100, victim.origin);
     wait 2;
     reviver setorigin(victim.origin + (30, 0, 0));
