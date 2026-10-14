@@ -135,6 +135,8 @@ impl OsFeatures {
 /// upstream). Both are read on every `Queue::present`; left at their defaults
 /// (0 and unset) the present is the upstream `presentDrawable:` call.
 pub mod pacing {
+    use alloc::borrow::ToOwned as _;
+    use alloc::string::{String, ToString as _};
     use core::sync::atomic::AtomicU32;
     use std::sync::OnceLock;
 
@@ -177,10 +179,30 @@ pub mod pacing {
         }
         let error: Option<objc2::rc::Retained<objc2::runtime::NSObject>> =
             unsafe { objc2::msg_send![buffer, error] };
-        let code: isize = error.map_or(-1, |error| unsafe { objc2::msg_send![&*error, code] });
+        let code: isize = error
+            .as_ref()
+            .map_or(-1, |error| unsafe { objc2::msg_send![&**error, code] });
         LAST_GPU_ERROR.store(code as i64, Ordering::Relaxed);
         GPU_ERRORS.fetch_add(1, Ordering::Relaxed);
+        // Which command buffer (its label names the pass or encoder that recorded it)
+        // and Metal's own description, kept for the log.
+        let text = |object: Option<objc2::rc::Retained<objc2_foundation::NSString>>| {
+            object.map_or_else(|| "none".to_owned(), |s| s.to_string())
+        };
+        let label = text(unsafe { objc2::msg_send![buffer, label] });
+        let description = text(
+            error
+                .as_ref()
+                .and_then(|error| unsafe { objc2::msg_send![&**error, localizedDescription] }),
+        );
+        if let Ok(mut last) = LAST_GPU_ERROR_TEXT.lock() {
+            *last = Some(format!("{label}: {description}"));
+        }
     }
+
+    /// The last failed command buffer's label and Metal's description of the error.
+    pub static LAST_GPU_ERROR_TEXT: std::sync::Mutex<Option<String>> =
+        std::sync::Mutex::new(None);
 }
 
 pub struct Instance {}

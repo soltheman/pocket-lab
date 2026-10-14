@@ -65,9 +65,14 @@ mod ios {
             return;
         }
         let code = pacing::LAST_GPU_ERROR.load(Ordering::Relaxed);
+        let text = pacing::LAST_GPU_ERROR_TEXT
+            .lock()
+            .ok()
+            .and_then(|last| last.clone())
+            .unwrap_or_default();
         diag::warn!(
             World,
-            "gpu: {count} command buffer(s) failed so far; last MTLCommandBufferError code {code} (7 = out of memory, 3 = page fault, 2 = timeout)"
+            "gpu: {count} command buffer(s) failed so far; last MTLCommandBufferError code {code} (7 = out of memory, 8 = invalid resource, 3 = page fault, 2 = timeout) in {text}"
         );
         *logged = (count, Some(Instant::now()));
     }

@@ -1,6 +1,9 @@
-# Pocket Lab 0.3.8
+# Pocket Lab 0.3.9
 
 Smoother on the phone, every touch button does its job, and co-op over Wi-Fi.
+
+**New in 0.3.9**
+- The log names which part of a frame the GPU rejects, with Metal's own error text.
 
 **New in 0.3.8**
 - About 1.2 GB less memory, measured rather than guessed: each of the game's ~2,000 shader programs kept a 600 KB parsed copy of its source alive (23x the source) after the GPU no longer needed it. The graphics library held it for the life of every pipeline; on iPhone it now lets go once the pipeline is built.
