@@ -183,7 +183,15 @@ pub mod pacing {
             .as_ref()
             .map_or(-1, |error| unsafe { objc2::msg_send![&**error, code] });
         LAST_GPU_ERROR.store(code as i64, Ordering::Relaxed);
-        GPU_ERRORS.fetch_add(1, Ordering::Relaxed);
+        if GPU_ERRORS.fetch_add(1, Ordering::Relaxed) == 0 {
+            let device: Option<objc2::rc::Retained<objc2::runtime::NSObject>> =
+                unsafe { objc2::msg_send![buffer, device] };
+            if let Some(device) = device {
+                let held: usize = unsafe { objc2::msg_send![&*device, currentAllocatedSize] };
+                let held = held as u64;
+                GPU_ALLOCATED_AT_FIRST_ERROR.store(held, Ordering::Relaxed);
+            }
+        }
         // Which command buffer (its label names the pass or encoder that recorded it)
         // and Metal's own description, kept for the log.
         let text = |object: Option<objc2::rc::Retained<objc2_foundation::NSString>>| {
@@ -203,6 +211,64 @@ pub mod pacing {
     /// The last failed command buffer's label and Metal's description of the error.
     pub static LAST_GPU_ERROR_TEXT: std::sync::Mutex<Option<String>> =
         std::sync::Mutex::new(None);
+
+    /// What the device holds (`currentAllocatedSize`) after the latest allocation,
+    /// its peak, and the device's `recommendedMaxWorkingSetSize`, in bytes.
+    pub static GPU_ALLOCATED: core::sync::atomic::AtomicU64 = core::sync::atomic::AtomicU64::new(0);
+    pub static GPU_ALLOCATED_PEAK: core::sync::atomic::AtomicU64 =
+        core::sync::atomic::AtomicU64::new(0);
+    pub static GPU_WORKING_SET: core::sync::atomic::AtomicU64 =
+        core::sync::atomic::AtomicU64::new(0);
+    pub static GPU_ALLOCATED_AT_FIRST_ERROR: core::sync::atomic::AtomicU64 =
+        core::sync::atomic::AtomicU64::new(0);
+    /// Resources of at least [`BIG_ALLOCATION`] bytes, described for the log; drained
+    /// by whoever logs them, and capped so nothing grows without one.
+    pub static BIG_ALLOCATIONS: std::sync::Mutex<alloc::vec::Vec<String>> =
+        std::sync::Mutex::new(alloc::vec::Vec::new());
+    pub const BIG_ALLOCATION: u64 = 16 << 20;
+
+    pub(super) fn note_allocation<R: objc2::Message + ?Sized>(
+        device: &objc2::runtime::ProtocolObject<dyn objc2_metal::MTLDevice>,
+        resource: &R,
+        describe: impl FnOnce() -> String,
+    ) {
+        use core::sync::atomic::Ordering;
+        // Untyped: these properties need features this build leaves off.
+        let bytes: usize = unsafe { objc2::msg_send![resource, allocatedSize] };
+        let held: usize = unsafe { objc2::msg_send![device, currentAllocatedSize] };
+        let held = held as u64;
+        GPU_ALLOCATED.store(held, Ordering::Relaxed);
+        GPU_ALLOCATED_PEAK.fetch_max(held, Ordering::Relaxed);
+        if GPU_WORKING_SET.load(Ordering::Relaxed) == 0 {
+            let working: u64 = unsafe { objc2::msg_send![device, recommendedMaxWorkingSetSize] };
+            GPU_WORKING_SET.store(working, Ordering::Relaxed);
+        }
+        if bytes as u64 >= BIG_ALLOCATION {
+            if let Ok(mut big) = BIG_ALLOCATIONS.lock() {
+                if big.len() < 256 {
+                    big.push(alloc::format!("{} ({} MiB)", describe(), bytes >> 20));
+                }
+            }
+        }
+    }
+
+    /// Bind groups whose binding arrays go through an argument buffer: every
+    /// command buffer that binds one makes all of its resources resident.
+    pub static BINDLESS_GROUPS: AtomicU32 = AtomicU32::new(0);
+    /// The most resources any one such group made resident, and its label.
+    pub static BINDLESS_MAX: core::sync::atomic::AtomicUsize =
+        core::sync::atomic::AtomicUsize::new(0);
+    pub static BINDLESS_MAX_LABEL: std::sync::Mutex<Option<String>> = std::sync::Mutex::new(None);
+
+    pub(super) fn note_bindless_group(label: Option<&str>, resources: usize) {
+        use core::sync::atomic::Ordering;
+        BINDLESS_GROUPS.fetch_add(1, Ordering::Relaxed);
+        if BINDLESS_MAX.fetch_max(resources, Ordering::Relaxed) < resources {
+            if let Ok(mut last) = BINDLESS_MAX_LABEL.lock() {
+                *last = Some(label.unwrap_or("").to_owned());
+            }
+        }
+    }
 }
 
 pub struct Instance {}

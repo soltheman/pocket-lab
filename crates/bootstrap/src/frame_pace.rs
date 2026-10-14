@@ -45,6 +45,7 @@ mod ios {
             stats::register(app, pace);
             app.add_systems(Last, log_gpu_errors);
         }
+        app.add_systems(Last, log_gpu_memory);
         if pace.snap_active() {
             app.insert_resource(PaceTime(PaceClock::new(pace.hz)))
                 .add_systems(First, pace_time.before(TimeSystems));
@@ -70,11 +71,54 @@ mod ios {
             .ok()
             .and_then(|last| last.clone())
             .unwrap_or_default();
+        let first = logged.0 == 0;
         diag::warn!(
             World,
-            "gpu: {count} command buffer(s) failed so far; last MTLCommandBufferError code {code} (7 = out of memory, 8 = invalid resource, 3 = page fault, 2 = timeout) in {text}"
+            "gpu: {count} command buffer(s) failed so far; last MTLCommandBufferError code {code} in {text}"
         );
+        if first {
+            diag::warn!(
+                World,
+                "gpu memory at the first failure: {} MiB held by the device ({})",
+                pacing::GPU_ALLOCATED_AT_FIRST_ERROR.load(Ordering::Relaxed) >> 20,
+                gpu_memory_line()
+            );
+        }
         *logged = (count, Some(Instant::now()));
+    }
+
+    fn gpu_memory_line() -> String {
+        let label = pacing::BINDLESS_MAX_LABEL
+            .lock()
+            .ok()
+            .and_then(|label| label.clone())
+            .unwrap_or_default();
+        format!(
+            "now {} MiB, peak {} MiB, Metal's recommended working set {} MiB; {} bind group(s) with texture arrays, the largest {} resources ({label:?})",
+            pacing::GPU_ALLOCATED.load(Ordering::Relaxed) >> 20,
+            pacing::GPU_ALLOCATED_PEAK.load(Ordering::Relaxed) >> 20,
+            pacing::GPU_WORKING_SET.load(Ordering::Relaxed) >> 20,
+            pacing::BINDLESS_GROUPS.load(Ordering::Relaxed),
+            pacing::BINDLESS_MAX.load(Ordering::Relaxed),
+        )
+    }
+
+    /// Every graphics resource of 16 MiB or more as it is made, and what the GPU
+    /// device holds in total: once it grows by 64 MiB, and at most every 5 seconds.
+    fn log_gpu_memory(mut logged: Local<(u64, Option<Instant>)>) {
+        if let Ok(mut big) = pacing::BIG_ALLOCATIONS.lock() {
+            for line in big.drain(..) {
+                diag::info!(World, "gpu: big allocation {line}");
+            }
+        }
+        let held = pacing::GPU_ALLOCATED.load(Ordering::Relaxed);
+        if held.abs_diff(logged.0) < 64 << 20
+            || logged.1.is_some_and(|at| at.elapsed().as_secs() < 5)
+        {
+            return;
+        }
+        diag::info!(World, "gpu memory: {}", gpu_memory_line());
+        *logged = (held, Some(Instant::now()));
     }
 
     #[derive(Resource)]

@@ -425,6 +425,9 @@ impl crate::Device for super::Device {
             if let Some(label) = desc.label {
                 raw.setLabel(Some(&NSString::from_str(label)));
             }
+            super::pacing::note_allocation(&self.shared.device, &*raw, || {
+                alloc::format!("buffer {:?} {} bytes", desc.label.unwrap_or(""), desc.size)
+            });
             self.counters.buffers.add(1);
             Ok(super::Buffer {
                 raw,
@@ -513,6 +516,17 @@ impl crate::Device for super::Device {
             if let Some(label) = desc.label {
                 raw.setLabel(Some(&NSString::from_str(label)));
             }
+            super::pacing::note_allocation(&self.shared.device, &*raw, || {
+                alloc::format!(
+                    "texture {:?} {}x{}x{} {:?} mips {}",
+                    desc.label.unwrap_or(""),
+                    desc.size.width,
+                    desc.size.height,
+                    desc.size.depth_or_array_layers,
+                    desc.format,
+                    desc.mip_level_count
+                )
+            });
 
             self.counters.textures.add(1);
 
@@ -1127,6 +1141,9 @@ impl crate::Device for super::Device {
                 }
             }
 
+            if !bg.resources_to_use.is_empty() {
+                super::pacing::note_bindless_group(desc.label, bg.resources_to_use.len());
+            }
             self.counters.bind_groups.add(1);
 
             Ok(bg)

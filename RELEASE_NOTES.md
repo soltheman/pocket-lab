@@ -1,6 +1,9 @@
-# Pocket Lab 0.3.9
+# Pocket Lab 0.3.10
 
 Smoother on the phone, every touch button does its job, and co-op over Wi-Fi.
+
+**New in 0.3.10**
+- No fix yet for the shaking and black/pink frames. This build finds their cause. In 0.3.9's log, the iPhone's graphics chip rejects almost every frame with "Insufficient Memory", starting on the loading screen while the game used under 1 GB of the 3.3 GB iOS allows. The log now records how much memory the graphics chip itself holds, Metal's limit for it, and every graphics allocation of 16 MB or more by name and size.
 
 **New in 0.3.9**
 - The log names which part of a frame the GPU rejects, with Metal's own error text.
