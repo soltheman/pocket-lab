@@ -57,8 +57,6 @@ enum SlotState {
 }
 
 struct PortBuild {
-    module: ModuleKey,
-    created: Option<Arc<ShaderModule>>,
     pipelines: Vec<(ExactPipelineSlot, RenderPipeline)>,
 }
 
@@ -66,7 +64,11 @@ struct PortBuild {
 pub(super) struct ExactPipelineRegistry {
     slots: Vec<SlotState>,
     by_key: HashMap<super::colour_submit::ExactColourPipelineKey, ExactPipelineSlot>,
-    modules: HashMap<ModuleKey, Arc<ShaderModule>>,
+    /// Shader modules built so far. None is kept once its pipelines exist: on Metal a
+    /// module holds its whole naga IR for its lifetime (the backend writes MSL per
+    /// pipeline), and keeping every port's module cost the phone over 1 GB. A variant
+    /// requested later rebuilds its module from the WGSL.
+    modules_built: usize,
 
     queued: HashMap<
         ModuleKey,
@@ -167,10 +169,9 @@ impl ExactPipelineRegistry {
         let pool = assets::load_pool();
         for (module, (source, plans)) in self.queued.drain() {
             let device = device.clone();
-            let existing = self.modules.get(&module).cloned();
-            self.jobs.push(
-                pool.spawn(async move { build_port(&device, module, source, existing, plans) }),
-            );
+            self.modules_built += 1;
+            self.jobs
+                .push(pool.spawn(async move { build_port(&device, module, source, plans) }));
         }
     }
 
@@ -183,9 +184,6 @@ impl ExactPipelineRegistry {
             };
 
             drop(self.jobs.swap_remove(index));
-            if let Some(created) = build.created {
-                self.modules.insert(build.module, created);
-            }
             for (slot, pipeline) in build.pipelines {
                 self.slots[slot.0 as usize] = SlotState::Ready(pipeline);
             }
@@ -193,7 +191,7 @@ impl ExactPipelineRegistry {
     }
 
     pub(super) fn module_n(&self) -> usize {
-        self.modules.len()
+        self.modules_built
     }
 
     pub(super) fn building_n(&self) -> usize {
@@ -205,7 +203,6 @@ fn build_port(
     device: &RenderDevice,
     module: ModuleKey,
     source: ExactModuleSource,
-    existing: Option<Arc<ShaderModule>>,
     plans: Vec<(ExactPipelineSlot, ExactPipelinePlan)>,
 ) -> PortBuild {
     let label = format!(
@@ -219,27 +216,19 @@ fn build_port(
         }
     );
 
-    let (shader, created) = match existing {
-        Some(shader) => (shader, None),
-        None => {
-            let shader = Arc::new(unsafe {
-                device.create_shader_module(ShaderModuleDescriptor {
-                    label: Some(&label),
-                    source: ShaderSource::Wgsl(std::borrow::Cow::Borrowed(source.wgsl())),
-                })
-            });
-            (shader.clone(), Some(shader))
-        }
+    let shader = unsafe {
+        device.create_shader_module(ShaderModuleDescriptor {
+            label: Some(&label),
+            source: ShaderSource::Wgsl(std::borrow::Cow::Borrowed(source.wgsl())),
+        })
     };
     let pipelines = plans
         .into_iter()
         .map(|(slot, plan)| (slot, build_pipeline(device, &shader, &plan)))
         .collect();
-    PortBuild {
-        module,
-        created,
-        pipelines,
-    }
+    // The pipelines keep what they compiled; the module (and its IR) goes here.
+    drop(shader);
+    PortBuild { pipelines }
 }
 
 fn build_pipeline(
