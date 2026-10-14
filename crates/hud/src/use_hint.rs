@@ -11,6 +11,18 @@ use std::collections::HashMap;
 #[derive(Component)]
 pub(crate) struct UseHintRaster;
 
+/// This frame's use hint once resolved, for a HUD that draws it itself where the IW4 menus
+/// and their font are not installed (a BO1-only install).
+#[derive(Resource, Default, Debug, Clone)]
+pub struct UseHintText {
+    pub text: Option<String>,
+    /// What the hint names as the use key.
+    pub bind: String,
+    pub alpha: f32,
+    /// The IW4 HUD drew it this frame.
+    pub drawn: bool,
+}
+
 #[derive(Default)]
 pub(crate) struct HintMemory {
     caption: Option<(
@@ -36,8 +48,11 @@ pub(crate) fn update(
     time: Res<Time>,
     mut memory: Local<HintMemory>,
     view: Option<Res<frame::ViewSubject>>,
+    mut published: ResMut<UseHintText>,
 ) {
     pass.use_hint = TessJob::Hide;
+    published.text = None;
+    published.drawn = false;
     if !surface.is_ready()
         || input.script_menu_open
         || view.as_ref().is_some_and(|v| v.in_killcam())
@@ -73,25 +88,35 @@ pub(crate) fn update(
             let strings = strings
                 .as_ref()
                 .ok_or_else(|| "localized strings missing".to_owned())?;
-            let raw =
+            let published =
                 sim::hud_string_in_occupied(&snapshot.meta.hud_strings, ps.cursor_hint_string)
                     .ok_or_else(|| {
                         format!("hint string {} not published", ps.cursor_hint_string)
                     })?;
+            // The string, then its `&&1`, `&&2`... parameters (a BO1 wall buy's costs).
+            let mut parts = published.split(sim::HUD_PRINT_ARG_SEPARATOR);
+            let raw = parts.next().unwrap_or_default();
+            let params: Vec<&str> = parts.collect();
             let localized = crate::hudelem::resolve_hud_text(strings, raw)
                 .ok_or_else(|| format!("missing {raw}"))?;
             let unbound = strings
                 .0
                 .text(hud_iw4::KEY_UNBOUND)
                 .ok_or_else(|| "KEY_UNBOUND localization missing".to_owned())?;
-            let hint = hud_iw4::replace_directive(&localized, |cmd| {
+            let mut hint = hud_iw4::replace_directive(&localized, |cmd| {
                 if matches!(cmd, "+activate" | "+usereload") {
                     bind.to_owned()
                 } else {
                     hud_iw4::unbound_directive(unbound, cmd)
                 }
-            })
-            .replace("&&1", bind);
+            });
+            if params.is_empty() {
+                hint = hint.replace("&&1", bind);
+            } else {
+                for (index, param) in params.iter().enumerate().rev() {
+                    hint = hint.replace(&format!("&&{}", index + 1), param);
+                }
+            }
             return Ok(Some((hint, raw.to_owned(), None)));
         }
         let weapon = (ps.cursor_hint - 4) as u32;
@@ -174,6 +199,19 @@ pub(crate) fn update(
     let Some((text, key, icon)) = memory.caption.as_ref().filter(|_| alpha > 0.0) else {
         return;
     };
+    published.text = Some(text.clone());
+    published.alpha = alpha;
+    published.bind = input
+        .use_key
+        .clone()
+        .or_else(|| {
+            strings
+                .as_ref()?
+                .0
+                .text(hud_iw4::KEY_UNBOUND)
+                .map(str::to_owned)
+        })
+        .unwrap_or_default();
     let Some(catalog) = catalog else {
         gaps.raise(GapCause::NoFontCatalog);
         return;
@@ -305,4 +343,5 @@ pub(crate) fn update(
     } else {
         pass.use_hint = TessJob::Quads(quads);
     }
+    published.drawn = true;
 }

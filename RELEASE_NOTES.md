@@ -7,10 +7,10 @@ Zombies. Kino der Toten now plays a real round 1: zombies spawn outside, tear th
 - They go to a window, rip the boards off, climb through, then chase you over the map's own AI paths.
 - Shooting them works and pays like Black Ops: 10 points a hit, 60 for the kill.
 - They hurt. Solo, going down ends the game: "GAME OVER - You Survived N Rounds" over the theater, then the map starts over by itself after about 10 seconds.
+- What you can buy is spelled out when you look at it: "Hold USE to buy Olympia [Cost: 500]".
 
 **Known problems**
 - Zombies sometimes get stuck on a ledge or behind a door that is still closed.
-- Nothing tells you what you can buy yet (no "Hold USE" text).
 - Doors, power, perks and the mystery box are untested; many sounds are missing.
 - No co-op yet.
 

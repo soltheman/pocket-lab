@@ -40,6 +40,7 @@ impl Plugin for HudPlugin {
         let _ = crate::scorebar::milliseconds();
         app.init_resource::<frame::ScreenEffectsView>()
             .init_resource::<HudImages>()
+            .init_resource::<crate::use_hint::UseHintText>()
             .init_resource::<HudPresentationGaps>()
             .init_resource::<ReticleAdsLatch>()
             .init_resource::<IrisLetterboxFill>()

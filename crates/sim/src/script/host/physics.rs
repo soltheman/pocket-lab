@@ -29,12 +29,14 @@ fn usable<'a>(
     // off: BO1's wall buys and doors are trigger_use with a hint string and nothing else);
     // a script model waits for makeusable.
     let trigger = entity.classname.starts_with("trigger_");
-    Ok(entity.usable.get_or_insert_with(|| super::entities::Usable {
-        cursor: 1,
-        hint: -1,
-        enabled: trigger,
-        barred: Default::default(),
-    }))
+    Ok(entity
+        .usable
+        .get_or_insert_with(|| super::entities::Usable {
+            cursor: 1,
+            hint: -1,
+            enabled: trigger,
+            barred: Default::default(),
+        }))
 }
 
 pub(crate) fn register(registry: &mut NativeRegistry) {
@@ -115,7 +117,8 @@ pub(crate) fn register(registry: &mut NativeRegistry) {
         Ok(Value::Undefined)
     });
     registry.register(Method, "sethintstring", |world, receiver, args| {
-        let hint = super::hud::string_index(world, arg(args, 0)?)?;
+        // BO1 passes the hint's parameters (a wall buy's costs) after the string.
+        let hint = super::hud::string_index_with_params(world, arg(args, 0)?, &args[1..])?;
         usable(world, receiver)?.hint = hint;
         Ok(Value::Undefined)
     });

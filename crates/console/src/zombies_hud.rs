@@ -29,6 +29,27 @@ pub(crate) struct ZombiesGameOver;
 #[derive(Component)]
 pub(crate) struct ZombiesSurvived;
 
+#[derive(Component)]
+pub(crate) struct ZombiesHint;
+
+/// A hint as the zombies HUD shows it: no `^N` colour codes, and the touch USE button
+/// named in place of a keyboard key.
+fn hint_line(text: &str, bind: &str, touch: bool) -> String {
+    let mut line = String::with_capacity(text.len());
+    let mut chars = text.chars().peekable();
+    while let Some(c) = chars.next() {
+        if c == '^' && chars.peek().is_some_and(char::is_ascii_digit) {
+            chars.next();
+            continue;
+        }
+        line.push(c);
+    }
+    if touch && !bind.is_empty() {
+        line = line.replace(bind, "USE");
+    }
+    line
+}
+
 pub(crate) fn spawn_zombies_hud(commands: &mut Commands, font: Handle<Font>) {
     commands
         .spawn((
@@ -83,6 +104,28 @@ pub(crate) fn spawn_zombies_hud(commands: &mut Commands, font: Handle<Font>) {
                 TextColor(Color::srgb(0.98, 0.86, 0.33)),
                 TextShadow::default(),
             ));
+            // The use hint ("Hold USE for Weapon [500]..."), under the crosshair.
+            root.spawn((Node {
+                position_type: PositionType::Absolute,
+                left: px(0),
+                top: percent(58),
+                width: percent(100),
+                justify_content: JustifyContent::Center,
+                ..default()
+            },))
+                .with_children(|row| {
+                    row.spawn((
+                        ZombiesHint,
+                        Text::new(""),
+                        TextFont {
+                            font: font.clone().into(),
+                            font_size: FontSize::Px(22.0),
+                            ..default()
+                        },
+                        TextColor(Color::srgb(0.95, 0.95, 0.95)),
+                        TextShadow::default(),
+                    ));
+                });
             // Game over, centred: BO1's red title and the rounds survived under it.
             root.spawn((
                 ZombiesGameOver,
@@ -209,4 +252,28 @@ pub(crate) fn update_zombies_hud(
     {
         text.0 = round_text;
     }
+}
+
+/// The use hint, when the IW4 HUD could not draw it (a BO1-only install has no IW4 menus
+/// or font); hidden with the rest of the zombies HUD.
+pub(crate) fn update_zombies_hint(
+    hint: Option<Res<hud::UseHintText>>,
+    touch: Option<Res<crate::touch_controls::TouchGameplay>>,
+    mut text: Query<(&mut Text, &mut TextColor), With<ZombiesHint>>,
+) {
+    let Ok((mut text, mut color)) = text.single_mut() else {
+        return;
+    };
+    let line = hint.as_deref().filter(|hint| !hint.drawn).and_then(|hint| {
+        let touch = touch.as_deref().is_some_and(|touch| touch.enabled);
+        Some((
+            hint_line(hint.text.as_deref()?, &hint.bind, touch),
+            hint.alpha,
+        ))
+    });
+    let (line, alpha) = line.unwrap_or_default();
+    if text.0 != line {
+        text.0 = line;
+    }
+    color.0.set_alpha(alpha);
 }

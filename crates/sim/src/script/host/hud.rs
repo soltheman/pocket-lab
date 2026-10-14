@@ -234,6 +234,30 @@ pub(crate) fn string_index(world: &mut World, value: &Value) -> Result<i32, Stri
         .ok_or_else(|| "exceeded maximum number of localized strings".into())
 }
 
+/// A HUD string with its `&&1`, `&&2`... parameters, each after a `HUD_PRINT_ARG_SEPARATOR`
+/// separator, for the client to substitute once it has localized the string.
+pub(crate) fn string_index_with_params(
+    world: &mut World,
+    value: &Value,
+    params: &[Value],
+) -> Result<i32, String> {
+    if params.is_empty() {
+        return string_index(world, value);
+    }
+    let mut text = match value {
+        Value::LocalizedString(key) => key.to_string(),
+        Value::String(text) => format!("{}{text}", crate::HUD_STRING_PLAIN),
+        other => return Err(format!("{other:?} is not a string")),
+    };
+    for param in params {
+        text.push(crate::HUD_PRINT_ARG_SEPARATOR);
+        text.push_str(&crate::script::runtime::to_text(param).unwrap_or_default());
+    }
+    FrameWorld::from_world(world)
+        .hud_string_index(&text)
+        .ok_or_else(|| "exceeded maximum number of localized strings".into())
+}
+
 fn set_flag(elem: &mut HudElem, flag: i32, value: &Value, name: &str) -> Result<(), String> {
     if number(name, value)? != 0.0 {
         elem.flags |= flag;

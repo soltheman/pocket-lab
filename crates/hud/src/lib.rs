@@ -55,3 +55,4 @@ pub use splash::PendingSplash;
 pub use surface::Hud2dSurface;
 
 mod use_hint;
+pub use use_hint::UseHintText;

@@ -19,6 +19,8 @@ pub(crate) const ZOMBIES_HUD: (&str, &str) = (
         level thread aim_at_zombies();
     if (getdvar("iw4l_zm_watch") == "die")
         level thread down_first_player();
+    if (getdvar("iw4l_zm_watch") == "buy")
+        level thread face_wall_buy();
 }
 
 // Debug (IW4L_ZM_WATCH=1): every new zombie is put a few metres in front of
@@ -42,6 +44,26 @@ watch_zombie()
             zombies[i].origin = p.origin + (forward[0] * 300, forward[1] * 300, 0) + (i * 20, 0, 0);
         }
     }
+}
+
+// Debug (IW4L_ZM_WATCH=buy): the first player stands at the nearest wall buy, facing it.
+face_wall_buy()
+{
+    wait 8;
+    players = getplayers();
+    buys = getentarray("weapon_upgrade", "targetname");
+    if (!players.size || !buys.size)
+        return;
+    p = players[0];
+    buy = buys[0];
+    for (i = 1; i < buys.size; i++)
+    {
+        if (distancesquared(buys[i].origin, p.origin) < distancesquared(buy.origin, p.origin))
+            buy = buys[i];
+    }
+    away = vectornormalize(p.origin - buy.origin);
+    p setorigin(buy.origin + (away[0] * 48, away[1] * 48, 0) - (0, 0, 40));
+    p setplayerangles(vectortoangles(buy.origin - (p.origin + (0, 0, 60))));
 }
 
 // Debug (IW4L_ZM_WATCH=die): the first player takes a killing blow after 35 seconds.
