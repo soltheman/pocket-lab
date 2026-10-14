@@ -281,13 +281,12 @@ pub(crate) fn frame_latency() -> u32 {
     // measured on a 3 GB grant, so the Low device tier keeps one frame (what every
     // earlier build ran) and Mid/High take two. `IW4L_FRAME_LATENCY=2` in
     // `iw4l-env.txt` tries two on a Low phone without a rebuild.
-    let default: u32 = if cfg!(target_os = "ios")
-        && diag::memory_settings::get().tier != diag::memory_settings::Tier::Low
-    {
-        2
-    } else {
-        1
-    };
+    //
+    // Pocket Lab: Kino on a Low-tier iPhone 16e (3.3 GB grant) peaked under 2.1 GB and
+    // held 30 fps with each frame waiting ~26 ms for its drawable, and moving looked
+    // shaky; the second frame in flight is worth its memory there, so iOS takes two on
+    // every tier.
+    let default: u32 = if cfg!(target_os = "ios") { 2 } else { 1 };
     static FRAMES: std::sync::OnceLock<u32> = std::sync::OnceLock::new();
     *FRAMES.get_or_init(|| {
         let Some(asked) = std::env::var_os(FRAME_LATENCY_ENV) else {

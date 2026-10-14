@@ -25,7 +25,10 @@ fn follow_native_window(
     };
     let native = bevy::winit::WINIT_WINDOWS.with_borrow(|windows| {
         windows.get_window(entity).map(|native| {
-            let size = native.inner_size();
+            // outer: the whole screen the view and its Metal layer cover, where touches
+            // land. winit's inner size on iOS is the safe area (750x369 pt of an 844x390
+            // pt iPhone 16e), which put the touch layout and the drawn one apart.
+            let size = native.outer_size();
             (size.width, size.height, native.scale_factor() as f32)
         })
     });

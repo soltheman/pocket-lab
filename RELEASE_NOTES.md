@@ -1,19 +1,22 @@
-# Pocket Lab 0.1.3
+# Pocket Lab 0.1.4
 
-Fixes screens drawing too big on the phone: the app now opens fullscreen at the screen's own size (a windowed iOS window takes the requested 1280x720 as its frame), starts the match once the first view's graphics are ready instead of waiting for all 2052 (the rest load in the background; a few surfaces may pop in), and names the map on the loading screen. If the Black Ops folder is missing the app still closes, but `iw4l-boot.log` now says where the folder goes. It opens straight into a walkable map from your own Black Ops files; there are no enemies, weapons or HUD yet.
+Touch buttons now answer where they are drawn, and the game runs two frames in flight on every iPhone (smoother, up to 60 fps).
+
+**What changed**
+- Touch buttons: the game laid itself out for the screen's safe area (750x369 pt on an iPhone 16e) while drawing and taking touches over the whole 844x390 pt screen, so presses could land on the wrong button. It now uses the whole screen.
+- Smoother movement: the phone was held at 30 fps with each frame waiting ~26 ms for the next one; two frames in flight let it overlap work.
+- Still from 0.1.3: fullscreen at the screen's own size; the match starts once the first view's graphics are ready (the rest load in the background, so a few surfaces may pop in).
 
 **Setup**
-1. Install `Pocket Lab.ipa` with SideStore and open the app once (it makes its folders, then stops at a "games not found" message or a black screen).
-2. Copy the staged `Call of Duty Black Ops` folder (`scripts/stage-bo1-for-iphone.ps1`, about 6.9 GB) into **On My iPhone → Pocket Lab → Games** (Files app, or Apple Devices / iTunes file sharing on Windows).
-3. Open Pocket Lab again. The first load is slow while graphics are prepared.
+1. Install `Pocket.Lab.ipa` over the existing Pocket Lab (do not delete the app: that deletes the game files).
+2. First time only: copy the staged `Call of Duty Black Ops` folder (`scripts/stage-bo1-for-iphone.ps1`, about 6.9 GB) into Pocket Lab's folder (Apple Devices → Files → Pocket Lab).
+3. Open Pocket Lab and stay in the app until the map shows.
 
 **Controls**
 - Left side: a stick appears under your finger. Push past the ring to sprint.
 - Anywhere else: drag to look.
-- Right side: FIRE, AIM, RELOAD, USE, JUMP, CROUCH, KNIFE, NADE, SWAP. Holding FIRE or AIM and dragging also turns.
-- A paired controller works too.
+- Right side: FIRE, AIM, RELOAD, USE, JUMP, CROUCH, KNIFE, NADE, SWAP. There is no weapon yet, so only JUMP and CROUCH do something; JUMP while crouched stands up first.
 
 **Known**
 - No zombies, weapons, HUD or menus yet.
-- Some surfaces draw wrong and about 60 props are missing.
-- Problem reports: send `iw4l-boot.log`, `iw4l-boot.prev.log` and `iw4l-memory-settings.txt` from the app's folder.
+- Problem reports: `iw4l-boot.log` from the app's folder.
