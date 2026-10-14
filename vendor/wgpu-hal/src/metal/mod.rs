@@ -172,9 +172,11 @@ pub mod pacing {
     ) {
         use core::sync::atomic::Ordering;
         const STATUS_ERROR: isize = 5;
+        let in_flight = IN_FLIGHT.fetch_sub(1, Ordering::Relaxed);
         // Untyped: the typed `status`/`error` need features this build leaves off.
         let status: isize = unsafe { objc2::msg_send![buffer, status] };
         if status != STATUS_ERROR {
+            note_succeeded(buffer);
             return;
         }
         let error: Option<objc2::rc::Retained<objc2::runtime::NSObject>> =
@@ -203,8 +205,136 @@ pub mod pacing {
                 .as_ref()
                 .and_then(|error| unsafe { objc2::msg_send![&**error, localizedDescription] }),
         );
+        let failed = GPU_ERRORS.load(Ordering::Relaxed);
+        if failed <= 12 || failed % 1000 == 0 {
+            sample(
+                &FAILED_SAMPLES,
+                format!("#{failed} ({in_flight} buffers queued) {label}"),
+            );
+        }
         if let Ok(mut last) = LAST_GPU_ERROR_TEXT.lock() {
             *last = Some(format!("{label}: {description}"));
+        }
+    }
+
+    /// Command buffers committed and not yet completed, and the most at once.
+    pub static IN_FLIGHT: AtomicU32 = AtomicU32::new(0);
+    pub static IN_FLIGHT_MAX: AtomicU32 = AtomicU32::new(0);
+
+    pub(super) fn note_committed() {
+        use core::sync::atomic::Ordering;
+        let now = IN_FLIGHT.fetch_add(1, Ordering::Relaxed) + 1;
+        IN_FLIGHT_MAX.fetch_max(now, Ordering::Relaxed);
+    }
+
+    /// Command buffers that completed without error, and labels of the first few
+    /// after the first failure (to compare with the failed ones).
+    pub static GPU_OK: AtomicU32 = AtomicU32::new(0);
+    static OK_SAMPLED: AtomicU32 = AtomicU32::new(0);
+    pub static FAILED_SAMPLES: std::sync::Mutex<alloc::vec::Vec<String>> =
+        std::sync::Mutex::new(alloc::vec::Vec::new());
+    pub static OK_SAMPLES: std::sync::Mutex<alloc::vec::Vec<String>> =
+        std::sync::Mutex::new(alloc::vec::Vec::new());
+
+    fn sample(samples: &std::sync::Mutex<alloc::vec::Vec<String>>, line: String) {
+        if let Ok(mut samples) = samples.lock() {
+            if samples.len() < 64 {
+                samples.push(line);
+            }
+        }
+    }
+
+    pub(super) fn note_succeeded(
+        buffer: &objc2::runtime::ProtocolObject<dyn objc2_metal::MTLCommandBuffer>,
+    ) {
+        use core::sync::atomic::Ordering;
+        GPU_OK.fetch_add(1, Ordering::Relaxed);
+        if GPU_ERRORS.load(Ordering::Relaxed) == 0 || OK_SAMPLED.fetch_add(1, Ordering::Relaxed) >= 16
+        {
+            return;
+        }
+        let label: Option<objc2::rc::Retained<objc2_foundation::NSString>> =
+            unsafe { objc2::msg_send![buffer, label] };
+        sample(
+            &OK_SAMPLES,
+            label.map_or_else(|| "none".to_owned(), |s| s.to_string()),
+        );
+    }
+
+    /// What one command buffer holds: its passes (label, first attachment's size
+    /// and sample count), draws and the primitives they ask for, copies, compute
+    /// dispatches and resources made resident through argument buffers.
+    #[derive(Default)]
+    pub(super) struct Contents {
+        passes: alloc::vec::Vec<String>,
+        pass_count: u32,
+        draws: u32,
+        indirect_draws: u32,
+        elements: u64,
+        largest_draw: u64,
+        copies: u32,
+        copy_bytes: u64,
+        dispatches: u32,
+        resident: u32,
+        bind_groups: u32,
+        bound: u32,
+    }
+
+    impl Contents {
+        pub(super) fn pass(&mut self, describe: impl FnOnce() -> String) {
+            self.pass_count += 1;
+            if self.passes.len() < 10 {
+                self.passes.push(describe());
+            }
+        }
+        pub(super) fn draw(&mut self, elements: u32, instances: u32) {
+            let total = u64::from(elements) * u64::from(instances);
+            self.draws += 1;
+            self.elements += total;
+            self.largest_draw = self.largest_draw.max(total);
+        }
+        pub(super) fn indirect_draws(&mut self, count: u32) {
+            self.indirect_draws += count;
+        }
+        pub(super) fn copy(&mut self, bytes: u64) {
+            self.copies += 1;
+            self.copy_bytes += bytes;
+        }
+        pub(super) fn dispatch(&mut self) {
+            self.dispatches += 1;
+        }
+        pub(super) fn resident(&mut self, count: usize) {
+            self.resident += count as u32;
+        }
+        pub(super) fn bound(&mut self, count: usize) {
+            self.bind_groups += 1;
+            self.bound += count as u32;
+        }
+        /// The label for the finished command buffer, starting with its own; resets.
+        pub(super) fn finish(&mut self, label: &str) -> String {
+            let more = self.pass_count as usize - self.passes.len();
+            let more = if more > 0 {
+                alloc::format!(" +{more} more")
+            } else {
+                String::new()
+            };
+            let text = alloc::format!(
+                "{label} | {} pass(es) [{}{more}] draws {} (+{} indirect) elements {} largest {} | copies {} ({} KiB) | dispatches {} | argument-buffer resources {} | bind groups {} binding {} buffers/textures",
+                self.pass_count,
+                self.passes.join(", "),
+                self.draws,
+                self.indirect_draws,
+                self.elements,
+                self.largest_draw,
+                self.copies,
+                self.copy_bytes >> 10,
+                self.dispatches,
+                self.resident,
+                self.bind_groups,
+                self.bound,
+            );
+            *self = Self::default();
+            text
         }
     }
 
@@ -704,7 +834,15 @@ impl crate::Queue for Queue {
                             .unwrap()
                     }
                 };
-                raw.setLabel(Some(ns_string!("(wgpu internal) Signal")));
+                // IW4 Pocket: keep what the label says the buffer holds.
+                match raw.label() {
+                    Some(held) if command_buffers.last().is_some() => raw.setLabel(Some(
+                        &objc2_foundation::NSString::from_str(&format!(
+                            "(wgpu internal) Signal + {held}"
+                        )),
+                    )),
+                    _ => raw.setLabel(Some(ns_string!("(wgpu internal) Signal"))),
+                }
                 unsafe { raw.addCompletedHandler(block2::RcBlock::as_ptr(&block)) };
 
                 signal_fence.maintain();
@@ -737,6 +875,7 @@ impl crate::Queue for Queue {
                             .raw
                             .addCompletedHandler(block2::RcBlock::as_ptr(&block))
                     };
+                    pacing::note_committed();
                 }
                 cmd_buffer.raw.commit();
                 // One command buffer per `end_encoding` call moves from the
@@ -1316,6 +1455,8 @@ pub struct CommandEncoder {
     state: CommandState,
     temp: Temp,
     counters: Arc<wgt::HalCounters>,
+    /// IW4 Pocket: what this command buffer holds, written into its label.
+    contents: pacing::Contents,
 }
 
 impl fmt::Debug for CommandEncoder {

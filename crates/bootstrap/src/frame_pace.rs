@@ -72,10 +72,18 @@ mod ios {
             .and_then(|last| last.clone())
             .unwrap_or_default();
         let first = logged.0 == 0;
+        let ok = pacing::GPU_OK.load(Ordering::Relaxed);
         diag::warn!(
             World,
-            "gpu: {count} command buffer(s) failed so far; last MTLCommandBufferError code {code} in {text}"
+            "gpu: {count} command buffer(s) failed so far, {ok} completed; last MTLCommandBufferError code {code} in {text}"
         );
+        for (samples, kind) in [(&pacing::FAILED_SAMPLES, "failed"), (&pacing::OK_SAMPLES, "completed")] {
+            if let Ok(mut samples) = samples.lock() {
+                for line in samples.drain(..) {
+                    diag::warn!(World, "gpu: {kind} batch {line}");
+                }
+            }
+        }
         if first {
             diag::warn!(
                 World,
@@ -94,12 +102,13 @@ mod ios {
             .and_then(|label| label.clone())
             .unwrap_or_default();
         format!(
-            "now {} MiB, peak {} MiB, Metal's recommended working set {} MiB; {} bind group(s) with texture arrays, the largest {} resources ({label:?})",
+            "now {} MiB, peak {} MiB, Metal's recommended working set {} MiB; {} bind group(s) with texture arrays, the largest {} resources ({label:?}); most command buffers queued at once {}",
             pacing::GPU_ALLOCATED.load(Ordering::Relaxed) >> 20,
             pacing::GPU_ALLOCATED_PEAK.load(Ordering::Relaxed) >> 20,
             pacing::GPU_WORKING_SET.load(Ordering::Relaxed) >> 20,
             pacing::BINDLESS_GROUPS.load(Ordering::Relaxed),
             pacing::BINDLESS_MAX.load(Ordering::Relaxed),
+            pacing::IN_FLIGHT_MAX.load(Ordering::Relaxed),
         )
     }
 

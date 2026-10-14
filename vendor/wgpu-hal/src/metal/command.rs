@@ -489,6 +489,7 @@ impl crate::CommandEncoder for super::CommandEncoder {
         });
 
         self.raw_cmd_buf = Some(raw);
+        self.contents = Default::default();
 
         Ok(())
     }
@@ -528,8 +529,17 @@ impl crate::CommandEncoder for super::CommandEncoder {
         debug_assert!(self.state.compute.is_none());
         debug_assert!(self.state.pending_timer_queries.is_empty());
 
+        let raw = self.raw_cmd_buf.take().unwrap();
+        // IW4 Pocket: name what the buffer holds, so a failed one can be told apart.
+        if super::pacing::HOOKS.get().is_some() {
+            let label = raw
+                .label()
+                .map(|label| alloc::string::ToString::to_string(&*label))
+                .unwrap_or_default();
+            raw.setLabel(Some(&NSString::from_str(&self.contents.finish(&label))));
+        }
         Ok(super::CommandBuffer {
-            raw: self.raw_cmd_buf.take().unwrap(),
+            raw,
             queue_shared: Arc::clone(&self.queue_shared),
         })
     }
@@ -568,6 +578,7 @@ impl crate::CommandEncoder for super::CommandEncoder {
     {
         let encoder = self.enter_blit();
         for copy in regions {
+            self.contents.copy(copy.size.get());
             unsafe {
                 encoder.copyFromBuffer_sourceOffset_toBuffer_destinationOffset_size(
                     &src.raw,
@@ -602,6 +613,7 @@ impl crate::CommandEncoder for super::CommandEncoder {
         };
         let encoder = self.enter_blit();
         for copy in regions {
+            self.contents.copy(0);
             let src_origin = conv::map_origin(&copy.src_base.origin);
             let dst_origin = conv::map_origin(&copy.dst_base.origin);
             // no clamping is done: Metal expects physical sizes here
@@ -649,6 +661,9 @@ impl crate::CommandEncoder for super::CommandEncoder {
                 // the amount of data to copy.
                 0
             };
+            self.contents.copy(
+                bytes_per_row * u64::from(extent.height) * u64::from(extent.depth.max(1)),
+            );
             unsafe {
                 encoder.copyFromBuffer_sourceOffset_sourceBytesPerRow_sourceBytesPerImage_sourceSize_toTexture_destinationSlice_destinationLevel_destinationOrigin_options(
                     &src.raw,
@@ -862,6 +877,17 @@ impl crate::CommandEncoder for super::CommandEncoder {
     ) -> Result<(), crate::DeviceError> {
         self.begin_pass();
         self.state.index = None;
+        self.contents.pass(|| {
+            alloc::format!(
+                "{} {}x{} x{} {}c{}",
+                desc.label.unwrap_or("?"),
+                desc.extent.width,
+                desc.extent.height,
+                desc.sample_count,
+                desc.color_attachments.iter().flatten().count(),
+                if desc.depth_stencil_attachment.is_some() { "+d" } else { "" },
+            )
+        });
 
         assert!(self.state.blit.is_none());
         assert!(self.state.compute.is_none());
@@ -1063,6 +1089,13 @@ impl crate::CommandEncoder for super::CommandEncoder {
             .unwrap();
         let render_encoder = self.state.render.clone();
         let compute_encoder = self.state.compute.clone();
+        self.contents.resident(group.resources_to_use.len());
+        self.contents.bound(
+            [&group.counters.vs, &group.counters.fs, &group.counters.cs]
+                .iter()
+                .map(|c| (c.buffers + c.textures) as usize)
+                .sum(),
+        );
         if let Some(encoder) = render_encoder {
             self.update_bind_group_state(
                 Encoder::Vertex(&encoder),
@@ -1454,6 +1487,7 @@ impl crate::CommandEncoder for super::CommandEncoder {
         first_instance: u32,
         instance_count: u32,
     ) {
+        self.contents.draw(vertex_count, instance_count);
         let encoder = self.state.render.as_ref().unwrap();
         if first_instance != 0 {
             unsafe {
@@ -1493,6 +1527,7 @@ impl crate::CommandEncoder for super::CommandEncoder {
         first_instance: u32,
         instance_count: u32,
     ) {
+        self.contents.draw(index_count, instance_count);
         let encoder = self.state.render.as_ref().unwrap();
         let index = self.state.index.as_ref().unwrap();
         let offset = (index.offset + index.stride * first_index as wgt::BufferAddress) as usize;
@@ -1558,6 +1593,7 @@ impl crate::CommandEncoder for super::CommandEncoder {
         mut offset: wgt::BufferAddress,
         draw_count: u32,
     ) {
+        self.contents.indirect_draws(draw_count);
         let encoder = self.state.render.as_ref().unwrap();
         for _ in 0..draw_count {
             unsafe {
@@ -1577,6 +1613,7 @@ impl crate::CommandEncoder for super::CommandEncoder {
         mut offset: wgt::BufferAddress,
         draw_count: u32,
     ) {
+        self.contents.indirect_draws(draw_count);
         let encoder = self.state.render.as_ref().unwrap();
         let index = self.state.index.as_ref().unwrap();
         for _ in 0..draw_count {
@@ -1650,6 +1687,8 @@ impl crate::CommandEncoder for super::CommandEncoder {
 
     unsafe fn begin_compute_pass(&mut self, desc: &crate::ComputePassDescriptor<super::QuerySet>) {
         self.begin_pass();
+        self.contents
+            .pass(|| alloc::format!("{} compute", desc.label.unwrap_or("?")));
 
         debug_assert!(self.state.blit.is_none());
         debug_assert!(self.state.compute.is_none());
@@ -1769,6 +1808,7 @@ impl crate::CommandEncoder for super::CommandEncoder {
     }
 
     unsafe fn dispatch(&mut self, count: [u32; 3]) {
+        self.contents.dispatch();
         if count[0] > 0 && count[1] > 0 && count[2] > 0 {
             let encoder = self.state.compute.as_ref().unwrap();
             let raw_count = MTLSize {
@@ -1784,6 +1824,7 @@ impl crate::CommandEncoder for super::CommandEncoder {
     }
 
     unsafe fn dispatch_indirect(&mut self, buffer: &super::Buffer, offset: wgt::BufferAddress) {
+        self.contents.dispatch();
         let encoder = self.state.compute.as_ref().unwrap();
         unsafe {
             encoder

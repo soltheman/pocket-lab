@@ -3909,7 +3909,7 @@ version = "0.1.0"
 
 [[package]]
 name = "launcher"
-version = "0.3.10"
+version = "0.3.11"
 dependencies = [
  "asset_transport",
  "bootstrap",
