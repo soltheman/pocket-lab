@@ -251,13 +251,21 @@ pub(crate) fn sync_engine_events(world: &mut World) {
 }
 
 fn notify_weapon_changes(world: &mut World) {
-    let slots: Vec<(u32, u64, u32, bool)> = world
+    let slots: Vec<(u32, u64, u32, bool, bool)> = world
         .resource::<Runtime>()
         .players
         .iter()
-        .map(|(client, slot)| (*client, slot.object, slot.weapon, slot.switching))
+        .map(|(client, slot)| {
+            (
+                *client,
+                slot.object,
+                slot.weapon,
+                slot.switching,
+                slot.raising,
+            )
+        })
         .collect();
-    for (client, object, last, was_switching) in slots {
+    for (client, object, last, was_switching, was_raising) in slots {
         let Some(ps) = FrameWorld::from_world(world)
             .player(ClientId(client))
             .copied()
@@ -279,9 +287,27 @@ fn notify_weapon_changes(world: &mut World) {
             let name = weapon_name(world, current);
             raise(world, Value::Object(object), "weapon_change", vec![name]);
         }
+        // BO1's `weapon_change_complete`: the weapon changed to is up (its raise is over;
+        // a perk bottle's raise is the drink).
+        let raising = matches!(
+            WeaponState::from_i32(ps.weaponstate_primary),
+            Ok(WeaponState::Raising | WeaponState::RaisingAltswitch)
+        );
+        let changed = ps.weapon != last;
+        let raising = raising && (was_raising || changed);
+        if (was_raising && !raising) || (changed && !raising && !switching) {
+            let name = weapon_name(world, current);
+            raise(
+                world,
+                Value::Object(object),
+                "weapon_change_complete",
+                vec![name],
+            );
+        }
         if let Some(slot) = world.resource_mut::<Runtime>().players.get_mut(&client) {
             slot.weapon = ps.weapon;
             slot.switching = switching;
+            slot.raising = raising;
         }
     }
 }

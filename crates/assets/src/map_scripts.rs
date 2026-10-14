@@ -27,6 +27,8 @@ pub(crate) const ZOMBIES_HUD: (&str, &str) = (
         level thread face_power_switch();
     if (getdvar("iw4l_zm_watch") == "box")
         level thread face_box();
+    if (getdvar("iw4l_zm_watch") == "perk")
+        level thread face_juggernog();
 }
 
 // Debug (IW4L_ZM_WATCH=1): every new zombie is put a few metres in front of
@@ -136,6 +138,32 @@ face_box()
         stand = stand - (away[0] * 112, away[1] * 112, 0);
     p setorigin((stand[0], stand[1], box.origin[2] - 10));
     p setplayerangles(vectortoangles(box.origin - (p.origin + (0, 0, 60))));
+}
+
+// Debug (IW4L_ZM_WATCH=perk): the power goes on, then the first player gets 10000 points
+// and stands at Juggernog, facing it.
+face_juggernog()
+{
+    wait 8;
+    players = getplayers();
+    switch_trigger = getent("use_elec_switch", "targetname");
+    if (!players.size || !isdefined(switch_trigger))
+        return;
+    p = players[0];
+    switch_trigger notify("trigger", p);
+    wait 8;
+    machines = getentarray("zombie_vending", "targetname");
+    for (i = 0; i < machines.size; i++)
+    {
+        if (!isdefined(machines[i].script_noteworthy) || machines[i].script_noteworthy != "specialty_armorvest")
+            continue;
+        p.score = 10000;
+        target = machines[i].origin;
+        away = vectornormalize((p.origin[0] - target[0], p.origin[1] - target[1], 0));
+        p setorigin((target[0], target[1], target[2] - 40) + (away[0] * 48, away[1] * 48, 0));
+        p setplayerangles(vectortoangles(target - (p.origin + (0, 0, 60))));
+        return;
+    }
 }
 
 // Debug (IW4L_ZM_WATCH=die): the first player takes a killing blow after 35 seconds.

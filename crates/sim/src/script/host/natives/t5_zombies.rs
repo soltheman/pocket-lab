@@ -113,8 +113,20 @@ fn register_implemented(registry: &mut NativeRegistry) {
         "setturretignoregoals",
         "startfadingblur",
         "stopsounds",
+        // Player movement limits during a perk drink and the like, and feedback.
+        "allowlean",
+        "allowcrouch",
+        "allowprone",
+        "allowmelee",
+        "allowstand",
+        "vibrate",
+        "playerknockback",
+        "enablehealthshield",
     ] {
         registry.register(Method, name, |_, _, _| Ok(Value::Undefined));
+    }
+    for name in ["disablegrenadesuicide", "setailimit"] {
+        registry.register(Function, name, |_, _, _| Ok(Value::Undefined));
     }
     // Clip facts from the walk's animations, for the clips the player tree does not hold.
     registry.register(Function, "getanimlength", |world, _, args| {
