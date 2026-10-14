@@ -127,22 +127,25 @@ const HOP_REACH: f32 = 260.0;
 /// Fallen this far below its spawn: out of the map, so it dies.
 const FELL_OUT: f32 = 1500.0;
 
+/// Nothing solid between two points (the actor itself aside).
+fn clear_between(world: &mut World, object: u64, a: [f32; 3], b: [f32; 3]) -> bool {
+    let ignore = super::natives::engine::trace_ignore(world, Some(&Value::Object(object)));
+    matches!(
+        super::natives::engine::entity_trace(
+            world,
+            a,
+            b,
+            crate::bullet_collision::MASK_PLAYER_SOLID,
+            ignore,
+        ),
+        crate::bullet_collision::TraceOutcome::Miss { .. }
+    )
+}
+
 /// Nothing solid between two points at chest height, straight across or over the top
 /// (up from the lower one, across at the higher one's height, down: a ledge or a drop).
 fn in_sight(world: &mut World, object: u64, from: [f32; 3], to: [f32; 3]) -> bool {
-    let mut clear = |a: [f32; 3], b: [f32; 3]| {
-        let ignore = super::natives::engine::trace_ignore(world, Some(&Value::Object(object)));
-        matches!(
-            super::natives::engine::entity_trace(
-                world,
-                a,
-                b,
-                crate::bullet_collision::MASK_PLAYER_SOLID,
-                ignore,
-            ),
-            crate::bullet_collision::TraceOutcome::Miss { .. }
-        )
-    };
+    let mut clear = |a: [f32; 3], b: [f32; 3]| clear_between(world, object, a, b);
     let lift = |p: [f32; 3]| [p[0], p[1], p[2] + 40.0];
     if clear(lift(from), lift(to)) {
         return true;
@@ -168,10 +171,34 @@ fn nav(world: &mut World) -> Option<std::sync::Arc<crate::actor_nav::ActorNav>> 
     })
 }
 
+/// The graph node a route starts or ends at for `at`: the nearest in sight of it (the
+/// nearest of all can be on the far side of a wall), else the nearest.
+fn graph_end(
+    world: &mut World,
+    object: u64,
+    nav: &crate::actor_nav::ActorNav,
+    at: [f32; 3],
+) -> Option<usize> {
+    let near = nav.nearest_k(at, 6);
+    near.iter()
+        .copied()
+        .find(|&node| {
+            let node = nav.nodes[node];
+            clear_between(
+                world,
+                object,
+                [at[0], at[1], at[2] + 40.0],
+                [node[0], node[1], node[2] + 40.0],
+            )
+        })
+        .or_else(|| near.first().copied())
+}
+
 /// Where to steer this tick toward `target`: the next node of a walk-graph route when the
 /// map has one and both ends are on it, else straight at the target.
 fn steer_point(
     world: &mut World,
+    object: u64,
     state: &mut Actor,
     origin: [f32; 3],
     target: [f32; 3],
@@ -189,21 +216,33 @@ fn steer_point(
         .routed_to
         .is_none_or(|was| flat_distance(was, target) > REPLAN_MOVE);
     if moved || now >= state.replan_ms {
-        state.route = nav.route(origin, target).unwrap_or_default();
+        let start = graph_end(world, object, &nav, origin);
+        let goal = graph_end(world, object, &nav, target);
+        state.route = start
+            .zip(goal)
+            .and_then(|(start, goal)| nav.route_between(start, goal))
+            .unwrap_or_default();
         if std::env::var_os("IW4L_ACTOR_DEBUG").is_some() {
             diag::info!(
                 Sim,
-                "actor debug: route {:?} -> {:?}: {} nodes ({} in graph; ends on graph {} {})",
+                "actor debug: route {:?} -> {:?}: {} nodes ({} in graph; start {:?} reaches {:?}, goal {:?} reaches {:?})",
                 origin.map(|v| v as i32),
                 target.map(|v| v as i32),
                 state.route.len(),
                 nav.nodes.len(),
-                nav.nearest(origin).is_some(),
-                nav.nearest(target).is_some(),
+                nav.nearest(origin).map(|n| nav.nodes[n].map(|v| v as i32)),
+                nav.nearest(origin).map(|n| nav.reach_count(n)),
+                nav.nearest(target).map(|n| nav.nodes[n].map(|v| v as i32)),
+                nav.nearest(target).map(|n| nav.reach_count(n)),
             );
         }
         state.routed_to = Some(target);
         state.replan_ms = now + REPLAN_MS;
+        // No route to the goal: the engine's `bad_path`, on which BO1 picks another window
+        // (zombie_assure_node) or falls back to following the player's breadcrumbs.
+        if state.route.is_empty() {
+            raise(world, Value::Object(object), "bad_path", Vec::new());
+        }
         // The first node is where it stands already.
         if state.route.len() > 1 {
             state.route.remove(0);
@@ -1010,7 +1049,7 @@ fn think(
         let distance = (to[0] * to[0] + to[1] * to[1]).sqrt();
         let arrive = if goal.is_some() { radius } else { REACH };
         if distance > arrive {
-            let via = steer_point(world, state, origin, at, now);
+            let via = steer_point(world, object, state, origin, at, now);
             steering = Some(via);
             let to = [via[0] - origin[0], via[1] - origin[1]];
             let leg = (to[0] * to[0] + to[1] * to[1]).sqrt().max(0.001);

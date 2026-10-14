@@ -390,6 +390,27 @@ pub fn apply_prepared_match(
         // A singleplayer map's own AI path nodes: BO1 zombies route over them (their
         // links include the window climbs and drops a walk graph cannot find).
         if let Some(paths) = &ai_paths {
+            // IW4L_NAV_DUMP=<file>: the path nodes and links, one node per line, to study.
+            if let Some(dump) = std::env::var_os("IW4L_NAV_DUMP") {
+                let text: String = paths
+                    .nodes
+                    .iter()
+                    .zip(&paths.links)
+                    .enumerate()
+                    .map(|(index, (at, links))| {
+                        let links: Vec<String> =
+                            links.iter().map(|(to, cost)| format!("{to}:{cost:.0}")).collect();
+                        format!(
+                            "{index} {:.0} {:.0} {:.0} {}\n",
+                            at[0],
+                            at[1],
+                            at[2],
+                            links.join(",")
+                        )
+                    })
+                    .collect();
+                let _ = std::fs::write(dump, text);
+            }
             content.set_ai_nav(sim::actor_nav::ActorNav {
                 nodes: paths.nodes.clone(),
                 adj: paths.links.clone(),

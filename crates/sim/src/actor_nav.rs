@@ -31,28 +31,55 @@ impl ActorNav {
 
     /// The node nearest `feet`, preferring the same floor over one above or below.
     pub fn nearest(&self, feet: [f32; 3]) -> Option<usize> {
-        let mut best: Option<(usize, f32)> = None;
-        for (index, node) in self.nodes.iter().enumerate() {
-            let dx = node[0] - feet[0];
-            let dy = node[1] - feet[1];
-            let dz = node[2] - feet[2];
-            let flat = dx * dx + dy * dy;
-            if flat > self.snap * self.snap || dz.abs() > 72.0 {
+        self.nearest_k(feet, 1).first().copied()
+    }
+
+    /// The `k` nodes nearest `feet`, nearest first (same floor preferred).
+    pub fn nearest_k(&self, feet: [f32; 3], k: usize) -> Vec<usize> {
+        let mut scored: Vec<(f32, usize)> = self
+            .nodes
+            .iter()
+            .enumerate()
+            .filter_map(|(index, node)| {
+                let dx = node[0] - feet[0];
+                let dy = node[1] - feet[1];
+                let dz = node[2] - feet[2];
+                let flat = dx * dx + dy * dy;
+                (flat <= self.snap * self.snap && dz.abs() <= 72.0)
+                    .then_some((flat + 4.0 * dz * dz, index))
+            })
+            .collect();
+        scored.sort_by(|a, b| a.0.total_cmp(&b.0));
+        scored.into_iter().take(k).map(|(_, index)| index).collect()
+    }
+
+    /// How many nodes `node` reaches (its connected part of the graph), for diagnostics.
+    pub fn reach_count(&self, node: usize) -> usize {
+        let mut seen = vec![false; self.nodes.len()];
+        let mut stack = vec![node];
+        let mut count = 0;
+        while let Some(at) = stack.pop() {
+            if at >= seen.len() || std::mem::replace(&mut seen[at], true) {
                 continue;
             }
-            let score = flat + 4.0 * dz * dz;
-            if best.is_none_or(|(_, b)| score < b) {
-                best = Some((index, score));
-            }
+            count += 1;
+            stack.extend(self.adj[at].iter().map(|&(next, _)| next as usize));
         }
-        best.map(|(index, _)| index)
+        count
     }
 
     /// The nodes from `from` to `to`, both ends snapped onto the graph; `None` when either
     /// end is off the graph or no route joins them within the budget.
     pub fn route(&self, from: [f32; 3], to: [f32; 3]) -> Option<Vec<[f32; 3]>> {
-        let start = self.nearest(from)?;
-        let goal = self.nearest(to)?;
+        self.route_between(self.nearest(from)?, self.nearest(to)?)
+    }
+
+    /// The nodes from node `start` to node `goal` (A*), or `None` when no route joins them
+    /// within the budget.
+    pub fn route_between(&self, start: usize, goal: usize) -> Option<Vec<[f32; 3]>> {
+        if start >= self.nodes.len() || goal >= self.nodes.len() {
+            return None;
+        }
         if start == goal {
             return Some(vec![self.nodes[goal]]);
         }
