@@ -32,6 +32,14 @@ pub(crate) struct ZombiesSurvived;
 #[derive(Component)]
 pub(crate) struct ZombiesHint;
 
+/// The row the hint sits in: under the crosshair, or above it while the touch buttons
+/// fill the lower right of the screen.
+#[derive(Component)]
+pub(crate) struct ZombiesHintRow;
+
+const HINT_TOP: f32 = 58.0;
+const HINT_TOP_TOUCH: f32 = 24.0;
+
 /// A hint as the zombies HUD shows it: no `^N` colour codes, and the touch USE button
 /// named in place of a keyboard key.
 fn hint_line(text: &str, bind: &str, touch: bool) -> String {
@@ -105,14 +113,17 @@ pub(crate) fn spawn_zombies_hud(commands: &mut Commands, font: Handle<Font>) {
                 TextShadow::default(),
             ));
             // The use hint ("Hold USE for Weapon [500]..."), under the crosshair.
-            root.spawn((Node {
-                position_type: PositionType::Absolute,
-                left: px(0),
-                top: percent(58),
-                width: percent(100),
-                justify_content: JustifyContent::Center,
-                ..default()
-            },))
+            root.spawn((
+                ZombiesHintRow,
+                Node {
+                    position_type: PositionType::Absolute,
+                    left: px(0),
+                    top: percent(HINT_TOP),
+                    width: percent(100),
+                    justify_content: JustifyContent::Center,
+                    ..default()
+                },
+            ))
                 .with_children(|row| {
                     row.spawn((
                         ZombiesHint,
@@ -260,10 +271,18 @@ pub(crate) fn update_zombies_hint(
     hint: Option<Res<hud::UseHintText>>,
     touch: Option<Res<crate::touch_controls::TouchGameplay>>,
     mut text: Query<(&mut Text, &mut TextColor), With<ZombiesHint>>,
+    mut row: Query<&mut Node, With<ZombiesHintRow>>,
 ) {
     let Ok((mut text, mut color)) = text.single_mut() else {
         return;
     };
+    if let Ok(mut row) = row.single_mut() {
+        let buttons = touch.as_deref().is_some_and(|touch| touch.owns_touches);
+        let top = percent(if buttons { HINT_TOP_TOUCH } else { HINT_TOP });
+        if row.top != top {
+            row.top = top;
+        }
+    }
     let line = hint.as_deref().filter(|hint| !hint.drawn).and_then(|hint| {
         let touch = touch.as_deref().is_some_and(|touch| touch.enabled);
         Some((
