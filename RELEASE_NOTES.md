@@ -10,7 +10,7 @@ Smoother on the phone, every touch button does its job, and co-op over Wi-Fi.
   - KNIFE plays the knife slash.
 - Prompts: "Hold USE to ..." now shows for the thing you're facing (wall guns) or standing at (doors, debris). The "You must turn on the power first!" prompt no longer sits on screen at the start.
 - Co-op over Wi-Fi (see below):
-  - When you go down, you're downed, not dead. A teammate stands over you and holds USE for about 3 seconds to revive you. Zombies leave downed players alone.
+  - When you go down, you're downed, not dead. A teammate stands over you and holds USE for about 3 seconds to revive you. Zombies leave downed players alone. If nobody revives you, you bleed out after about 45 seconds, watch as a spectator, and come back at the start of the next round.
   - A player who joins lands on their own start point and can move. Before, Black Ops' own rule killed both players for standing in the same spot.
   - A host that stalls for a moment no longer drops the other player.
 - Jugger-Nog now actually raises your health.
