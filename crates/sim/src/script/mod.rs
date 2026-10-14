@@ -42,6 +42,7 @@ pub use ir::IR_VERSION;
 pub(crate) use ir::{Binary, Callee, Function, Global, Op, Unary};
 pub use profile::catalog::{Builtin, Catalog, Namespace, Owner};
 pub use profile::iw4_startup::Iw4Startup;
+pub use profile::zombies_startup::{ZOMBIES_CALLBACKS, ZombiesStartup};
 pub use compiler::Census;
 pub use program::{ModuleIdentity, Program, Realm, Site};
 pub(crate) use runtime::{

@@ -53,6 +53,14 @@ impl Catalog {
     pub fn t5() -> Self {
         Self::from_list(crate::script::Realm::T5, super::t5_catalog::T5)
     }
+    /// BO1 zombies: the T5 catalog plus the singleplayer builtins its scripts call.
+    pub fn t5_zombies() -> Self {
+        let mut catalog = Self::t5();
+        for builtin in super::t5_zombies_catalog::T5_ZOMBIES {
+            catalog.insert(builtin.clone());
+        }
+        catalog
+    }
     fn from_list(realm: crate::script::Realm, list: &[Builtin]) -> Self {
         let mut catalog = Self {
             realm,
