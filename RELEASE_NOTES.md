@@ -1,6 +1,9 @@
-# Pocket Lab 0.3.3
+# Pocket Lab 0.3.4
 
 Smoother on the phone, every touch button does its job, and co-op over Wi-Fi.
+
+**New in 0.3.4**
+- No pink flash before the loading screen: the screen behind the game is now black while the game starts.
 
 **New in 0.3.3**
 - Smoother: the game now runs at a locked 30 frames per second with its clock in step with the screen. Before, some frames moved the game ~1 ms and others ~65 ms, which made the view shake while you moved and looked around.

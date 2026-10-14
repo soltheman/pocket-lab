@@ -10,6 +10,7 @@ mod launch;
 mod open_url;
 mod plugins;
 mod promotion;
+mod window_backdrop;
 
 pub use args::{AcceptanceLaunch, LaunchMode, parse_cli};
 pub use launch::launch;
