@@ -120,7 +120,11 @@ impl Plugin for BotsPlugin {
             )
             .add_systems(
                 Update,
-                (reset_roster_on_match_torn_down, prepare_navigation)
+                (
+                    reset_roster_on_match_torn_down,
+                    prepare_navigation,
+                    share_navigation_with_actors,
+                )
                     .chain()
                     .in_set(ClientSet::Load),
             )
@@ -533,6 +537,40 @@ fn prepare_navigation(
     }
 }
 
+/// The authority's AI actors (BO1 zombies) route over the same walk graph the bots do.
+fn share_navigation_with_actors(
+    world: Option<ResMut<AuthorityWorld>>,
+    nav: Res<BotNav>,
+    mut shared: Local<Option<(u64, u64)>>,
+) {
+    let Some(mut world) = world else {
+        return;
+    };
+    if nav.graph.is_empty() {
+        return;
+    }
+    let key = (nav.graph.generation, nav.graph.digest);
+    if *shared == Some(key) && world.0.has_actor_nav() {
+        return;
+    }
+    *shared = Some(key);
+    world.0.set_actor_nav(sim::actor_nav::ActorNav {
+        nodes: nav.graph.nodes.clone(),
+        adj: nav
+            .graph
+            .adj
+            .iter()
+            .map(|edges| {
+                edges
+                    .iter()
+                    .map(|edge| (u32::from(edge.to), edge.cost))
+                    .collect()
+            })
+            .collect(),
+        snap: nav::SNAP_IN.min(192.0),
+    });
+}
+
 fn refresh_nav(world: &SimWorld, nav: &mut BotNav, load: Option<&assets::MapLoadProcess>) -> bool {
     let digest = nav_digest(world);
     if nav.graph.digest == digest && nav.graph.schema == NAV_SCHEMA && nav.graph.hull == NAV_HULL {
@@ -587,10 +625,18 @@ const NAV_CACHE_KIND: &str = "nav";
 /// back through a cold walk (12-29 s on the phone) for nothing.
 fn nav_digest(world: &SimWorld) -> u64 {
     let parts = world.content_components();
-    assets::fnv1a64_more(
+    let digest = assets::fnv1a64_more(
         assets::fnv1a64(&parts.map.to_le_bytes()),
         &parts.models.to_le_bytes(),
-    )
+    );
+    // AI spawners seed the walk as well; a map without any keeps its digest.
+    world
+        .ai_spawner_origins()
+        .iter()
+        .flatten()
+        .fold(digest, |digest, v| {
+            assets::fnv1a64_more(digest, &v.to_le_bytes())
+        })
 }
 
 /// The digest, schema and hull that decide in-memory reuse are the whole key,
@@ -641,6 +687,8 @@ fn bake_navigation(world: &mut SimWorld, graph: &mut NavGraph) {
     }
     let generation = graph.generation.wrapping_add(1);
     let mut seeds = world.authored_spawn_origins();
+    // AI spawners too: BO1 zombies start outside the area players can walk.
+    seeds.extend(world.ai_spawner_origins());
     seeds.extend(
         world
             .objectives

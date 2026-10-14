@@ -46,6 +46,17 @@ pub struct MapFacts {
     pub t5_teamset: Option<String>,
 
     pub objective_visuals: asset_game::ObjectiveVisuals,
+
+    /// A singleplayer map's AI path nodes (BO1 zombies route over them).
+    pub ai_paths: Option<std::sync::Arc<AiPathGraph>>,
+}
+
+/// AI path nodes: where each stands and the nodes it links to with the walk distance,
+/// traversals (window climbs, jumps down) included.
+#[derive(Clone, Debug, Default, PartialEq)]
+pub struct AiPathGraph {
+    pub nodes: Vec<[f32; 3]>,
+    pub links: Vec<Vec<(u32, f32)>>,
 }
 
 #[derive(Clone, Debug, Default, PartialEq)]

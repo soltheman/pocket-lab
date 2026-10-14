@@ -93,6 +93,37 @@ impl SimWorld {
         Self::default()
     }
 
+    /// The walk graph AI actors route over (the bots' baked navigation).
+    pub fn set_actor_nav(&mut self, nav: crate::actor_nav::ActorNav) {
+        self.ecs
+            .insert_resource(crate::actor_nav::BakedActorNav(std::sync::Arc::new(nav)));
+    }
+
+    pub fn has_actor_nav(&self) -> bool {
+        self.ecs
+            .contains_resource::<crate::actor_nav::BakedActorNav>()
+    }
+
+    /// Where the map's AI spawners (`actor_*`) stand: seeds for a walk graph that reaches
+    /// the areas AI start in (BO1 zombies spawn outside the playable area).
+    pub fn ai_spawner_origins(&self) -> Vec<[f32; 3]> {
+        let Some(runtime) = self.ecs.get_resource::<crate::script::Runtime>() else {
+            return Vec::new();
+        };
+        runtime
+            .entities
+            .iter()
+            .filter(|(_, entity)| {
+                entity.classname.starts_with("actor_")
+                    && entity.kind != crate::script::host::entities::EntityKind::Actor
+            })
+            .filter_map(|(id, _)| match runtime.peek_field(*id, "origin") {
+                Some(crate::script::Value::Vector(origin)) => Some(*origin),
+                _ => None,
+            })
+            .collect()
+    }
+
     pub fn persistent_data(&self) -> &crate::PersistentDataStore {
         self.ecs.resource::<crate::PersistentDataStore>()
     }

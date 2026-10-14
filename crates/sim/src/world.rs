@@ -308,6 +308,8 @@ pub struct SimContentBuilder {
     player_anim_properties: Vec<xmodel_runtime::PlayerAnimProperties>,
     player_body_branches: Option<xmodel_runtime::PlayerBodyBranches>,
     script_model_anims: std::collections::BTreeMap<String, crate::ScriptModelPlayAnim>,
+    anim_notes: std::collections::BTreeMap<String, Arc<[crate::AnimNote]>>,
+    ai_nav: Option<Arc<crate::actor_nav::ActorNav>>,
     xanims: Arc<crate::MantleXAnimBind>,
     weapon_script_names: Arc<[String]>,
     weapon_script_aliases: std::collections::BTreeMap<String, u32>,
@@ -356,6 +358,23 @@ impl SimContentBuilder {
         self.script_model_anims = anims
             .into_iter()
             .map(|(name, facts)| (name.to_ascii_lowercase(), facts))
+            .collect();
+    }
+
+    /// The map's own AI path graph (a singleplayer map's path nodes), which actors route
+    /// over before any baked walk graph.
+    pub fn set_ai_nav(&mut self, nav: crate::actor_nav::ActorNav) {
+        self.ai_nav = (!nav.is_empty()).then(|| Arc::new(nav));
+    }
+
+    /// Animation notetracks by clip name, for `animScripted` and the notetrack queries.
+    pub fn set_anim_notes(
+        &mut self,
+        notes: impl IntoIterator<Item = (String, Vec<crate::AnimNote>)>,
+    ) {
+        self.anim_notes = notes
+            .into_iter()
+            .map(|(name, notes)| (name.to_ascii_lowercase(), notes.into()))
             .collect();
     }
 
@@ -2983,6 +3002,19 @@ impl SimState {
             .script_model_anims
             .get(&name.to_ascii_lowercase())
             .copied()
+    }
+
+    pub(crate) fn ai_nav(&self) -> Option<Arc<crate::actor_nav::ActorNav>> {
+        self.content.data.ai_nav.clone()
+    }
+
+    pub(crate) fn anim_notes(&self, name: &str) -> Arc<[crate::AnimNote]> {
+        self.content
+            .data
+            .anim_notes
+            .get(&name.to_ascii_lowercase())
+            .cloned()
+            .unwrap_or_else(|| Arc::from(Vec::new()))
     }
 
     pub(crate) fn player_anim_clip(&self, legs_anim: i32) -> Option<Arc<xmodel_runtime::AnimClip>> {

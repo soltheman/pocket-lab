@@ -1,12 +1,13 @@
-//! BO1 AI actors, first cut (zombies). An `actor_*` spawner's `CodeSpawnerSpawn` makes a
-//! script model with the spawner's model; each tick it walks at the nearest living player
-//! with monster collision, and in reach it hits them on an interval. Damage to it goes
-//! through BO1's `CodeCallback_ActorDamage`, whose scripts score the hit and call
-//! `finishActorDamage`; that takes the health and, at zero, runs
-//! `CodeCallback_ActorKilled` and the `death` notify. The body is deleted a little later.
-//!
-//! No pathing (it walks straight, sliding along walls), no animation and no AI natives
-//! (goals, animscripts) yet: the actor's own think runs here, not in its scripts.
+//! BO1 AI actors (zombies). An `actor_*` spawner's `CodeSpawnerSpawn` makes a script
+//! model with the spawner's model and runs the engine's actor scripts on it (aitype, init
+//! animscript). BO1's own scripts then drive it through the AI natives here: a goal
+//! (`setGoalPos`/`Node`/`Entity`, answered with `goal`), `animScripted` (its notetracks
+//! and `end`), and the window climb its pathing would do. Each tick it walks straight at
+//! its goal with monster collision (sliding along walls) and, once in the playable area,
+//! swings at players in reach. Damage goes through BO1's `CodeCallback_ActorDamage`, whose
+//! scripts score the hit and call `finishActorDamage`; at zero health it runs
+//! `CodeCallback_ActorKilled`, the `death` notify and the death animscript. The body is
+//! deleted a little later.
 
 use bevy_ecs::prelude::World;
 
@@ -57,6 +58,45 @@ const RADIUS: f32 = 15.0;
 const CORPSE_MS: i64 = 1500;
 const DEFAULT_HEALTH: i32 = 150;
 
+/// BO1's window climb clips.
+const TRAVERSE_CLIPS: [&str; 4] = [
+    "ai_zombie_traverse_v1",
+    "ai_zombie_traverse_v2",
+    "ai_zombie_traverse_v3",
+    "ai_zombie_traverse_v4",
+];
+/// How far past its exterior goal (along the goal's facing) a zombie lands inside.
+const WINDOW_HOP: f32 = 110.0;
+const TRAVERSE_MS: i64 = 1400;
+const DEFAULT_GOAL_RADIUS: f32 = 32.0;
+
+#[derive(Clone, Debug)]
+enum Goal {
+    Pos([f32; 3]),
+    Entity(u64),
+}
+
+/// An `animScripted` clip: the actor holds its place while the notetracks fire.
+#[derive(Clone, Debug)]
+struct Scripted {
+    notify: std::sync::Arc<str>,
+    start_ms: i64,
+    length_ms: i64,
+    notes: std::sync::Arc<[crate::AnimNote]>,
+    fired: usize,
+}
+
+/// Carried through a window: from where it stood to where it lands inside.
+#[derive(Clone, Debug)]
+struct Traverse {
+    from: [f32; 3],
+    to: [f32; 3],
+    start_ms: i64,
+    ms: i64,
+    /// Through its window (BO1 waits on the traverse notifies), not an unsticking hop.
+    window: bool,
+}
+
 #[derive(Clone, Debug, Default)]
 pub(crate) struct Actor {
     next_hit_ms: i64,
@@ -64,6 +104,316 @@ pub(crate) struct Actor {
     died_ms: Option<i64>,
     /// The clip the body plays now (dogs play none yet).
     clip: Option<&'static str>,
+    goal: Option<Goal>,
+    goal_yaw: Option<f32>,
+    goal_reached: bool,
+    scripted: Option<Scripted>,
+    traverse: Option<Traverse>,
+    climbed: bool,
+    /// The walk-graph route toward `routed_to`, next node first, and when to plan again.
+    route: Vec<[f32; 3]>,
+    routed_to: Option<[f32; 3]>,
+    replan_ms: i64,
+    /// Since when its walk has made no headway, and where it was steering.
+    stuck_since: Option<i64>,
+    /// The height it spawned at: far below that it has fallen out of the map.
+    home_z: f32,
+}
+
+/// No headway for this long and the actor hops to where it steers, when that is in sight
+/// and near (a rail, a ledge, a step too tall for the walk).
+const STUCK_MS: i64 = 800;
+const HOP_REACH: f32 = 260.0;
+/// Fallen this far below its spawn: out of the map, so it dies.
+const FELL_OUT: f32 = 1500.0;
+
+/// Nothing solid between two points at chest height, straight across or over the top
+/// (up from the lower one, across at the higher one's height, down: a ledge or a drop).
+fn in_sight(world: &mut World, object: u64, from: [f32; 3], to: [f32; 3]) -> bool {
+    let mut clear = |a: [f32; 3], b: [f32; 3]| {
+        let ignore = super::natives::engine::trace_ignore(world, Some(&Value::Object(object)));
+        matches!(
+            super::natives::engine::entity_trace(
+                world,
+                a,
+                b,
+                crate::bullet_collision::MASK_PLAYER_SOLID,
+                ignore,
+            ),
+            crate::bullet_collision::TraceOutcome::Miss { .. }
+        )
+    };
+    let lift = |p: [f32; 3]| [p[0], p[1], p[2] + 40.0];
+    if clear(lift(from), lift(to)) {
+        return true;
+    }
+    let top = from[2].max(to[2]) + 40.0;
+    let over_from = [from[0], from[1], top];
+    let over_to = [to[0], to[1], top];
+    clear(lift(from), over_from) && clear(over_from, over_to) && clear(over_to, lift(to))
+}
+
+/// Plan again this often, or as soon as the goal moves this far.
+const REPLAN_MS: i64 = 1000;
+const REPLAN_MOVE: f32 = 96.0;
+/// A route node counts as reached this close (horizontally, and within a step of height).
+const NODE_REACHED: f32 = 28.0;
+
+/// The graph actors route over: the map's own path nodes, else the baked walk graph.
+fn nav(world: &mut World) -> Option<std::sync::Arc<crate::actor_nav::ActorNav>> {
+    FrameWorld::from_world(world).ai_nav().or_else(|| {
+        world
+            .get_resource::<crate::actor_nav::BakedActorNav>()
+            .map(|baked| baked.0.clone())
+    })
+}
+
+/// Where to steer this tick toward `target`: the next node of a walk-graph route when the
+/// map has one and both ends are on it, else straight at the target.
+fn steer_point(
+    world: &mut World,
+    state: &mut Actor,
+    origin: [f32; 3],
+    target: [f32; 3],
+    now: i64,
+) -> [f32; 3] {
+    let Some(nav) = nav(world) else {
+        return target;
+    };
+    let close = flat_distance(origin, target) < 96.0 && (origin[2] - target[2]).abs() < 40.0;
+    if close || nav.is_empty() {
+        state.route.clear();
+        return target;
+    }
+    let moved = state
+        .routed_to
+        .is_none_or(|was| flat_distance(was, target) > REPLAN_MOVE);
+    if moved || now >= state.replan_ms {
+        state.route = nav.route(origin, target).unwrap_or_default();
+        if std::env::var_os("IW4L_ACTOR_DEBUG").is_some() {
+            diag::info!(
+                Sim,
+                "actor debug: route {:?} -> {:?}: {} nodes ({} in graph; ends on graph {} {})",
+                origin.map(|v| v as i32),
+                target.map(|v| v as i32),
+                state.route.len(),
+                nav.nodes.len(),
+                nav.nearest(origin).is_some(),
+                nav.nearest(target).is_some(),
+            );
+        }
+        state.routed_to = Some(target);
+        state.replan_ms = now + REPLAN_MS;
+        // The first node is where it stands already.
+        if state.route.len() > 1 {
+            state.route.remove(0);
+        }
+    }
+    while let Some(next) = state.route.first() {
+        if flat_distance(origin, *next) < NODE_REACHED && (origin[2] - next[2]).abs() < 48.0 {
+            state.route.remove(0);
+        } else {
+            break;
+        }
+    }
+    state.route.first().copied().unwrap_or(target)
+}
+
+fn actor_id(world: &mut World, receiver: &Value) -> Result<u64, String> {
+    let object = super::natives::engine::entity_id(world, receiver)?;
+    if is_actor(world, object) {
+        Ok(object)
+    } else {
+        Err("receiver is not an actor".into())
+    }
+}
+
+fn with_actor(world: &mut World, object: u64, change: impl FnOnce(&mut Actor)) {
+    if let Some(actor) = world.resource_mut::<Runtime>().actors.get_mut(&object) {
+        change(actor);
+    }
+}
+
+fn vector_arg(args: &[Value], index: usize) -> Option<[f32; 3]> {
+    match args.get(index) {
+        Some(Value::Vector(v)) => Some(*v),
+        _ => None,
+    }
+}
+
+/// `setGoalPos(origin, [angles])`, `setGoalNode(node)` and `setGoalEntity(ent)`.
+pub(crate) fn set_goal(
+    world: &mut World,
+    receiver: &Value,
+    args: &[Value],
+    how: &str,
+) -> Result<Value, String> {
+    let object = actor_id(world, receiver)?;
+    let goal = match how {
+        "pos" => Goal::Pos(vector_arg(args, 0).ok_or("setGoalPos takes an origin")?),
+        "node" => {
+            let node = match args.first() {
+                Some(Value::Object(node)) => *node,
+                _ => return Err("setGoalNode takes a node".into()),
+            };
+            Goal::Pos(vec_field(
+                &mut world.resource_mut::<Runtime>(),
+                node,
+                "origin",
+            ))
+        }
+        _ => match args.first() {
+            Some(Value::Object(target)) => Goal::Entity(*target),
+            _ => return Err("setGoalEntity takes an entity".into()),
+        },
+    };
+    let yaw = vector_arg(args, 1).map(|angles| angles[1]);
+    with_actor(world, object, |actor| {
+        actor.goal = Some(goal);
+        actor.goal_yaw = yaw;
+        actor.goal_reached = false;
+    });
+    Ok(Value::Undefined)
+}
+
+/// `animScripted(notify, origin, angles, anim, ...)`: the clip plays from that spot, its
+/// notetracks go out as `notify` with the notetrack's name, and `end` last.
+pub(crate) fn anim_scripted(
+    world: &mut World,
+    receiver: &Value,
+    args: &[Value],
+) -> Result<Value, String> {
+    let object = actor_id(world, receiver)?;
+    let notify: std::sync::Arc<str> = match args.first() {
+        Some(Value::String(name)) => name.to_string().into(),
+        _ => return Err("animScripted takes a notify name".into()),
+    };
+    let clip = match args.get(3) {
+        Some(Value::Animation { name, .. }) => name.to_string(),
+        _ => return Err("animScripted takes an animation".into()),
+    };
+    let now = super::players::now_ms(world);
+    let frame = FrameWorld::from_world(world);
+    let length_ms = frame
+        .script_model_anim(&clip)
+        .filter(|timing| timing.frequency > 0.0)
+        .map_or(1000, |timing| (1000.0 / timing.frequency) as i64);
+    let notes = frame.anim_notes(&clip);
+    {
+        let mut runtime = world.resource_mut::<Runtime>();
+        if let Some(origin) = vector_arg(args, 1) {
+            runtime.set_object_field(object, "origin", Value::Vector(origin));
+        }
+        if let Some(angles) = vector_arg(args, 2) {
+            runtime.set_object_field(object, "angles", Value::Vector([0.0, angles[1], 0.0]));
+        }
+    }
+    let previous = world
+        .resource::<Runtime>()
+        .actors
+        .get(&object)
+        .and_then(|actor| actor.scripted.clone());
+    if let Some(previous) = previous {
+        raise(
+            world,
+            Value::Object(object),
+            &previous.notify,
+            vec![Value::string("end")],
+        );
+    }
+    let mut runtime = world.resource_mut::<Runtime>();
+    let dog = runtime
+        .entities
+        .get(&object)
+        .is_some_and(|entity| entity.classname.contains("dog"));
+    if let Some(entity) = runtime.entities.get_mut(&object).filter(|_| !dog) {
+        entity.anim_op = Some(Some(clip.as_str().into()));
+    }
+    if let Some(actor) = runtime.actors.get_mut(&object) {
+        actor.clip = None;
+        actor.scripted = Some(Scripted {
+            notify,
+            start_ms: now,
+            length_ms: length_ms.max(50),
+            notes,
+            fired: 0,
+        });
+    }
+    Ok(Value::Undefined)
+}
+
+/// `stopAnimScripted()`: the clip ends now.
+pub(crate) fn stop_anim_scripted(world: &mut World, receiver: &Value) -> Result<Value, String> {
+    let object = actor_id(world, receiver)?;
+    let scripted = world
+        .resource_mut::<Runtime>()
+        .actors
+        .get_mut(&object)
+        .and_then(|actor| actor.scripted.take());
+    if let Some(scripted) = scripted {
+        raise(
+            world,
+            Value::Object(object),
+            &scripted.notify,
+            vec![Value::string("end")],
+        );
+    }
+    Ok(Value::Undefined)
+}
+
+/// `forceTeleport(origin, [angles])`.
+pub(crate) fn force_teleport(
+    world: &mut World,
+    receiver: &Value,
+    args: &[Value],
+) -> Result<Value, String> {
+    let object = actor_id(world, receiver)?;
+    let origin = vector_arg(args, 0).ok_or("forceTeleport takes an origin")?;
+    let mut runtime = world.resource_mut::<Runtime>();
+    runtime.set_object_field(object, "origin", Value::Vector(origin));
+    if let Some(angles) = vector_arg(args, 1) {
+        runtime.set_object_field(object, "angles", Value::Vector([0.0, angles[1], 0.0]));
+    }
+    Ok(Value::Undefined)
+}
+
+/// `calcPathLength(origin)`: the walk-graph route's length to there, or the straight
+/// distance where the graph has no route.
+pub(crate) fn path_length(
+    world: &mut World,
+    receiver: &Value,
+    args: &[Value],
+) -> Result<Value, String> {
+    let object = actor_id(world, receiver)?;
+    let to = vector_arg(args, 0).ok_or("calcPathLength takes an origin")?;
+    let from = vec_field(&mut world.resource_mut::<Runtime>(), object, "origin");
+    let straight =
+        ((to[0] - from[0]).powi(2) + (to[1] - from[1]).powi(2) + (to[2] - from[2]).powi(2)).sqrt();
+    let routed = nav(world).and_then(|nav| nav.route(from, to)).map(|route| {
+        route
+            .windows(2)
+            .map(|pair| {
+                (0..3)
+                    .map(|i| (pair[1][i] - pair[0][i]).powi(2))
+                    .sum::<f32>()
+                    .sqrt()
+            })
+            .sum::<f32>()
+    });
+    Ok(Value::Float(routed.unwrap_or(straight).max(1.0)))
+}
+
+/// An animation's length and notetracks, for the notetrack queries on clips the player
+/// tree does not hold.
+pub(crate) fn clip_length(world: &mut World, name: &str) -> Option<f32> {
+    FrameWorld::from_world(world)
+        .script_model_anim(name)
+        .filter(|timing| timing.frequency > 0.0)
+        .map(|timing| 1.0 / timing.frequency)
+}
+
+pub(crate) fn clip_notes(world: &mut World, name: &str) -> std::sync::Arc<[crate::AnimNote]> {
+    FrameWorld::from_world(world).anim_notes(name)
 }
 
 /// One of a set of clips, the same one for an actor every time.
@@ -178,7 +528,13 @@ pub(crate) fn spawn_from_spawner(
     if let Some(number) = number {
         entity.number = number;
     }
-    runtime.actors.insert(id, Actor::default());
+    runtime.actors.insert(
+        id,
+        Actor {
+            home_z: origin[2],
+            ..Actor::default()
+        },
+    );
     let living = runtime.actors.len();
     drop(runtime);
     diag::info!(
@@ -419,8 +775,48 @@ fn kill(world: &mut World, object: u64, args: &[Value], attacker: Value) {
     let _ = run_now(world, death, Value::Object(object), Vec::new(), now);
 }
 
-/// Each tick: walk every living actor at the nearest living player and swing in reach;
-/// delete bodies whose time is up.
+/// GSC truth: a defined, non-zero value.
+fn truthy(value: &Value) -> bool {
+    match value {
+        Value::Int(n) => *n != 0,
+        Value::Float(f) => *f != 0.0,
+        Value::Undefined => false,
+        _ => true,
+    }
+}
+
+/// A zombie that has torn its window open climbs in: BO1 sets `got_to_entrance` at the
+/// window and clears `ignoreall` once the boards are down, then waits for its pathing to
+/// carry it over the sill (`zombie_start_traverse` / `zombie_end_traverse`).
+fn window_climb(runtime: &mut Runtime, object: u64, origin: [f32; 3]) -> Option<Traverse> {
+    if !truthy(&runtime.object_field(object, "got_to_entrance"))
+        || truthy(&runtime.object_field(object, "ignoreall"))
+        || truthy(&runtime.object_field(object, "completed_emerging_into_playable_area"))
+    {
+        return None;
+    }
+    let Value::Object(node) = runtime.object_field(object, "first_node") else {
+        return None;
+    };
+    let at = vec_field(runtime, node, "origin");
+    let yaw = vec_field(runtime, node, "angles")[1].to_radians();
+    let to = [
+        at[0] + yaw.cos() * WINDOW_HOP,
+        at[1] + yaw.sin() * WINDOW_HOP,
+        at[2],
+    ];
+    Some(Traverse {
+        from: origin,
+        to,
+        start_ms: 0,
+        ms: TRAVERSE_MS,
+        window: true,
+    })
+}
+
+/// Each tick: play out scripted clips and window climbs, walk every other living actor at
+/// its goal (or the nearest living player when its scripts set none) and swing at players
+/// in reach; delete bodies whose time is up.
 pub(crate) fn advance(world: &mut World) {
     if world.resource::<Runtime>().actors.is_empty() {
         return;
@@ -456,78 +852,12 @@ pub(crate) fn advance(world: &mut World) {
             }
             continue;
         }
-        let origin = vec_field(&mut world.resource_mut::<Runtime>(), object, "origin");
-        let nearest = targets
-            .iter()
-            .min_by(|a, b| flat_distance(origin, a.1).total_cmp(&flat_distance(origin, b.1)));
-        let Some(&(client, target)) = nearest else {
-            continue;
-        };
-        let to = [target[0] - origin[0], target[1] - origin[1]];
-        let distance = (to[0] * to[0] + to[1] * to[1]).sqrt();
-        let yaw = to[1].atan2(to[0]).to_degrees();
-        let (speed, clips) = gait(&mut world.resource_mut::<Runtime>(), object);
-        let walk = if distance > REACH {
-            play(world, object, &mut state, pick(clips, object));
-            [to[0] / distance * speed, to[1] / distance * speed]
-        } else {
-            if !state.clip.is_some_and(|clip| ATTACK_CLIPS.contains(&clip)) {
-                play(world, object, &mut state, pick(&ATTACK_CLIPS, object));
-            }
-            [0.0, 0.0]
-        };
-        let mut slide = super::mechanics::Slide {
-            center: [0.0, 0.0, RADIUS + 1.0],
-            radius: RADIUS,
-            velocity: [walk[0], walk[1], state.fall],
-        };
-        let moved = crate::step::actor_slide(world, object, origin, &mut slide);
-        state.fall = slide.velocity[2];
-        if std::env::var_os("IW4L_ACTOR_DEBUG").is_some()
-            && now % 2000 < i64::from(crate::MATCH_TICK_MS)
-        {
-            let presence = world.resource::<Runtime>().entities[&object].presence;
-            let frame = FrameWorld::from_world(world);
-            let row = frame
-                .entity_collision_capabilities()
-                .iter()
-                .find(|row| presence.is_some_and(|id| row.owner.script_model() == Some(id)));
-            let flags = row.map(|row| (row.solid, row.hidden));
-            let collision = row.and_then(|row| row.dobj.as_ref()).map(|dobj| {
-                format!(
-                    "solid/hidden={flags:?} hit bones={:?} error={:?}",
-                    dobj.current_collision.as_ref().map(|c| c.bones.len()),
-                    dobj.materialize_error,
-                )
-            });
-            diag::info!(
-                Sim,
-                "actor debug: {object} at [{:.0}, {:.0}, {:.0}] -> client {} at {distance:.0}; {collision:?}",
-                moved[0],
-                moved[1],
-                moved[2],
-                client.0
-            );
-        }
-        {
-            let mut runtime = world.resource_mut::<Runtime>();
-            runtime.set_object_field(object, "origin", Value::Vector(moved));
-            runtime.set_object_field(object, "angles", Value::Vector([0.0, yaw, 0.0]));
-        }
-        if distance <= REACH && (target[2] - moved[2]).abs() < 72.0 && now >= state.next_hit_ms {
-            state.next_hit_ms = now + HIT_INTERVAL_MS;
-            // Attack clips play once: each swing starts one again.
-            state.clip = None;
-            play(
-                world,
-                object,
-                &mut state,
-                pick(&ATTACK_CLIPS, object ^ now as u64),
-            );
-            super::players::actor_hit_player(world, client, object, HIT_DAMAGE, moved);
-        }
+        think(world, object, &mut state, &targets, now);
         if let Some(slot) = world.resource_mut::<Runtime>().actors.get_mut(&object) {
+            // A death during the think (it fell out, a script killed it) stands.
+            let died = slot.died_ms;
             *slot = state;
+            slot.died_ms = slot.died_ms.or(died);
         }
     }
     for object in expired {
@@ -536,6 +866,248 @@ pub(crate) fn advance(world: &mut World) {
         if !runtime.pending_deletes.contains(&object) {
             runtime.pending_deletes.push(object);
         }
+    }
+}
+
+fn think(
+    world: &mut World,
+    object: u64,
+    state: &mut Actor,
+    targets: &[(crate::ClientId, [f32; 3])],
+    now: i64,
+) {
+    if let Some(scripted) = state.scripted.as_mut() {
+        let elapsed = now - scripted.start_ms;
+        let at = elapsed as f32 / scripted.length_ms as f32;
+        let mut fire = Vec::new();
+        while let Some(note) = scripted
+            .notes
+            .get(scripted.fired)
+            .filter(|note| note.time <= at)
+        {
+            if &*note.name != "end" {
+                fire.push(note.name.clone());
+            }
+            scripted.fired += 1;
+        }
+        let notify = scripted.notify.clone();
+        let done = elapsed >= scripted.length_ms;
+        for note in fire {
+            raise(
+                world,
+                Value::Object(object),
+                &notify,
+                vec![Value::String(note.into())],
+            );
+        }
+        if done {
+            state.scripted = None;
+            raise(
+                world,
+                Value::Object(object),
+                &notify,
+                vec![Value::string("end")],
+            );
+        }
+        return;
+    }
+    let origin = vec_field(&mut world.resource_mut::<Runtime>(), object, "origin");
+    if state.traverse.is_none() && !state.climbed {
+        let climb = window_climb(&mut world.resource_mut::<Runtime>(), object, origin);
+        if let Some(mut climb) = climb {
+            climb.start_ms = now;
+            state.traverse = Some(climb);
+            state.climbed = true;
+            play(world, object, state, pick(&TRAVERSE_CLIPS, object));
+            raise(
+                world,
+                Value::Object(object),
+                "zombie_start_traverse",
+                Vec::new(),
+            );
+        }
+    }
+    if let Some(climb) = state.traverse.clone() {
+        let t = ((now - climb.start_ms) as f32 / climb.ms.max(1) as f32).clamp(0.0, 1.0);
+        let at: [f32; 3] =
+            std::array::from_fn(|i| climb.from[i] + (climb.to[i] - climb.from[i]) * t);
+        let yaw = (climb.to[1] - climb.from[1]).atan2(climb.to[0] - climb.from[0]);
+        {
+            let mut runtime = world.resource_mut::<Runtime>();
+            runtime.set_object_field(object, "origin", Value::Vector(at));
+            runtime.set_object_field(
+                object,
+                "angles",
+                Value::Vector([0.0, yaw.to_degrees(), 0.0]),
+            );
+        }
+        if t >= 1.0 {
+            state.traverse = None;
+            state.fall = 0.0;
+            state.stuck_since = None;
+            if climb.window {
+                raise(
+                    world,
+                    Value::Object(object),
+                    "zombie_end_traverse",
+                    Vec::new(),
+                );
+            }
+        }
+        return;
+    }
+
+    // Where it is headed: its goal, else (no scripts steering it) the nearest player.
+    let nearest = targets
+        .iter()
+        .min_by(|a, b| flat_distance(origin, a.1).total_cmp(&flat_distance(origin, b.1)))
+        .copied();
+    let goal = match &state.goal {
+        Some(Goal::Pos(at)) => Some(*at),
+        Some(Goal::Entity(target)) => {
+            let target = *target;
+            let mut runtime = world.resource_mut::<Runtime>();
+            runtime
+                .live(&target)
+                .then(|| vec_field(&mut runtime, target, "origin"))
+        }
+        None => None,
+    };
+    let headed = goal.or(nearest.map(|(_, at)| at));
+    let radius = match world
+        .resource_mut::<Runtime>()
+        .object_field(object, "goalradius")
+    {
+        Value::Int(n) => n as f32,
+        Value::Float(f) => f,
+        _ => DEFAULT_GOAL_RADIUS,
+    }
+    .max(1.0);
+
+    // In the playable area (`ignoreall` cleared), a player in reach gets swung at.
+    let in_play = !truthy(
+        &world
+            .resource_mut::<Runtime>()
+            .object_field(object, "ignoreall"),
+    );
+    let attacking = in_play
+        && nearest.is_some_and(|(_, at)| {
+            flat_distance(origin, at) <= REACH && (at[2] - origin[2]).abs() < 72.0
+        });
+
+    let (speed, clips) = gait(&mut world.resource_mut::<Runtime>(), object);
+    let dt = crate::MATCH_TICK_MS as f32 / 1000.0;
+    let mut yaw = None;
+    let mut walk = [0.0, 0.0];
+    let mut steering = None;
+    if let Some((_, at)) = nearest.filter(|_| attacking) {
+        yaw = Some((at[1] - origin[1]).atan2(at[0] - origin[0]).to_degrees());
+        if !state.clip.is_some_and(|clip| ATTACK_CLIPS.contains(&clip)) {
+            play(world, object, state, pick(&ATTACK_CLIPS, object));
+        }
+    } else if let Some(at) = headed {
+        let to = [at[0] - origin[0], at[1] - origin[1]];
+        let distance = (to[0] * to[0] + to[1] * to[1]).sqrt();
+        let arrive = if goal.is_some() { radius } else { REACH };
+        if distance > arrive {
+            let via = steer_point(world, state, origin, at, now);
+            steering = Some(via);
+            let to = [via[0] - origin[0], via[1] - origin[1]];
+            let leg = (to[0] * to[0] + to[1] * to[1]).sqrt().max(0.001);
+            let step = speed.min(leg / dt);
+            walk = [to[0] / leg * step, to[1] / leg * step];
+            yaw = Some(to[1].atan2(to[0]).to_degrees());
+            play(world, object, state, pick(clips, object));
+        } else {
+            play(world, object, state, "ai_zombie_idle_v1");
+            if goal.is_some() && !state.goal_reached {
+                state.goal_reached = true;
+                raise(world, Value::Object(object), "goal", Vec::new());
+                if let Some(goal_yaw) = state.goal_yaw {
+                    yaw = Some(goal_yaw);
+                    raise(world, Value::Object(object), "orientdone", Vec::new());
+                }
+            }
+        }
+    }
+    let mut slide = super::mechanics::Slide {
+        center: [0.0, 0.0, RADIUS + 1.0],
+        radius: RADIUS,
+        velocity: [walk[0], walk[1], state.fall],
+    };
+    let moved = crate::step::actor_slide(world, object, origin, &mut slide);
+    state.fall = slide.velocity[2];
+    if moved[2] < state.home_z - FELL_OUT {
+        diag::warn!(
+            Sim,
+            "actor: {object} fell out of the map at [{:.0}, {:.0}, {:.0}]; it dies",
+            moved[0],
+            moved[1],
+            moved[2]
+        );
+        world
+            .resource_mut::<Runtime>()
+            .set_object_field(object, "health", Value::Int(0));
+        kill(world, object, &[], Value::Undefined);
+        return;
+    }
+    // No headway on a walk: hop to where it steers if that is near and in sight (a rail,
+    // a ledge, a step too tall), else plan the route again.
+    let wanted = (walk[0] * walk[0] + walk[1] * walk[1]).sqrt() * dt;
+    if wanted > 1.0 && flat_distance(origin, moved) < wanted * 0.25 {
+        let since = *state.stuck_since.get_or_insert(now);
+        if now - since >= STUCK_MS {
+            state.stuck_since = None;
+            state.route.clear();
+            state.replan_ms = 0;
+            if let Some(via) = steering.filter(|via| {
+                flat_distance(moved, *via) < HOP_REACH && (via[2] - moved[2]).abs() < 300.0
+            }) && in_sight(world, object, moved, via)
+            {
+                let ms = ((flat_distance(moved, via) / speed) * 1000.0) as i64;
+                state.traverse = Some(Traverse {
+                    from: moved,
+                    to: via,
+                    start_ms: now,
+                    ms: ms.clamp(400, 1500),
+                    window: false,
+                });
+            }
+        }
+    } else {
+        state.stuck_since = None;
+    }
+    if std::env::var_os("IW4L_ACTOR_DEBUG").is_some()
+        && now % 2000 < i64::from(crate::MATCH_TICK_MS)
+    {
+        diag::info!(
+            Sim,
+            "actor debug: {object} at [{:.0}, {:.0}, {:.0}] headed {headed:?} goal {:?} reached {} in play {in_play} attacking {attacking}",
+            moved[0],
+            moved[1],
+            moved[2],
+            state.goal,
+            state.goal_reached,
+        );
+    }
+    {
+        let mut runtime = world.resource_mut::<Runtime>();
+        runtime.set_object_field(object, "origin", Value::Vector(moved));
+        if let Some(yaw) = yaw {
+            runtime.set_object_field(object, "angles", Value::Vector([0.0, yaw, 0.0]));
+        }
+    }
+    if let Some((client, _)) = nearest.filter(|_| attacking && now >= state.next_hit_ms) {
+        state.next_hit_ms = now + HIT_INTERVAL_MS;
+        // Attack clips play once: each swing starts one again.
+        state.clip = None;
+        play(
+            world,
+            object,
+            state,
+            pick(&ATTACK_CLIPS, object ^ now as u64),
+        );
+        super::players::actor_hit_player(world, client, object, HIT_DAMAGE, moved);
     }
 }
 

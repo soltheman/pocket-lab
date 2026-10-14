@@ -39,7 +39,7 @@ fn load_asset_body_observed(
         GfxWorld => gfxworld::load_gfxworld(s, links),
         Glasses => glass::load_glasses(s, links),
         GameWorldMp => world::load_game_world_mp(s),
-        GameWorldSp => world::load_game_world_sp(s),
+        GameWorldSp => world::load_game_world_sp(s, links),
         XGlobals => simple::load_xglobals(s),
         EmblemSet => simple::load_emblem_set(s, links),
         ClipMapMp | ClipMapSp => clipmap::load_clip_map(s, links),
@@ -105,6 +105,20 @@ pub trait AssetLinkSink {
         geometry: crate::zone::XAnimPartsGeometry,
     ) -> Result<()> {
         let _ = (s, geometry);
+        Ok(())
+    }
+
+    /// One of a singleplayer map's AI path nodes (`pathnode_t`, `index` below the map's
+    /// `nodeCount`) and its `link_count` links (`pathlink_s`), as loaded.
+    fn capture_path_node(
+        &mut self,
+        s: &ZoneStream<'_>,
+        index: usize,
+        node: Ptr,
+        links: Option<Ptr>,
+        link_count: usize,
+    ) -> Result<()> {
+        let _ = (s, index, node, links, link_count);
         Ok(())
     }
 

@@ -170,6 +170,13 @@ pub struct ScriptModelPlayAnim {
     pub frequency: f32,
 }
 
+/// A notetrack of an animation: its name and when it fires, as a fraction of the clip.
+#[derive(Clone, Debug, PartialEq)]
+pub struct AnimNote {
+    pub name: std::sync::Arc<str>,
+    pub time: f32,
+}
+
 #[derive(Clone, Debug)]
 pub struct AuthorityDObjState {
     pub current_model: String,

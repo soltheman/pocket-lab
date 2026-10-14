@@ -94,6 +94,16 @@ impl Runtime {
         self.objects.contains_key(id) && !self.dead.contains(id)
     }
 
+    /// An object's field without interning the name: `None` when it was never set.
+    pub(crate) fn peek_field(&self, id: u64, name: &str) -> Option<&Value> {
+        let program = self.program.as_ref()?;
+        let symbol = program
+            .symbol_ids
+            .get(name)
+            .or_else(|| self.dynamic_symbols.get(name))?;
+        self.objects.get(&id)?.get(symbol)
+    }
+
     pub(crate) fn symbol(&mut self, name: &str) -> u32 {
         let program = self.program.as_ref().unwrap();
         if let Some(&id) = program.symbol_ids.get(name) {

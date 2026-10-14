@@ -273,6 +273,7 @@ pub fn apply_prepared_match(
 
         let facts = std::mem::take(&mut prepared_map.facts);
         let airstrike_height = facts.airstrike_height;
+        let ai_paths = facts.ai_paths.clone();
         stage_resource(
             &mut install,
             assets::SessionCompass {
@@ -385,6 +386,38 @@ pub fn apply_prepared_match(
                     frequency,
                 },
             ))
+        }));
+        // A singleplayer map's own AI path nodes: BO1 zombies route over them (their
+        // links include the window climbs and drops a walk graph cannot find).
+        if let Some(paths) = &ai_paths {
+            content.set_ai_nav(sim::actor_nav::ActorNav {
+                nodes: paths.nodes.clone(),
+                adj: paths.links.clone(),
+                snap: 512.0,
+            });
+        }
+        content.set_anim_notes(xanims.0.names().filter_map(|name| {
+            let parts = &[
+                anim_namespace,
+                asset_core::AssetNamespace::T5,
+                asset_core::AssetNamespace::Iw4,
+            ]
+            .into_iter()
+            .find_map(|namespace| xanims.0.get(namespace, name))?
+            .parts;
+            (!parts.notifies.is_empty()).then(|| {
+                (
+                    name.to_owned(),
+                    parts
+                        .notifies
+                        .iter()
+                        .map(|note| sim::AnimNote {
+                            name: note.name.as_str().into(),
+                            time: note.time,
+                        })
+                        .collect(),
+                )
+            })
         }));
         content.set_mantle_xanims(sim::MantleXAnimBind::from_clips(|fast, i| {
             let name = sim::MantleXAnimBind::clip_name(fast, i)?;

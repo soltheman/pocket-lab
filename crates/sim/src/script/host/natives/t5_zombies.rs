@@ -20,6 +20,14 @@ fn player_objects(world: &World) -> Vec<Value> {
         .collect()
 }
 
+fn anim_name(args: &[Value], index: usize) -> Result<String, String> {
+    match args.get(index) {
+        Some(Value::Animation { name, .. }) => Ok(name.to_string()),
+        Some(Value::String(name)) => Ok(name.to_string()),
+        _ => Err("not an animation".into()),
+    }
+}
+
 /// The builtins implemented so far; `register` stubs the rest.
 fn register_implemented(registry: &mut NativeRegistry) {
     registry.register(Function, "getplayers", |world, _, _| {
@@ -57,6 +65,84 @@ fn register_implemented(registry: &mut NativeRegistry) {
     }
     registry.register(Method, "finishactordamage", |world, receiver, args| {
         crate::script::host::actors::finish_damage(world, receiver, args)
+    });
+    // The AI natives BO1's zombie scripts steer an actor with.
+    registry.register(Method, "setgoalpos", |world, receiver, args| {
+        crate::script::host::actors::set_goal(world, receiver, args, "pos")
+    });
+    registry.register(Method, "setgoalnode", |world, receiver, args| {
+        crate::script::host::actors::set_goal(world, receiver, args, "node")
+    });
+    registry.register(Method, "setgoalentity", |world, receiver, args| {
+        crate::script::host::actors::set_goal(world, receiver, args, "entity")
+    });
+    registry.register(Method, "animscripted", |world, receiver, args| {
+        crate::script::host::actors::anim_scripted(world, receiver, args)
+    });
+    registry.register(Method, "stopanimscripted", |world, receiver, _| {
+        crate::script::host::actors::stop_anim_scripted(world, receiver)
+    });
+    registry.register(Method, "forceteleport", |world, receiver, args| {
+        crate::script::host::actors::force_teleport(world, receiver, args)
+    });
+    registry.register(Method, "calcpathlength", |world, receiver, args| {
+        crate::script::host::actors::path_length(world, receiver, args)
+    });
+    // AI tuning the actor's own think does not model: taken and ignored.
+    for name in [
+        "orientmode",
+        "allowedstances",
+        "setengagementmindist",
+        "setengagementmaxdist",
+        "setthreatbiasgroup",
+        "setteamforentity",
+        "traversemode",
+        "pushplayer",
+        "setavoidancemask",
+        "trackscriptstate",
+        "clearanim",
+        "setanimknoball",
+        "setanimknoballrestart",
+        "setflaggedanimknoball",
+        "setflaggedanimknoballrestart",
+        "setflaggedanimknob",
+        "setanimknob",
+        "setanim",
+        "setflaggedanim",
+        "animmode",
+        "setturretignoregoals",
+        "startfadingblur",
+        "stopsounds",
+    ] {
+        registry.register(Method, name, |_, _, _| Ok(Value::Undefined));
+    }
+    // Clip facts from the walk's animations, for the clips the player tree does not hold.
+    registry.register(Function, "getanimlength", |world, _, args| {
+        let name = anim_name(args, 0)?;
+        crate::script::host::actors::clip_length(world, &name)
+            .map(Value::Float)
+            .ok_or_else(|| format!("animation '{name}' is not loaded"))
+    });
+    registry.register(Function, "animhasnotetrack", |world, _, args| {
+        let name = anim_name(args, 0)?;
+        let note = crate::script::host::args::string(args, 1)?;
+        let notes = crate::script::host::actors::clip_notes(world, &name);
+        Ok(Value::Int(
+            notes
+                .iter()
+                .any(|n| n.name.eq_ignore_ascii_case(&note))
+                .into(),
+        ))
+    });
+    registry.register(Function, "getnotetracktimes", |world, _, args| {
+        let name = anim_name(args, 0)?;
+        let note = crate::script::host::args::string(args, 1)?;
+        let times: Vec<Value> = crate::script::host::actors::clip_notes(world, &name)
+            .iter()
+            .filter(|n| n.name.eq_ignore_ascii_case(&note))
+            .map(|n| Value::Float(n.time))
+            .collect();
+        new_array(world, times)
     });
     // Spawners are the map's `actor_*` entities.
     registry.register(Function, "getspawnerarray", |world, _, _| {

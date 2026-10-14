@@ -207,6 +207,20 @@ impl ZoneLane for T5Lane {
         let exp_fog = sink.exp_fog;
         let createart_name = sink.createart_name.clone();
         let t5_teamset = sink.t5_teamset.clone();
+        let ai_paths = sink.ai_paths.take().map(|mut paths| {
+            let count = paths.nodes.len() as u32;
+            for links in &mut paths.links {
+                links.retain(|(to, _)| *to < count);
+            }
+            std::sync::Arc::new(paths)
+        });
+        if let Some(paths) = &ai_paths {
+            report.push(format!(
+                "AI path nodes: {} nodes, {} links",
+                paths.nodes.len(),
+                paths.links.iter().map(Vec::len).sum::<usize>()
+            ));
+        }
         let script_sound = std::mem::take(&mut sink.script_sound).finish();
         let mut scripts = std::mem::take(&mut sink.scripts);
         if let Some(entities) = asset_world::map_ents_entity_string_t5(&stream) {
@@ -292,6 +306,7 @@ impl ZoneLane for T5Lane {
                 fpv_meshes,
                 facts: crate::MapFacts {
                     t5_teamset: t5_teamset.clone(),
+                    ai_paths: ai_paths.clone(),
                     script_sound: script_sound.clone(),
                     ..Default::default()
                 },
@@ -479,6 +494,7 @@ impl ZoneLane for T5Lane {
                         north_yaw,
                         compass,
                         t5_teamset: t5_teamset.clone(),
+                        ai_paths: ai_paths.clone(),
                         script_sound: script_sound.clone(),
                         ..Default::default()
                     },
@@ -504,6 +520,7 @@ impl ZoneLane for T5Lane {
                     fpv_meshes,
                     facts: crate::MapFacts {
                         t5_teamset: t5_teamset.clone(),
+                        ai_paths: ai_paths.clone(),
                         script_sound: script_sound.clone(),
                         ..Default::default()
                     },

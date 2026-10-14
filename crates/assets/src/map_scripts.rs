@@ -12,10 +12,13 @@ pub(crate) const ZOMBIES_HUD: (&str, &str) = (
     // thinks, model animation and shot history all wait for it).
     level notify("prematch_over");
     level thread hud_feed();
+    level thread game_over();
     if (getdvar("iw4l_zm_watch") != "")
         level thread watch_zombie();
     if (getdvar("iw4l_zm_watch") == "aim")
         level thread aim_at_zombies();
+    if (getdvar("iw4l_zm_watch") == "die")
+        level thread down_first_player();
 }
 
 // Debug (IW4L_ZM_WATCH=1): every new zombie is put a few metres in front of
@@ -41,6 +44,15 @@ watch_zombie()
     }
 }
 
+// Debug (IW4L_ZM_WATCH=die): the first player takes a killing blow after 35 seconds.
+down_first_player()
+{
+    wait 35;
+    players = getplayers();
+    if (players.size)
+        players[0] dodamage(players[0].health + 100, players[0].origin);
+}
+
 // Debug (IW4L_ZM_WATCH=aim): the first player also keeps aiming at the
 // nearest zombie's chest.
 aim_at_zombies()
@@ -63,6 +75,21 @@ aim_at_zombies()
     }
 }
 
+// Game over: the HUD shows the rounds survived, then the map starts over (BO1 would
+// leave the level for its menus).
+game_over()
+{
+    level waittill("end_game");
+    rounds = 1;
+    if (isdefined(level.round_number))
+        rounds = level.round_number;
+    players = getplayers();
+    for (i = 0; i < players.size; i++)
+        players[i] setclientdvar("ui_zm_gameover", "" + rounds);
+    wait 10;
+    map_restart(false);
+}
+
 hud_feed()
 {
     for (;;)
@@ -74,6 +101,17 @@ hud_feed()
         for (i = 0; i < players.size; i++)
         {
             p = players[i];
+            // Engine fields BO1's player checks read before anything sets them: without a
+            // team, the zombies' hits count as friendly fire and do nothing.
+            if (!isdefined(p.ignoreme))
+                p.ignoreme = false;
+            if (!isdefined(p.team) || p.team == "")
+                p.team = "allies";
+            if (!isdefined(p.iw4l_hud_over))
+            {
+                p.iw4l_hud_over = true;
+                p setclientdvar("ui_zm_gameover", "");
+            }
             score = 0;
             if (isdefined(p.score))
                 score = p.score;

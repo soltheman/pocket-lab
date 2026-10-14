@@ -1,3 +1,4 @@
+pub mod actor_nav;
 pub mod adopt;
 pub mod bullet;
 mod shield;
@@ -54,13 +55,13 @@ pub mod world_objects;
 
 pub use adopt::{ADOPT_GAP_COUNT, ADOPT_GAPS, AdoptGap, AdoptReport};
 pub use bullet_collision::{
-    AuthorityDObjCollision, AuthorityDObjCollisionBone, AuthorityDObjState, AuthorityModelOwner,
-    BulletHitKind, BulletPath, BulletTraceQuery, BulletTraceSegment, COLLISION_COVERAGE,
-    COLLISION_HISTORY_TICKS, CONTENTS_SOLID, ColliderId, CollisionCoverageRow, CollisionHistory,
-    CoverageSupport, CurrentAuthorityReason, EntityCollisionCapabilities, EntityCollisionEpoch,
-    EntityCollisionFrame, EntityCollisionHistory, EntityCollisionSample, EntityCollisionTraceGeom,
-    HistoryClampReason, HistoryFrame, HistoryPhase, HistoryRefusalReason, HistorySample,
-    HistorySampleVerdict, HitVolumeKind, LAGCOMP_MAX_REWIND_TICKS, LagcompQuery,
+    AnimNote, AuthorityDObjCollision, AuthorityDObjCollisionBone, AuthorityDObjState,
+    AuthorityModelOwner, BulletHitKind, BulletPath, BulletTraceQuery, BulletTraceSegment,
+    COLLISION_COVERAGE, COLLISION_HISTORY_TICKS, CONTENTS_SOLID, ColliderId, CollisionCoverageRow,
+    CollisionHistory, CoverageSupport, CurrentAuthorityReason, EntityCollisionCapabilities,
+    EntityCollisionEpoch, EntityCollisionFrame, EntityCollisionHistory, EntityCollisionSample,
+    EntityCollisionTraceGeom, HistoryClampReason, HistoryFrame, HistoryPhase, HistoryRefusalReason,
+    HistorySample, HistorySampleVerdict, HitVolumeKind, LAGCOMP_MAX_REWIND_TICKS, LagcompQuery,
     LinkedBrushCollisionBrush, MASK_BULLET_WORLD, MASK_PLAYER_SOLID, MASK_SHOT, PLAYER_MAXS,
     PLAYER_MINS, PlayerCollisionPose, ScriptModelPlayAnim, ShotSampleProvenance, ShotSampleQuality,
     TraceInvalidReason, TraceOutcome, bullet_trace, bullet_trace_segments,

@@ -182,6 +182,9 @@ pub(crate) struct ZoneWalkSink {
 
     pub t5_teamset: Option<String>,
 
+    /// A singleplayer map's AI path nodes (`GameWorldSp`).
+    pub ai_paths: Option<crate::AiPathGraph>,
+
     pub exp_fog: Option<asset_world::ExpFog>,
 
     pub film_visions:
@@ -970,6 +973,38 @@ impl fastfile_t5::AssetSink for ZoneWalkSink {
 }
 
 impl fastfile_t5::AssetLinkSink for ZoneWalkSink {
+    /// `pathnode_constant_t.vOrigin` sits after the type, flags, names and animscript;
+    /// `pathlink_s` is `{ fDist, nodeNum, .. }`.
+    fn capture_path_node(
+        &mut self,
+        s: &fastfile_t5::ZoneStream<'_>,
+        index: usize,
+        node: fastfile_t5::Ptr,
+        links: Option<fastfile_t5::Ptr>,
+        link_count: usize,
+    ) -> fastfile_t5::Result<()> {
+        const ORIGIN_OFF: usize = 20;
+        const LINK: usize = 12;
+        let paths = self.ai_paths.get_or_insert_with(Default::default);
+        if paths.nodes.len() != index {
+            return Ok(());
+        }
+        paths.nodes.push([
+            s.f32_at(node, ORIGIN_OFF)?,
+            s.f32_at(node, ORIGIN_OFF + 4)?,
+            s.f32_at(node, ORIGIN_OFF + 8)?,
+        ]);
+        let mut out = Vec::with_capacity(link_count);
+        if let Some(links) = links {
+            for i in 0..link_count {
+                let link = links.at(i * LINK);
+                out.push((u32::from(s.u16_at(link, 4)?), s.f32_at(link, 0)?.max(1.0)));
+            }
+        }
+        paths.links.push(out);
+        Ok(())
+    }
+
     fn capture_impact_fx(
         &mut self,
         s: &fastfile_t5::ZoneStream<'_>,

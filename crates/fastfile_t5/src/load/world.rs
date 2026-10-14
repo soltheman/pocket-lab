@@ -90,22 +90,31 @@ pub(super) fn load_game_world_mp(s: &mut ZoneStream<'_>) -> Result<()> {
     let p = s.alloc_load(4, sz::GAME_WORLD_MP)?;
     s.push(XFILE_BLOCK_VIRTUAL)?;
     follow_name(s, p, 0)?;
-    load_path_data(s, p.at(sz::PATH_DATA_OFF))?;
+    load_path_data(s, p.at(sz::PATH_DATA_OFF), None)?;
     s.pop()
 }
 
 /// `GameWorldSp`: same `{ name, PathData }` shell as the MP variant (OAT
 /// `GameWorldSp.txt` walks the identical `PathData`, including the
 /// `nodeCount + 128` overallocation).
-pub(super) fn load_game_world_sp(s: &mut ZoneStream<'_>) -> Result<()> {
+pub(super) fn load_game_world_sp(
+    s: &mut ZoneStream<'_>,
+    links: &mut dyn super::AssetLinkSink,
+) -> Result<()> {
     let p = s.alloc_load(4, sz::GAME_WORLD_SP)?;
     s.push(XFILE_BLOCK_VIRTUAL)?;
     follow_name(s, p, 0)?;
-    load_path_data(s, p.at(sz::PATH_DATA_OFF))?;
+    load_path_data(s, p.at(sz::PATH_DATA_OFF), Some(links))?;
     s.pop()
 }
 
-fn load_path_data(s: &mut ZoneStream<'_>, p: Ptr) -> Result<()> {
+/// Walks the path data; each real node (the array is allocated with 128 spare slots past
+/// `nodeCount`) goes to `links` with its link array once both are loaded.
+fn load_path_data(
+    s: &mut ZoneStream<'_>,
+    p: Ptr,
+    mut links: Option<&mut dyn super::AssetLinkSink>,
+) -> Result<()> {
     let node_count = s.u32_at(p, 0)? as usize;
     let node_alloc = node_count + 128;
     let vis_bytes = s.i32_at(p, 24)?.max(0) as usize;
@@ -115,12 +124,17 @@ fn load_path_data(s: &mut ZoneStream<'_>, p: Ptr) -> Result<()> {
         for i in 0..node_alloc {
             let node = nodes.at(i * sz::PATH_NODE);
             let link_count = s.u16_at(node, sz::PATH_NODE_TOTAL_LINK_COUNT_OFF)? as usize;
-            always_array(
+            let link_array = always_array(
                 s,
                 node.at(sz::PATH_NODE_LINKS_OFF),
                 4,
                 sz::PATH_LINK * link_count,
             )?;
+            if i < node_count
+                && let Some(sink) = links.as_deref_mut()
+            {
+                sink.capture_path_node(s, i, node, link_array, link_count)?;
+            }
         }
     }
 
