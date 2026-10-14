@@ -560,12 +560,32 @@ fn clip_slide(velocity: [f32; 3], normal: [f32; 3]) -> [f32; 3] {
 }
 
 fn apply_entity_links(world: &mut World) {
+    let (linked, player_parents): (Vec<(u64, Link)>, Vec<(u64, u32)>) = {
+        let runtime = world.resource::<Runtime>();
+        let linked: Vec<(u64, Link)> = runtime
+            .entities
+            .iter()
+            .filter_map(|(id, e)| Some((*id, e.linked_to.clone()?)))
+            .collect();
+        let players = linked
+            .iter()
+            .filter_map(|(_, link)| Some((link.parent, runtime.player_client(link.parent)?)))
+            .collect();
+        (linked, players)
+    };
+    // A player keeps its position in the playerstate, not in an object field: BO1's
+    // revive trigger is linked to the downed player, and stood at the world origin.
+    let player_bases: BTreeMap<u64, ([f32; 3], [f32; 3])> = {
+        let frame = crate::frame::FrameWorld::from_world(world);
+        player_parents
+            .into_iter()
+            .filter_map(|(object, client)| {
+                let ps = frame.player(crate::ClientId(client))?;
+                Some((object, (ps.origin, [0.0, ps.viewangles[1], 0.0])))
+            })
+            .collect()
+    };
     let mut runtime = world.resource_mut::<Runtime>();
-    let linked: Vec<(u64, Link)> = runtime
-        .entities
-        .iter()
-        .filter_map(|(id, e)| Some((*id, e.linked_to.clone()?)))
-        .collect();
     for (id, link) in linked {
         if !runtime.live(&link.parent) {
             runtime.entities.get_mut(&id).unwrap().linked_to = None;
@@ -575,7 +595,10 @@ fn apply_entity_links(world: &mut World) {
             Value::Vector(v) => v,
             _ => [0.0; 3],
         };
-        let (base, base_angles) = (field(&mut runtime, "origin"), field(&mut runtime, "angles"));
+        let (base, base_angles) = match player_bases.get(&link.parent) {
+            Some(&base) => base,
+            None => (field(&mut runtime, "origin"), field(&mut runtime, "angles")),
+        };
         let axis = math_iw4::angles_to_axis(base_angles);
         let offset = link.tag_offset.unwrap_or([0.0; 3]);
         let local = std::array::from_fn(|i| offset[i] + link.origin[i]);

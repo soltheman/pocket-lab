@@ -863,7 +863,13 @@ pub(crate) fn advance(world: &mut World) {
     let now = super::players::now_ms(world);
     let targets: Vec<(crate::ClientId, [f32; 3])> = {
         let runtime = world.resource::<Runtime>();
-        let clients: Vec<u32> = runtime.players.keys().copied().collect();
+        // A player BO1 sets `ignoreme` on (downed, waiting for a revive) is left alone.
+        let clients: Vec<u32> = runtime
+            .players
+            .iter()
+            .filter(|(_, slot)| !runtime.peek_field(slot.object, "ignoreme").is_some_and(truthy))
+            .map(|(client, _)| *client)
+            .collect();
         let frame = FrameWorld::from_world(world);
         clients
             .into_iter()

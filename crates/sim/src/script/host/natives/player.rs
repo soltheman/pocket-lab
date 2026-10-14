@@ -657,6 +657,16 @@ fn register_death(registry: &mut NativeRegistry) {
             .filter(|hit| hit.victim == id)
             .and_then(|hit| hit.commit);
         let tick = tick(world);
+        // BO1 zombies sets player_lastStandBleedoutTime: a lethal hit downs the player
+        // for a teammate to revive (its damage callback ends the game itself when no
+        // one is left standing).
+        let downs = {
+            let dvars = &world.resource::<Runtime>().dvars;
+            dvars.get("zombiemode").is_some_and(|v| v == "1")
+                && dvars
+                    .get("player_laststandbleedouttime")
+                    .is_some_and(|v| super::iw4::atof(v) > 0.0)
+        };
         let owed = || -> Vec<Value> {
             let at = |i: usize| args.get(i).cloned().unwrap_or(Value::Undefined);
             vec![
@@ -673,7 +683,7 @@ fn register_death(registry: &mut NativeRegistry) {
         };
         let finish = {
             let mut frame = FrameWorld::from_world(world);
-            let finish = script_player::finish_damage(&mut frame, id, amount, dir);
+            let finish = script_player::finish_damage(&mut frame, id, amount, dir, downs);
             if finish == script_player::Finish::Killed {
                 script_player::kill(&mut frame, tick, id, attacker, commit);
             }
@@ -701,6 +711,30 @@ fn register_death(registry: &mut NativeRegistry) {
         let id = client_of(world, receiver)?;
         slot(world, id.0)?.last_stand_until_ms = None;
         script_player::revive(&mut FrameWorld::from_world(world), id);
+        Ok(Value::Undefined)
+    });
+    // BO1: a teammate's revive (or a bleed-out turned zombie) stands the player up at
+    // full health.
+    registry.register(Method, "reviveplayer", |world, receiver, _| {
+        let id = client_of(world, receiver)?;
+        slot(world, id.0)?.last_stand_until_ms = None;
+        let mut frame = FrameWorld::from_world(world);
+        script_player::revive(&mut frame, id);
+        if let Some(ps) = frame.player_mut(id) {
+            ps.health = ps.max_health.max(1);
+        }
+        Ok(Value::Undefined)
+    });
+    // BO1: Jugger-Nog raises it (to 250) and a revive puts it back.
+    registry.register(Method, "setmaxhealth", |world, receiver, args| {
+        let id = client_of(world, receiver)?;
+        let most = int(args, 0)?.max(1);
+        let mut frame = FrameWorld::from_world(world);
+        frame.client_meta_mut(id).max_health = most;
+        if let Some(ps) = frame.player_mut(id) {
+            ps.max_health = most;
+            ps.health = ps.health.min(most);
+        }
         Ok(Value::Undefined)
     });
     registry.register(
@@ -981,7 +1015,19 @@ fn controls(
 ) -> Result<Value, String> {
     let id = client_of(world, receiver)?;
     let mut frame = FrameWorld::from_world(world);
+    let before = frame.client_meta_mut(id).controls;
     set(&mut frame.client_meta_mut(id).controls);
+    let after = frame.client_meta_mut(id).controls;
+    // A player who cannot move or use anything is the first thing to rule out.
+    if (before.frozen, before.usability_disabled) != (after.frozen, after.usability_disabled) {
+        diag::info!(
+            Sim,
+            "controls: client {} frozen={} usability_disabled={}",
+            id.0,
+            after.frozen,
+            after.usability_disabled
+        );
+    }
     Ok(Value::Undefined)
 }
 

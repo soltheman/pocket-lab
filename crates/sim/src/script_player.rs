@@ -286,11 +286,14 @@ pub(crate) fn god_mode(world: &FrameWorld, id: ClientId) -> bool {
         && world.client_meta(id).is_some_and(|meta| meta.god_mode)
 }
 
+/// `downs`: a lethal hit puts the player in last stand without MW2's Last Stand perk
+/// (BO1 zombies, where a teammate revives them).
 pub(crate) fn finish_damage(
     world: &mut FrameWorld,
     id: ClientId,
     amount: i32,
     dir: Option<[f32; 3]>,
+    downs: bool,
 ) -> Finish {
     if god_mode(world, id) {
         return Finish::Hurt;
@@ -312,7 +315,9 @@ pub(crate) fn finish_damage(
         return Finish::Hurt;
     }
     use playerstate_iw4::pm_flags::LAST_STAND;
-    if ps.perks[0] & playerstate_iw4::PERK_PISTOLDEATH != 0 && ps.pm_flags & LAST_STAND == 0 {
+    if (downs || ps.perks[0] & playerstate_iw4::PERK_PISTOLDEATH != 0)
+        && ps.pm_flags & LAST_STAND == 0
+    {
         ps.health = 1;
         ps.pm_type = playerstate_iw4::PM_TYPE_LAST_STAND;
         ps.view_height_target = movement_iw4::view_height::LAST_STAND;

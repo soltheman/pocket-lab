@@ -322,6 +322,9 @@ impl ClientCommandInbox {
             }
             drained.sort_by_key(|(seq, _, _)| *seq);
             if drained.is_empty() {
+                if let Some(seq) = self.trim_backlog(id, time_ms) {
+                    out.acks.push((id, seq));
+                }
                 if let Some(fault) = self.backlog_fault(id, time_ms) {
                     out.backlog_faults.push((id, fault));
                     continue;
@@ -359,6 +362,7 @@ impl ClientCommandInbox {
                     sequence: seq.map(|seq| sim::CommandSequence(seq.0)),
                 });
             }
+            let ack = self.trim_backlog(id, time_ms).or(ack);
             if let Some(seq) = ack {
                 out.acks.push((id, seq));
             }
@@ -367,6 +371,38 @@ impl ClientCommandInbox {
             }
         }
         out
+    }
+
+    /// More than [`MAX_QUEUED_COMMAND_MS`] of input waiting (the host stalled, say while
+    /// sending a joiner the world): the oldest commands are dropped, as Quake-family
+    /// servers drop stale input, instead of disconnecting the peer. Returns the last
+    /// sequence dropped, which counts as acknowledged.
+    fn trim_backlog(&mut self, id: ClientId, time_ms: i32) -> Option<CmdSeq> {
+        let mut dropped = None;
+        let mut count = 0usize;
+        while matches!(
+            self.backlog_fault(id, time_ms),
+            Some(InputBacklogFault::QueueDuration { .. })
+        ) {
+            let queue = self.queued.get_mut(&id)?;
+            let at = queue.iter().position(|(seq, _, _)| seq.is_some())?;
+            let (Some(seq), cmd, _) = queue.remove(at)? else {
+                break;
+            };
+            self.last_acked_seq.insert(id, seq.0);
+            self.last_consumed.insert(id, cmd);
+            self.blocked_head.remove(&id);
+            dropped = Some(seq);
+            count += 1;
+        }
+        if count > 0 {
+            diag::warn!(
+                Net,
+                "client {}: dropped {count} queued commands to keep input under {MAX_QUEUED_COMMAND_MS} ms",
+                id.0
+            );
+        }
+        dropped
     }
 }
 

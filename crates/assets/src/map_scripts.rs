@@ -34,6 +34,8 @@ pub(crate) const ZOMBIES_HUD: (&str, &str) = (
         level thread kill_all_zombies();
     if (getdvar("iw4l_zm_watch") == "volumes")
         level thread log_player_volumes();
+    if (getdvar("iw4l_zm_watch") == "revive")
+        level thread revive_test();
 }
 
 // Debug (IW4L_ZM_WATCH=1): every new zombie is put a few metres in front of
@@ -194,6 +196,45 @@ face_juggernog()
     }
 }
 
+// Debug (IW4L_ZM_WATCH=revive, co-op): once a second player is in, they go down; the
+// first player then stands beside them, facing them (hold USE on that client to revive).
+revive_test()
+{
+    for (waited = 0; ; waited++)
+    {
+        wait 1;
+        players = getplayers();
+        if (players.size >= 2)
+            break;
+        if (waited % 2 == 0 && players.size)
+            logprint("revive test: waiting for a second player; first player use " + players[0] usebuttonpressed());
+    }
+    level thread kill_all_zombies();
+    wait 8;
+    players = getplayers();
+    victim = players[1];
+    reviver = players[0];
+    victim dodamage(victim.health + 100, victim.origin);
+    wait 2;
+    reviver setorigin(victim.origin + (30, 0, 0));
+    wait 1;
+    reviver setplayerangles(vectortoangles(victim.origin - reviver geteye()));
+    for (i = 0; i < 15; i++)
+    {
+        touching = 0;
+        if (isdefined(victim.revivetrigger))
+        {
+            touching = reviver istouching(victim.revivetrigger);
+            if (i == 0)
+                logprint("revive test: radius dvar " + getdvarint("revive_trigger_radius") + " trigger at " + victim.revivetrigger.origin + " victim at " + victim.origin + " reviver at " + reviver.origin);
+        }
+        sight = sighttracepassed(reviver.origin + (0, 0, 50), victim.origin + (0, 0, 30), false, undefined);
+        bullet = bullettracepassed(reviver.origin + (0, 0, 50), victim.origin + (0, 0, 30), false, undefined);
+        logprint("revive test t+" + i + ": victim down " + victim maps\_laststand::player_is_in_laststand() + " health " + victim.health + " state " + victim.sessionstate + " | reviver can " + reviver maps\_laststand::can_revive(victim) + " touching " + touching + " facing " + reviver maps\_laststand::is_facing(victim) + " sight " + sight + " bullet " + bullet + " use " + reviver usebuttonpressed() + " at " + reviver.origin);
+        wait 1;
+    }
+}
+
 // Debug (IW4L_ZM_WATCH=volumes): logs which playable-area volumes the first player touches.
 log_player_volumes()
 {
@@ -269,6 +310,7 @@ aim_at_zombies()
 // start point (which is also where BO1 respawns them between rounds).
 place_joiners()
 {
+    level thread note_intro_done();
     for (;;)
     {
         players = getplayers();
@@ -278,6 +320,10 @@ place_joiners()
             if (p.sessionstate != "playing" || isdefined(p.iw4l_placed))
                 continue;
             p.iw4l_placed = true;
+            // BO1 freezes each player's first spawn and unfreezes everyone once, when
+            // the opening fade ends: a player joining after that stays frozen.
+            if (isdefined(level.iw4l_intro_done))
+                p thread unfreeze_joiner();
             if (!crowded(p.origin, p))
                 continue;
             structs = common_scripts\utility::getstructarray("initial_spawn_points", "targetname");
@@ -295,6 +341,19 @@ place_joiners()
         }
         wait 0.05;
     }
+}
+
+note_intro_done()
+{
+    level waittill("fade_in_complete");
+    level.iw4l_intro_done = true;
+}
+
+unfreeze_joiner()
+{
+    self endon("disconnect");
+    wait 1;
+    self freezecontrols(false);
 }
 
 crowded(origin, self_player)
@@ -340,6 +399,9 @@ hud_feed()
             // team, the zombies' hits count as friendly fire and do nothing.
             if (!isdefined(p.ignoreme))
                 p.ignoreme = false;
+            // Counted by BO1's last stand (each down) and its game-over stats.
+            if (!isdefined(p.downs))
+                p.downs = 0;
             if (!isdefined(p.team) || p.team == "")
                 p.team = "allies";
             if (!isdefined(p.iw4l_hud_over))

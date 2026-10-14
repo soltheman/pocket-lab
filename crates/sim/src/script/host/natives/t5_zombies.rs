@@ -122,6 +122,10 @@ fn register_implemented(registry: &mut NativeRegistry) {
         "vibrate",
         "playerknockback",
         "enablehealthshield",
+        // Revive feedback: the reviver's progress bar and the downed player's screen.
+        "startrevive",
+        "stoprevive",
+        "visionsetlaststand",
     ] {
         registry.register(Method, name, |_, _, _| Ok(Value::Undefined));
     }

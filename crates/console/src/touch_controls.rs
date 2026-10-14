@@ -155,9 +155,19 @@ pub(crate) fn update_touch_ownership(
     menus: Option<Res<hud::ScriptMenus>>,
     mut gameplay: ResMut<TouchGameplay>,
 ) {
-    let in_game = screen.is_some_and(|s| *s == AppScreen::InGame);
-    let modal = console.open || menus.is_some_and(|m| m.captures_input());
-    gameplay.owns_touches = gameplay.enabled && in_game && !modal;
+    let in_game = screen.as_ref().is_some_and(|s| **s == AppScreen::InGame);
+    let menu = menus.is_some_and(|m| m.captures_input());
+    let owns = gameplay.enabled && in_game && !console.open && !menu;
+    if owns != gameplay.owns_touches && gameplay.enabled {
+        diag::info!(
+            Console,
+            "touch controls {}: screen={:?} console_open={} menu_captures={menu}",
+            if owns { "active" } else { "paused" },
+            screen.as_deref(),
+            console.open
+        );
+    }
+    gameplay.owns_touches = owns;
 }
 
 pub(crate) fn read_touch_controls(
@@ -186,6 +196,9 @@ pub(crate) fn read_touch_controls(
         match touch.phase {
             TouchPhase::Started => {
                 if let Some(index) = button_at(touch.position, size) {
+                    if std::env::var_os("IW4L_TOUCH_DEBUG").is_some() {
+                        diag::info!(Console, "touch: finger {id} on {}", BUTTONS[index].label);
+                    }
                     state.buttons.insert(id, index);
                     if BUTTONS[index].looks {
                         state.looks.insert(id, touch.position);
