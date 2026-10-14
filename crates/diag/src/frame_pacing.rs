@@ -16,6 +16,9 @@ use std::time::{Duration, Instant};
 pub const FRAME_PACE_ENV: &str = "IW4L_FRAME_PACE";
 pub const DT_SNAP_ENV: &str = "IW4L_DT_SNAP";
 pub const FRAME_STATS_ENV: &str = "IW4L_FRAME_STATS";
+/// The phone's pace when `IW4L_FRAME_PACE` is unset: what Kino holds on an iPhone 16e
+/// (its frames take ~27 ms of view preparation, so 60 is out of reach).
+pub const DEFAULT_IOS_PACE: u32 = 30;
 
 /// One vsync of a 120 Hz panel in ns. A 60 Hz panel's vsync is two of these, so
 /// the same grid fits every iPhone.
@@ -54,10 +57,11 @@ impl FramePace {
     };
 
     /// Off the phone every switch is ignored: the hooks only exist there.
-    /// On iOS the pace is off unless set, the snap is off unless set (it only acts
-    /// with a pace; see [`PaceClock`] for why it is not on by default) and the
-    /// stats default to on. An invalid value keeps the
-    /// default and returns a warning to log.
+    /// On iOS the pace defaults to [`DEFAULT_IOS_PACE`] with the snap on, and the
+    /// stats default to on. Unpaced, the phone drew a steady 30 fps while game time
+    /// stepped by Bevy's samples taken after each present (some frames ~1 ms, others
+    /// ~65 ms), so the view lurched while moving. `IW4L_FRAME_PACE=off` restores the
+    /// plain present. An invalid value keeps the default and returns a warning to log.
     pub fn parse(
         ios: bool,
         pace: Option<&str>,
@@ -69,18 +73,19 @@ impl FramePace {
         }
         let mut warnings = Vec::new();
         let hz = match pace.map(str::trim) {
-            None | Some("off" | "0") => 0,
+            None => DEFAULT_IOS_PACE,
+            Some("off" | "0") => 0,
             Some("30") => 30,
             Some("40") => 40,
             Some("60") => 60,
             Some(other) => {
                 warnings.push(format!(
-                    "{FRAME_PACE_ENV}={other} is not off|0|30|40|60; using off"
+                    "{FRAME_PACE_ENV}={other} is not off|0|30|40|60; using {DEFAULT_IOS_PACE}"
                 ));
-                0
+                DEFAULT_IOS_PACE
             }
         };
-        let snap = switch(DT_SNAP_ENV, snap, false, &mut warnings);
+        let snap = switch(DT_SNAP_ENV, snap, true, &mut warnings);
         let stats = switch(FRAME_STATS_ENV, stats, true, &mut warnings);
         (Self { hz, snap, stats }, warnings)
     }
@@ -538,14 +543,14 @@ mod tests {
         assert_eq!(
             ios,
             FramePace {
-                hz: 0,
-                snap: false,
+                hz: 30,
+                snap: true,
                 stats: true
             }
         );
         assert!(warnings.is_empty());
-        assert!(!ios.snap_active());
-        assert_eq!(ios.min_present_us(), 0);
+        assert!(ios.snap_active());
+        assert_eq!(ios.min_present_us(), 31_333);
 
         // Desktop ignores every switch: the hooks only exist on the phone.
         let (desktop, warnings) = FramePace::parse(false, Some("30"), Some("1"), Some("1"));
@@ -558,9 +563,9 @@ mod tests {
         for (value, hz) in [("30", 30), ("40", 40), ("60", 60)] {
             let (pace, warnings) = FramePace::parse(true, Some(value), None, None);
             assert_eq!(pace.hz, hz);
-            assert!(!pace.snap_active());
+            assert!(pace.snap_active());
             assert!(
-                FramePace::parse(true, Some(value), Some("1"), None)
+                !FramePace::parse(true, Some(value), Some("0"), None)
                     .0
                     .snap_active()
             );
@@ -571,8 +576,8 @@ mod tests {
         assert_eq!(
             junk,
             FramePace {
-                hz: 0,
-                snap: false,
+                hz: 30,
+                snap: true,
                 stats: true
             }
         );
@@ -598,7 +603,7 @@ mod tests {
             "frame pace: pace=30 Hz min_present=31.33 ms frame_latency=2 dt_snap=on \
              unit=8.33 ms floor=4 frame_stats=on"
         );
-        let (off, _) = FramePace::parse(true, None, None, Some("0"));
+        let (off, _) = FramePace::parse(true, Some("off"), Some("0"), Some("0"));
         assert!(off.boot_line(2).starts_with("frame pace: pace=off"));
         assert!(off.boot_line(2).ends_with("dt_snap=off frame_stats=off"));
     }

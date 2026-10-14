@@ -1517,7 +1517,10 @@ fn register_refused(registry: &mut NativeRegistry) {
     refused!(Method: "launch", "physicslaunch", "fakefire",
         "spawnnapalmgroundflame", "revive", "docowardswayanims",
         "ghost", "teleport", "istouchingswept", "istouchingvolume", "playersighttrace",
-        "throwbuttonpressed", "actionslotonebuttonpressed", "depthinwater",
+        "throwbuttonpressed", "actionslotonebuttonpressed",
         "devaddpitch", "devaddroll", "devaddyaw"
         => "not simulated");
+    // No map this runtime plays has water deep enough to matter; BO1 zombies asks every
+    // tenth of a second whether a downed player is under water before offering a revive.
+    registry.register(Method, "depthinwater", |_, _, _| Ok(Value::Float(0.0)));
 }
