@@ -363,26 +363,35 @@ impl MapXModelCatalog {
         stream: &fastfile_t5::ZoneStream<'_>,
         geometry: fastfile_t5::ClipMapGeometry,
         clip: &mut asset_world::ClipCollision,
-    ) -> Result<(), asset_world::ClipCollisionError> {
+    ) -> Result<usize, asset_world::ClipCollisionError> {
         use asset_world::ClipCollisionError::{MissingTables, Truncated};
         let Some(rows) = geometry.static_models else {
             return if geometry.static_model_count == 0 {
-                Ok(())
+                Ok(0)
             } else {
                 Err(MissingTables)
             };
         };
+        // A model from a zone this load did not walk (a T5 zombies map places models from
+        // common_zombie) gets no collision rather than failing the map.
+        let mut skipped = 0;
         for index in 0..geometry.static_model_count {
             let row = rows.at(index * fastfile_t5::size::C_STATIC_MODEL);
             let slot = row.at(fastfile_t5::size::C_STATIC_MODEL_XMODEL_OFF);
-            let name = self
-                .name_at_slot(Ptr {
-                    block: slot.block,
-                    offset: slot.offset,
-                })
-                .ok_or(MissingTables)?;
+            let Some(name) = self.name_at_slot(Ptr {
+                block: slot.block,
+                offset: slot.offset,
+            }) else {
+                skipped += 1;
+                continue;
+            };
             let Some(MapXModelSceneAsset::T5(skel)) = self.scene_assets.get_name(name) else {
-                return Err(MissingTables);
+                skipped += 1;
+                continue;
+            };
+            let Some(contents) = skel.contents else {
+                skipped += 1;
+                continue;
             };
             let read = |offset| stream.f32_at(row, offset).map_err(|_| Truncated);
             let origin = [read(8)?, read(12)?, read(16)?];
@@ -404,7 +413,7 @@ impl MapXModelCatalog {
             }
             let coll = clipmap_iw4::XModelColl {
                 coll_lod: skel.coll_lod,
-                contents: skel.contents.ok_or(MissingTables)?,
+                contents,
                 surfs: skel
                     .coll_surfs
                     .iter()
@@ -438,7 +447,7 @@ impl MapXModelCatalog {
                 },
             });
         }
-        Ok(())
+        Ok(skipped)
     }
 
     pub(crate) fn phys_preset_slot_n(&self) -> usize {

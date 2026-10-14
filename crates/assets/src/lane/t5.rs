@@ -157,8 +157,14 @@ impl ZoneLane for T5Lane {
                 geometry.tri_count
             ));
             match build_t5_clip_collision(&stream, geometry).and_then(|mut clip| {
-                sink.map_xmodels
+                let skipped = sink
+                    .map_xmodels
                     .attach_t5_clip_models(&stream, geometry, &mut clip)?;
+                if skipped > 0 {
+                    report.push(format!(
+                        "t5 clip: {skipped} static models without a captured model have no collision"
+                    ));
+                }
                 Ok(clip)
             }) {
                 Ok(clip) => {

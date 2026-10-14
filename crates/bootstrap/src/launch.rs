@@ -25,6 +25,9 @@ use crate::args::{AcceptanceLaunch, LaunchMode};
 use crate::bench;
 use crate::plugins::{add_runtime_plugins, add_runtime_plugins_with_role};
 
+/// Where a launch with no map lands when only Black Ops is installed: Kino der Toten.
+const BO1_ONLY_START_ZONE: &str = "t5:zombie_theater";
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum Role {
     Listen,
@@ -154,6 +157,25 @@ pub fn launch(
                     "render acceptance requires `iw4l map <zone>` (not menu); maps: {}",
                     render::diag::acceptance::ACCEPTANCE_MAPS.join(", ")
                 ));
+            }
+            // The menu is built from MW2's; a BO1-only install starts in Kino der Toten.
+            if asset_game::ui_games_root(&games).is_err()
+                && find_zone_file(&games, BO1_ONLY_START_ZONE).is_ok()
+            {
+                diag::info!(
+                    Launch,
+                    "menu: MW2 not installed; starting {BO1_ONLY_START_ZONE} (BO1 only)"
+                );
+                run_map(
+                    games,
+                    artifacts,
+                    BO1_ONLY_START_ZONE.to_owned(),
+                    None,
+                    Role::Listen,
+                    None,
+                    cheats,
+                );
+                return;
             }
             run_menu(games, artifacts, cheats, &steam);
         }
@@ -522,7 +544,13 @@ fn run_map(
     };
     start_perf(Some(zone.clone()), role_name(config.role));
     let (mut menus, menu_report) = load_ui_menu_catalog(&games);
-    ui::install_frontend_menus(&mut menus).unwrap_or_else(|error| fatal(&error));
+    if let Err(error) = ui::install_frontend_menus(&mut menus) {
+        // The frontend menus extend MW2's; without MW2 a map still runs, menu-less.
+        if have.0 & net::CONTENT_IW4 != 0 {
+            fatal(&error);
+        }
+        diag::warn!(Launch, "frontend menus unavailable without MW2: {error}");
+    }
     for line in &menu_report {
         diag::info!(Launch, "{line}");
     }

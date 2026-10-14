@@ -241,10 +241,19 @@ pub(super) async fn walk_prepared_match(
     };
     let mut scripts = iw4_scripts;
     scripts.overlay(map_scripts);
-    scripts.insert_source(
-        "iw4l_t6/equipment",
-        crate::map_scripts::T6_EQUIPMENT.to_owned(),
-    );
+    if scripts.read("maps/mp/gametypes/_callbacksetup").is_ok() {
+        scripts.insert_source(
+            "iw4l_t6/equipment",
+            crate::map_scripts::T6_EQUIPMENT.to_owned(),
+        );
+    } else {
+        for (module, source) in crate::map_scripts::FREE_ROAM {
+            scripts.insert_source(module, source.to_owned());
+        }
+        // The map script written for IW4 rules includes IW4 modules; free roam runs none.
+        scripts.insert_source(&format!("maps/mp/{zone_name}"), "main()\n{\n}\n".to_owned());
+        report.push("GSC: no IW4 gametype scripts (MW2 not installed); built-in free roam".to_owned());
+    }
     report.push(format!(
         "GSC source assets: {} (map overrides common_mp)",
         scripts.len()

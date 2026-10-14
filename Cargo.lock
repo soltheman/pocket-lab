@@ -429,6 +429,7 @@ dependencies = [
  "bcdec_rs",
  "bevy",
  "clipmap_iw4",
+ "diag",
  "dpvs_iw4",
  "fastfile_iw4",
  "fastfile_iw5",
@@ -2034,6 +2035,9 @@ dependencies = [
  "libc",
  "master_protocol",
  "net",
+ "objc2 0.6.4",
+ "objc2-foundation 0.3.2",
+ "objc2-game-controller",
  "perf",
  "render",
  "render_frontend",
@@ -2597,6 +2601,7 @@ dependencies = [
 name = "diag"
 version = "0.1.0"
 dependencies = [
+ "libc",
  "mimalloc",
  "serde",
  "serde_json",
@@ -3902,6 +3907,7 @@ dependencies = [
  "asset_transport",
  "bootstrap",
  "diag",
+ "libc",
  "updater",
 ]
 
@@ -4585,6 +4591,21 @@ dependencies = [
  "libc",
  "objc2 0.6.4",
  "objc2-core-foundation",
+]
+
+[[package]]
+name = "objc2-game-controller"
+version = "0.3.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "1962c1882c5abcedb18e5f01acffeaad7b3cbd0a9d4cd8f5ca259ba8a64cb9a3"
+dependencies = [
+ "bitflags 2.13.1",
+ "block2 0.6.2",
+ "dispatch2",
+ "objc2 0.6.4",
+ "objc2-app-kit 0.3.2",
+ "objc2-core-foundation",
+ "objc2-foundation 0.3.2",
 ]
 
 [[package]]

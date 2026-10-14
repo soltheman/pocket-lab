@@ -232,6 +232,7 @@ pub struct ClipSweepHit {
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum ClipCollisionError {
     MissingTables,
+    MissingTable(&'static str),
     Truncated,
 
     LeafbrushIndexOverflow,
@@ -241,6 +242,7 @@ impl core::fmt::Display for ClipCollisionError {
     fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
         match self {
             Self::MissingTables => write!(f, "clipmap brush tables were not retained"),
+            Self::MissingTable(table) => write!(f, "clipmap table not retained: {table}"),
             Self::Truncated => write!(f, "clipmap brush bytes truncated in arena"),
             Self::LeafbrushIndexOverflow => {
                 write!(
@@ -1739,7 +1741,7 @@ pub fn build_t5_clip_collision(
     s: &fastfile_t5::ZoneStream<'_>,
     g: fastfile_t5::ClipMapGeometry,
 ) -> Result<ClipCollision, ClipCollisionError> {
-    let brushes_ptr = g.brushes.ok_or(ClipCollisionError::MissingTables)?;
+    let brushes_ptr = g.brushes.ok_or(ClipCollisionError::MissingTable("t5 brushes"))?;
     let mut out = ClipCollision {
         brushes: Vec::with_capacity(g.brush_count),
         ..ClipCollision::default()
@@ -1945,13 +1947,13 @@ fn extract_t5_bsp_tables(
     let mesh = std::sync::Arc::make_mut(&mut out.mesh);
     use fastfile_t5::{ZonePtr, size as sz};
     let (Some(nodes), Some(leaves), Some(lb)) = (g.nodes, g.leaves, g.leafbrush_nodes) else {
-        return Err(ClipCollisionError::MissingTables);
+        return Err(ClipCollisionError::MissingTable("t5 nodes, leaves or leafbrush nodes"));
     };
     for i in 0..g.node_count {
         let p = nodes.at(i * sz::C_NODE);
         let ZonePtr::Offset(plane) = s.ptr_at(p, 0).map_err(|_| ClipCollisionError::Truncated)?
         else {
-            return Err(ClipCollisionError::MissingTables);
+            return Err(ClipCollisionError::MissingTable("t5 node plane"));
         };
         out.nodes.push(ClipBspNode {
             plane: [
@@ -2040,7 +2042,7 @@ fn append_t5_leafbrush_node(
             let fastfile_t5::ZonePtr::Offset(brushes) =
                 s.ptr_at(p, 8).map_err(|_| ClipCollisionError::Truncated)?
             else {
-                return Err(ClipCollisionError::MissingTables);
+                return Err(ClipCollisionError::MissingTable("t5 leafbrush node brushes"));
             };
             for i in 0..count as usize {
                 out.push(

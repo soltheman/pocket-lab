@@ -524,6 +524,15 @@ pub fn apply_prepared_match(
         )
         .map_err(|e| script_refusal(&zone, gametype, "install", &e))?;
         if *role == frame::RuntimeRole::Listen
+            && account.is_some()
+            && account_defaults.is_none()
+        {
+            // MW2's player-data schema supplies the defaults; without MW2 nothing persists.
+            diag::warn!(
+                World,
+                "local account not bound: no player-data defaults (MW2 not installed)"
+            );
+        } else if *role == frame::RuntimeRole::Listen
             && let (Some(account), Some(local)) = (account.as_ref(), local.as_ref())
         {
             account
@@ -923,17 +932,26 @@ fn preflight_match_install(
         );
     }
     let mut objective_weapons = Vec::new();
+    let iw4_factions = catalog.and_then(|catalog| {
+        catalog
+            .string_table(gamemode_iw4::FACTION_TABLE)
+            .map(|table| (catalog, table))
+    });
+    if matches!(
+        prepared_map.namespace,
+        Some(asset_core::AssetNamespace::T5 | asset_core::AssetNamespace::Iw5)
+    ) && iw4_factions.is_none()
+    {
+        // BO1-only install: no IW4 objectives to bind the map's own assets to.
+        diag::info!(
+            World,
+            "objective visuals skipped: no IW4 faction table (MW2 not installed)"
+        );
+    }
     if let Some(namespace @ (asset_core::AssetNamespace::T5 | asset_core::AssetNamespace::Iw5)) =
         prepared_map.namespace
+        && let Some((catalog, table)) = iw4_factions
     {
-        let catalog = catalog.ok_or_else(|| {
-            InstallRefusal::new("IW4 menu catalog missing for objective bindings".to_owned())
-        })?;
-        let table = catalog
-            .string_table(gamemode_iw4::FACTION_TABLE)
-            .ok_or_else(|| {
-                InstallRefusal::new("IW4 faction table missing for objective bindings".to_owned())
-            })?;
         let (allies, axis) = iw4_charsets(catalog, identity, zone);
         let iw4 =
             asset_game::ObjectiveVisuals::from_faction_table(table, Some(&allies), Some(&axis));

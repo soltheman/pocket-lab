@@ -547,8 +547,15 @@ pub fn find_common_mp_for_zone(zone_ff: &Path) -> Result<ZoneFile, String> {
 pub fn find_runtime_zone(root: &GamesRoot, zone_ff: &Path, zone: &str) -> Result<ZoneFile, String> {
     match zone_game_for_path(zone_ff) {
         Some(crate::ZoneGame::Iw4) | None => find_zone_for_tree(zone_ff, zone),
-        Some(_) => {
-            let found = find_zone_file_under(&root.0, zone)?;
+        Some(game) => {
+            let found = find_zone_file_under(&root.0, zone);
+            if game == crate::ZoneGame::T5
+                && !matches!(&found, Ok(f) if peek_zone_version(&f.path) == Some(IW4_ZONE_VERSION))
+            {
+                // A BO1-only install: the T5 map runs on BO1's own runtime zones.
+                return find_zone_for_tree(zone_ff, zone);
+            }
+            let found = found?;
             match peek_zone_version(&found.path) {
                 Some(IW4_ZONE_VERSION) => Ok(found),
                 Some(version) => Err(format!(

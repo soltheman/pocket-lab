@@ -1,5 +1,96 @@
 pub(crate) const T6_EQUIPMENT: &str = include_str!("t6_equipment.gsc.txt");
 
+/// Free roam for an install without MW2's gametype scripts: every player who connects is
+/// spawned at the map's first start point, and nothing else runs.
+pub(crate) const FREE_ROAM: [(&str, &str); 4] = [
+    ("codescripts/delete", "main()\n{\n}\n"),
+    (
+        "codescripts/struct",
+        r#"initstructs()
+{
+    level.struct = [];
+}
+
+createstruct()
+{
+    s = spawnstruct();
+    level.struct[level.struct.size] = s;
+    return s;
+}
+"#,
+    ),
+    ("maps/mp/gametypes/dm", "main()\n{\n}\n"),
+    (
+        "maps/mp/gametypes/_callbacksetup",
+        r#"codecallback_startgametype()
+{
+}
+
+codecallback_playerconnect()
+{
+    waittillframeend;
+    start = free_roam_start();
+    self.sessionstate = "playing";
+    self spawn(start.origin, start.angles);
+}
+
+codecallback_playerdisconnect()
+{
+}
+
+codecallback_playerdamage(inflictor, attacker, damage, flags, meansofdeath, weapon, point, dir, hitloc, timeoffset)
+{
+}
+
+codecallback_playerkilled(inflictor, attacker, damage, meansofdeath, weapon, dir, hitloc, timeoffset, deathanimduration)
+{
+}
+
+codecallback_playerlaststand(inflictor, attacker, damage, meansofdeath, weapon, dir, hitloc, timeoffset, deathanimduration)
+{
+}
+
+codecallback_vehicledamage(inflictor, attacker, damage, flags, meansofdeath, weapon, point, dir, hitloc, timeoffset, partname, modelname, tagname)
+{
+}
+
+// Zombies maps start players at their `initial_spawn_points` structs; other maps at
+// their first player start of a known classname.
+free_roam_start()
+{
+    for (i = 0; i < level.struct.size; i++)
+    {
+        s = level.struct[i];
+        if (isdefined(s.targetname) && s.targetname == "initial_spawn_points" && isdefined(s.origin))
+            return free_roam_point(s.origin, s.angles);
+    }
+    classnames = [];
+    classnames[0] = "info_player_start";
+    classnames[1] = "mp_dm_spawn";
+    classnames[2] = "mp_tdm_spawn";
+    classnames[3] = "mp_global_intermission";
+    for (i = 0; i < classnames.size; i++)
+    {
+        ents = getentarray(classnames[i], "classname");
+        if (ents.size > 0)
+            return free_roam_point(ents[0].origin, ents[0].angles);
+    }
+    return free_roam_point((0, 0, 0), undefined);
+}
+
+free_roam_point(origin, angles)
+{
+    p = spawnstruct();
+    p.origin = origin;
+    p.angles = (0, 0, 0);
+    if (isdefined(angles))
+        p.angles = angles;
+    return p;
+}
+"#,
+    ),
+];
+
 pub(crate) const RADIATION: &str = r#"main()
 {
     waittillframeend;

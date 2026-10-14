@@ -863,9 +863,10 @@ pub fn build_t5_static_model_instances(
             .map_err(|_| ModelMeshError::MissingStaticModelInstances)?
         {
             fastfile_t5::ZonePtr::Offset(p) => p,
-            _ => {
-                continue;
-            }
+            // A model held by another zone (zombies maps place common_zombie models). The
+            // slot stays, so later placements keep their indices: the instance's own model
+            // field resolves to no mesh and the slot is counted as a gap.
+            _ => inst.at(MODEL_OFF),
         };
         out.push(StaticModelInstance {
             model_slot: Ptr {

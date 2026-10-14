@@ -72,7 +72,7 @@ def verify(path):
     with zipfile.ZipFile(path) as archive:
         prefix = "Payload/IW4L.app/"
         info = plistlib.loads(archive.read(prefix + "Info.plist"))
-        require(info["CFBundleIdentifier"] == "com.markussela.iw4l", "bundle identifier changed")
+        require(info["CFBundleIdentifier"] == "com.soltheman.pocketlab", "bundle identifier changed")
         require(info["CFBundleShortVersionString"] == version, "launcher and plist versions differ")
         require(info == expected, "packaged plist differs from source")
         binary = archive.read(prefix + info["CFBundleExecutable"])
