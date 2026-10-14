@@ -51,6 +51,7 @@ pub fn add_runtime_plugins_with_role(app: &mut App, role: RuntimeRole) {
     crate::promotion::register(app);
     // iOS: no auto-lock while a map loads or a match runs.
     crate::idle_timer::register(app);
+    crate::screen_size::register(app);
     // iOS present pacing, dt snap and frame timing stats; nothing elsewhere.
     crate::frame_pace::register(app);
     // "Send logs" in IW4 Pocket options opens the project's GitHub page.
