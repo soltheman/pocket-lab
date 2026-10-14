@@ -2979,6 +2979,16 @@ fn t5_to_iw4_ptr(p: fastfile_t5::Ptr) -> Ptr {
     }
 }
 
+/// T5's inventory type in IW4's terms. Primary, offhand, item and alt mode agree; T5's
+/// melee (the zombies knife) and dual-wield left hand are never cycled to or thrown, so
+/// they become items: IW4's 4 is "exclusive", which weapon cycling treats specially.
+fn remap_t5_inventory_type(t5: i32) -> i32 {
+    match t5 {
+        0..=3 => t5,
+        _ => 2,
+    }
+}
+
 fn i32_at_t5(stream: &fastfile_t5::ZoneStream<'_>, body: fastfile_t5::Ptr, off: usize) -> i32 {
     stream.i32_at(body, off).unwrap_or(0)
 }
@@ -3355,6 +3365,8 @@ fn capture_t5_body_facts(
         ..WeaponBodyFacts::default()
     };
     if let Some(body) = geometry.weap_def {
+        facts.inventory_type =
+            remap_t5_inventory_type(i32_at_t5(stream, body, sz::WEAPON_DEF_INVENTORY_TYPE_OFF));
         facts.kill_icon_ratio = i32_at_t5(stream, body, sz::WEAPON_DEF_KILL_ICON_RATIO_OFF);
         facts.flip_kill_icon = u8_at_t5(stream, body, sz::WEAPON_DEF_FLIP_KILL_ICON_OFF) != 0;
     }
@@ -6218,8 +6230,14 @@ impl WeaponBuild {
             .rows
             .iter()
             .position(|row| {
+                // Multiplayer's `knife_mp`, or zombies' `knife_zm`.
                 row.namespace == crate::AssetNamespace::T5
-                    && row.name.strip_suffix("_mp").unwrap_or(&row.name) == "knife"
+                    && row
+                        .name
+                        .strip_suffix("_mp")
+                        .or_else(|| row.name.strip_suffix("_zm"))
+                        .unwrap_or(&row.name)
+                        == "knife"
             })
             .map(|index| index as u32);
         for row in &mut registry.rows {

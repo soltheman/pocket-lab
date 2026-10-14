@@ -506,6 +506,15 @@ pub(crate) fn give_weapon(
     if !ps.weapons.contains(&(weapon as i32)) {
         return Err("the player's inventory is full".into());
     }
+    // A given grenade fills its offhand slot, as the debug give does: BO1 gives its
+    // grenades with GiveWeapon alone (MW2's scripts also set the class themselves).
+    if let Some(eq) = &offhand {
+        match eq.offhand_class {
+            1 | 4 | 5 => ps.offhand_primary = eq.offhand_class,
+            2 | 3 => ps.offhand_secondary = eq.offhand_class,
+            _ => {}
+        }
+    }
     if had {
         return Ok(());
     }

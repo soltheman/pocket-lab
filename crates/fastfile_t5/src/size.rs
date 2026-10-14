@@ -553,6 +553,9 @@ pub const WEAPON_DEF_NOTE_SOUND_KEYS_OFF: usize = 0x10;
 pub const WEAPON_DEF_NOTE_SOUND_VALUES_OFF: usize = 0x14;
 
 pub const WEAPON_DEF_IMPACT_TYPE_OFF: usize = 0x28;
+/// `weapInventoryType_t`: primary 0, offhand 1, item 2, alt mode 3, melee 4, dual-wield
+/// left hand 5.
+pub const WEAPON_DEF_INVENTORY_TYPE_OFF: usize = 0x2c;
 pub const WEAPON_DEF_PARENT_WEAPON_NAME_OFF: usize = 0x3c;
 pub const WEAPON_DEF_VIEW_FLASH_OFF: usize = 0x74;
 pub const WEAPON_DEF_WORLD_FLASH_OFF: usize = 0x78;
