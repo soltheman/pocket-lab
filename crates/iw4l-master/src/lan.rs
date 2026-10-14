@@ -58,8 +58,8 @@ pub fn prepare(dir: &Path, port: u16, address: Option<IpAddr>) -> Result<Lan> {
     println!("  iPhone: Files app > On My iPhone > Pocket Lab (next to the Games folder)");
     println!("  PC: next to iw4l.exe");
     println!();
-    println!("Every device must be on this Wi-Fi network. If Windows asks, allow");
-    println!("iw4l-master on private networks. Leave this window open while you play.");
+    println!("Every device must be on this Wi-Fi network. If Windows asks, allow this");
+    println!("program on private networks. Leave this window open while you play.");
     Ok(Lan {
         bind: SocketAddr::new(IpAddr::from([0, 0, 0, 0]), port),
         cert,
