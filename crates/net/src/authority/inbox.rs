@@ -39,6 +39,10 @@ pub(crate) const COMMAND_TIME_STEP_MS: i32 = 200;
 
 pub const MAX_COMMAND_STALL_MS: i32 = 1000;
 
+/// How far ahead of the authority's clock a command may be stamped and still wait for
+/// its time; further ahead, it runs at the authority's time.
+pub const EARLY_COMMAND_GRACE_MS: i32 = 250;
+
 pub const MAX_COMMANDS_PER_PEER_PER_FRAME: usize = 32;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -217,6 +221,23 @@ impl ClientCommandInbox {
         }
         let stalled_ms = time_ms.saturating_sub(blocked.1);
         if stalled_ms > MAX_COMMAND_STALL_MS {
+            let head_time = queue
+                .iter()
+                .find(|(seq, _, _)| seq.is_some())
+                .map(|(_, cmd, _)| cmd.server_time);
+            diag::warn!(
+                Net,
+                "client {}: input stalled: head seq {} (expected {}), head server_time {:?} vs authority {time_ms}, {} queued",
+                id.0,
+                head.0,
+                self.last_acked_seq
+                    .get(&id)
+                    .copied()
+                    .unwrap_or(0)
+                    .wrapping_add(1),
+                head_time,
+                queue.len()
+            );
             return Some(InputBacklogFault::NoProgress { stalled_ms });
         }
         None
@@ -245,6 +266,17 @@ impl ClientCommandInbox {
     pub fn take_for_tick(&mut self, time_ms: i32) -> GatheredCommands {
         let mut out = GatheredCommands::default();
         for id in self.known_clients() {
+            // A command stamped far ahead of the authority's clock (a peer whose clock
+            // ran ahead while this host fell behind real time) runs now, at the
+            // authority's time, as Quake-family servers clamp it, rather than waiting
+            // until the stall check retires the peer.
+            if let Some(queue) = self.queued.get_mut(&id) {
+                for (_, cmd, _) in queue.iter_mut() {
+                    if cmd.server_time > time_ms.saturating_add(EARLY_COMMAND_GRACE_MS) {
+                        cmd.server_time = time_ms;
+                    }
+                }
+            }
             // A datagram burst can contain more than one frame of runnable work.
             // Consume the bounded frame budget before measuring remaining debt.
             // Count and blocked-head limits still apply before any simulation.

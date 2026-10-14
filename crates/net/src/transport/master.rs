@@ -87,6 +87,8 @@ const HOST_CONTROL_CAP: usize = 32;
 
 const BOOTSTRAP_PRIORITY: i32 = -32;
 const IO_DEADLINE: Duration = Duration::from_secs(8);
+/// How long a zombies launch waits for the co-op server's room list before playing solo.
+const AUTO_LIST_DEADLINE: Duration = Duration::from_secs(4);
 const LEAVE_DRAIN: Duration = Duration::from_millis(500);
 const DATAGRAM_SEND_BUFFER: usize = 1024 * 1024;
 const QUEUE_POLL: Duration = Duration::from_millis(5);
@@ -366,6 +368,47 @@ impl MasterLaunchIntent {
             }))),
             (Some(_), Some(_)) => {
                 Err("set only one of IW4L_MASTER_HOST_NAME or IW4L_MASTER_JOIN".into())
+            }
+            // Zombies co-op picks for itself (a BO1-only install has no lobby menu): join
+            // the open room playing this map, or host one for the next player to join.
+            (None, None)
+                if map.to_ascii_lowercase().contains("zombie_")
+                    && std::env::var("IW4L_MASTER_AUTO").as_deref() != Ok("0") =>
+            {
+                let mode = std::env::var("IW4L_GAMETYPE").unwrap_or_else(|_| "dm".into());
+                match find_open_room(&target, map, have, AUTO_LIST_DEADLINE)? {
+                    Some(advert) => {
+                        diag::info!(
+                            Net,
+                            "co-op: joining \"{}\" ({} of {} players)",
+                            advert.name,
+                            advert.players,
+                            advert.max_players
+                        );
+                        Ok(Self(MasterLaunchMode::Join(JoinConfig {
+                            password: String::new(),
+                            target,
+                            advert_id: advert.id,
+                            map: map.to_owned(),
+                            mode,
+                            have,
+                        })))
+                    }
+                    None => {
+                        diag::info!(Net, "co-op: no open game on the server; hosting one");
+                        Ok(Self(MasterLaunchMode::Host(HostConfig {
+                            password: String::new(),
+                            auto_start_map: true,
+                            target,
+                            name: "Zombies co-op".into(),
+                            map: map.to_owned(),
+                            mode,
+                            max_players: 4,
+                            requires,
+                            have,
+                        })))
+                    }
+                }
             }
             _ => Err("community master requires IW4L_MASTER_HOST_NAME or IW4L_MASTER_JOIN".into()),
         }
@@ -1030,6 +1073,96 @@ fn apply_master_menu_action(
     }
 }
 
+/// One `ListRooms` round trip: (generation, adverts, ping in ms).
+async fn list_rooms(
+    target: &MasterTarget,
+    cancel: &CancellationToken,
+) -> Result<(u64, Vec<master_protocol::Advert>, u64)> {
+    let (_endpoint, connection) = connect(target, cancel).await?;
+    let (mut send, mut recv) = io_timeout(cancel, connection.open_bi()).await?;
+    send.set_priority(0)?;
+    write_frame(
+        &mut send,
+        &ControlFrame::Hello(ControlHello {
+            protocol_version: master_protocol::PROTOCOL_VERSION,
+            game_protocol: crate::PROTOCOL_VERSION,
+            role: EndpointRole::Cli,
+            build: endpoint_build(),
+            player_name: String::new(),
+        }),
+    )
+    .await?;
+    write_frame(
+        &mut send,
+        &ControlFrame::Request(ControlRequest {
+            request_id: 1,
+            body: RequestBody::ListRooms,
+        }),
+    )
+    .await?;
+    loop {
+        match read_frame(&mut recv).await? {
+            ControlFrame::Response(ControlResponse {
+                request_id: 1,
+                body:
+                    ResponseBody::RoomList {
+                        generation,
+                        adverts,
+                    },
+            }) => {
+                return Ok((
+                    generation,
+                    adverts,
+                    connection.rtt().as_millis().max(1) as u64,
+                ));
+            }
+            ControlFrame::Response(ControlResponse {
+                body: ResponseBody::Error(error),
+                ..
+            }) => return Err(error.into()),
+            ControlFrame::RoomView(_)
+            | ControlFrame::Closed { .. }
+            | ControlFrame::PeerEvent(_)
+            | ControlFrame::Hello(_)
+            | ControlFrame::Relay(_) => {}
+            other => {
+                return Err(format!("unexpected browser frame {other:?}").into());
+            }
+        }
+    }
+}
+
+/// Co-op with nothing to choose (a phone has no lobby menu): the first open room on
+/// the relay playing `map` that this install can play, if any. Bounded by `deadline`
+/// so an unreachable relay only delays a solo start.
+fn find_open_room(
+    target: &MasterTarget,
+    map: &str,
+    have: ContentFlags,
+    deadline: Duration,
+) -> Result<Option<master_protocol::Advert>> {
+    let bare = |name: &str| {
+        let name = name.to_ascii_lowercase();
+        name.split_once(':')
+            .map_or(name.clone(), |(_, rest)| rest.to_owned())
+    };
+    let wanted = bare(map);
+    let cancel = CancellationToken::new();
+    let runtime = blocking_runtime()?;
+    let (_, adverts, _) = runtime.block_on(async {
+        tokio::time::timeout(deadline, list_rooms(target, &cancel))
+            .await
+            .map_err(|_| Error::from("co-op server did not answer"))?
+    })?;
+    Ok(adverts.into_iter().find(|advert| {
+        bare(&advert.map) == wanted
+            && !advert.locked
+            && !advert.password_protected
+            && advert.players < advert.max_players
+            && advert.requires.missing_from(have).is_empty()
+    }))
+}
+
 fn browser_worker(
     target: MasterTarget,
     state: Arc<Mutex<MasterBrowserSnapshot>>,
@@ -1049,62 +1182,7 @@ fn browser_worker(
                 return;
             }
             state.lock().expect("master browser state poisoned").loading = true;
-            let result: Result<(u64, Vec<master_protocol::Advert>, u64)> =
-                io_timeout(&cancel, async {
-                    let (_endpoint, connection) = connect(&target, &cancel).await?;
-                    let (mut send, mut recv) = io_timeout(&cancel, connection.open_bi()).await?;
-                    send.set_priority(0)?;
-                    write_frame(
-                        &mut send,
-                        &ControlFrame::Hello(ControlHello {
-                            protocol_version: master_protocol::PROTOCOL_VERSION,
-                            game_protocol: crate::PROTOCOL_VERSION,
-                            role: EndpointRole::Cli,
-                            build: endpoint_build(),
-                            player_name: String::new(),
-                        }),
-                    )
-                    .await?;
-                    write_frame(
-                        &mut send,
-                        &ControlFrame::Request(ControlRequest {
-                            request_id: 1,
-                            body: RequestBody::ListRooms,
-                        }),
-                    )
-                    .await?;
-                    loop {
-                        match read_frame(&mut recv).await? {
-                            ControlFrame::Response(ControlResponse {
-                                request_id: 1,
-                                body:
-                                    ResponseBody::RoomList {
-                                        generation,
-                                        adverts,
-                                    },
-                            }) => {
-                                return Result::Ok((
-                                    generation,
-                                    adverts,
-                                    connection.rtt().as_millis().max(1) as u64,
-                                ));
-                            }
-                            ControlFrame::Response(ControlResponse {
-                                body: ResponseBody::Error(error),
-                                ..
-                            }) => return Err(error.into()),
-                            ControlFrame::RoomView(_)
-                            | ControlFrame::Closed { .. }
-                            | ControlFrame::PeerEvent(_)
-                            | ControlFrame::Hello(_)
-                            | ControlFrame::Relay(_) => {}
-                            other => {
-                                return Err(format!("unexpected browser frame {other:?}").into());
-                            }
-                        }
-                    }
-                })
-                .await;
+            let result = io_timeout(&cancel, list_rooms(&target, &cancel)).await;
             let mut current = state.lock().expect("master browser state poisoned");
             current.loading = false;
             match result {

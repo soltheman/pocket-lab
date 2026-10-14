@@ -351,6 +351,12 @@ pub(crate) fn settle_deaths(world: &mut World) {
         }
         if callback == KILLED {
             let attacker = args.get(1).cloned().unwrap_or(Value::Undefined);
+            diag::info!(
+                Sim,
+                "player death: client {client} by {attacker:?} means {:?} weapon {:?}",
+                args.get(3),
+                args.get(4)
+            );
             raise(world, victim.clone(), "death", vec![attacker]);
         }
         if run_now(world, callback, victim, args, now).is_err() {

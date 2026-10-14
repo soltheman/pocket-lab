@@ -559,10 +559,13 @@ fn run_map(
 
     let master_intent = if role == Role::Replay {
         net::MasterLaunchIntent::disabled()
-    } else if have.0 & net::CONTENT_IW4 == 0 {
+    } else if have.0 & requires.0 != requires.0 {
+        // The map's own game must be installed; MW2 is not needed for a BO1 map (zombies
+        // run BO1's scripts on BO1's common).
         diag::warn!(
             Net,
-            "master launch disabled: IW4 common_mp.ff is not installed"
+            "master launch disabled: {} is not installed",
+            net::content_names(requires)
         );
         net::MasterLaunchIntent::disabled()
     } else {

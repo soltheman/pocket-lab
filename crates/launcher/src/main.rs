@@ -178,7 +178,17 @@ fn main() {
         args.push("menu".into());
     }
     #[cfg(target_os = "ios")]
-    diag::boot_crumb("3 after updater");
+    {
+        diag::boot_crumb("3 after updater");
+        match (updater::selected(), updater::selection_error()) {
+            (Some(community), _) => diag::boot_crumb(&format!(
+                "co-op server: {} at {}",
+                community.name, community.master.address
+            )),
+            (None, Some(error)) => diag::boot_crumb(&format!("co-op server file ignored: {error}")),
+            (None, None) => diag::boot_crumb("co-op server: none (no .iw4l-server file in Documents)"),
+        }
+    }
     bootstrap::bench::arm();
     prepare_process_root().unwrap_or_else(|e| {
         diag::exit_launch_error(&e);

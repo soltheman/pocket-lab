@@ -13,6 +13,7 @@ pub(crate) const ZOMBIES_HUD: (&str, &str) = (
     level notify("prematch_over");
     level thread hud_feed();
     level thread game_over();
+    level thread place_joiners();
     if (getdvar("iw4l_zm_watch") == "1")
         level thread watch_zombie();
     if (getdvar("iw4l_zm_watch") == "aim")
@@ -31,6 +32,8 @@ pub(crate) const ZOMBIES_HUD: (&str, &str) = (
         level thread face_juggernog();
     if (getdvar("iw4l_zm_watch") == "nuke")
         level thread kill_all_zombies();
+    if (getdvar("iw4l_zm_watch") == "volumes")
+        level thread log_player_volumes();
 }
 
 // Debug (IW4L_ZM_WATCH=1): every new zombie is put a few metres in front of
@@ -187,6 +190,28 @@ face_juggernog()
     }
 }
 
+// Debug (IW4L_ZM_WATCH=volumes): logs which playable-area volumes the first player touches.
+log_player_volumes()
+{
+    wait 10;
+    players = getplayers();
+    if (!players.size)
+        return;
+    p = players[0];
+    volumes = getentarray("player_volume", "script_noteworthy");
+    logprint("volumes: " + volumes.size + " player volumes; player at " + p.origin);
+    for (i = 0; i < volumes.size; i++)
+    {
+        name = "";
+        if (isdefined(volumes[i].targetname))
+            name = volumes[i].targetname;
+        model = "";
+        if (isdefined(volumes[i].model))
+            model = volumes[i].model;
+        logprint("  " + volumes[i].classname + " " + name + " " + model + " at " + volumes[i].origin + " touching " + p istouching(volumes[i]));
+    }
+}
+
 // Debug (IW4L_ZM_WATCH=nuke): every three seconds the first player kills every zombie.
 kill_all_zombies()
 {
@@ -231,6 +256,54 @@ aim_at_zombies()
         }
         p setplayerangles(vectortoangles(z.origin + (0, 0, 48) - (p.origin + (0, 0, 60))));
     }
+}
+
+// Co-op joiners: BO1 places every player on its own start point once, when all of
+// them have connected from the lobby. Here players join a match already running, and
+// they spawn where the first player started; BO1 kills two players standing within 18
+// units of each other, so a player who spawns on top of another moves to a free
+// start point (which is also where BO1 respawns them between rounds).
+place_joiners()
+{
+    for (;;)
+    {
+        players = getplayers();
+        for (i = 0; i < players.size; i++)
+        {
+            p = players[i];
+            if (p.sessionstate != "playing" || isdefined(p.iw4l_placed))
+                continue;
+            p.iw4l_placed = true;
+            if (!crowded(p.origin, p))
+                continue;
+            structs = common_scripts\utility::getstructarray("initial_spawn_points", "targetname");
+            for (s = 0; s < structs.size; s++)
+            {
+                if (crowded(structs[s].origin, p))
+                    continue;
+                p setorigin(structs[s].origin);
+                if (isdefined(structs[s].angles))
+                    p setplayerangles(structs[s].angles);
+                p.spectator_respawn = structs[s];
+                logprint("joiner " + p getentitynumber() + " placed at start point " + s + " " + structs[s].origin);
+                break;
+            }
+        }
+        wait 0.05;
+    }
+}
+
+crowded(origin, self_player)
+{
+    players = getplayers();
+    for (i = 0; i < players.size; i++)
+    {
+        if (players[i] == self_player || players[i].sessionstate != "playing")
+            continue;
+        if (distance2d(players[i].origin, origin) < 48 && abs(players[i].origin[2] - origin[2]) < 72)
+            return true;
+    }
+    return false;
 }
 
 // Game over: the HUD shows the rounds survived, then the map starts over (BO1 would

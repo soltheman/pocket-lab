@@ -15,6 +15,7 @@ pub type Result<T> = std::result::Result<T, String>;
 const MAX_BINARY: u64 = 512 * 1024 * 1024;
 const MAX_MANIFEST: u64 = 64 * 1024;
 static SELECTED: OnceLock<Community> = OnceLock::new();
+static SELECTION_ERROR: OnceLock<String> = OnceLock::new();
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -88,26 +89,27 @@ impl Manifest {
     }
 }
 
-pub fn startup() -> Result<Option<Vec<OsString>>> {
-    let mut args: Vec<OsString> = std::env::args_os().skip(1).collect();
-    if args.first().is_some_and(|a| a == "--iw4l-replace") {
-        if args.len() != 2 {
-            return Err("replacement helper requires one job path".into());
-        }
-        replace(Path::new(&args[1]))?;
-        return Ok(None);
+/// Why a community file was found but not used (iOS only, where that is not fatal).
+pub fn selection_error() -> Option<&'static str> {
+    SELECTION_ERROR.get().map(String::as_str)
+}
+
+/// Where `.iw4l-server` files are looked for: next to the executable, except on iOS,
+/// where the app bundle is signed and read-only and the Files app reaches Documents.
+fn descriptor_dir(root: &Path) -> PathBuf {
+    #[cfg(target_os = "ios")]
+    if let Some(home) = std::env::var_os("HOME") {
+        return PathBuf::from(home).join("Documents");
     }
-    let restarted = args.first().is_some_and(|a| a == "--iw4l-updated");
-    if restarted {
-        args.remove(0);
-    }
-    let exe = std::env::current_exe().map_err(|e| e.to_string())?;
-    let root = exe.parent().ok_or("executable has no directory")?;
+    root.to_path_buf()
+}
+
+fn find_community(dir: &Path) -> Result<Option<Community>> {
     let descriptor = if let Ok(path) = std::env::var("IW4L_COMMUNITY") {
-        Some(root.join(path))
+        Some(dir.join(path))
     } else {
         let mut descriptors = Vec::new();
-        for entry in fs::read_dir(root).map_err(|e| e.to_string())? {
+        for entry in fs::read_dir(dir).map_err(|e| e.to_string())? {
             let path = entry.map_err(|e| e.to_string())?.path();
             if path.extension().is_some_and(|ext| ext == "iw4l-server") {
                 descriptors.push(path);
@@ -125,7 +127,7 @@ pub fn startup() -> Result<Option<Vec<OsString>>> {
         }
     };
     let Some(path) = descriptor else {
-        return Ok(Some(args));
+        return Ok(None);
     };
     let bytes = read_bounded(
         File::open(&path).map_err(|e| format!("{}: {e}", path.display()))?,
@@ -145,7 +147,38 @@ pub fn startup() -> Result<Option<Vec<OsString>>> {
         .address
         .to_socket_addrs()
         .map_err(|e| format!("master address: {e}"))?;
-    if !cfg!(windows) {
+    Ok(Some(community))
+}
+
+pub fn startup() -> Result<Option<Vec<OsString>>> {
+    let mut args: Vec<OsString> = std::env::args_os().skip(1).collect();
+    if args.first().is_some_and(|a| a == "--iw4l-replace") {
+        if args.len() != 2 {
+            return Err("replacement helper requires one job path".into());
+        }
+        replace(Path::new(&args[1]))?;
+        return Ok(None);
+    }
+    let restarted = args.first().is_some_and(|a| a == "--iw4l-updated");
+    if restarted {
+        args.remove(0);
+    }
+    let exe = std::env::current_exe().map_err(|e| e.to_string())?;
+    let root = exe.parent().ok_or("executable has no directory")?;
+    let community = match find_community(&descriptor_dir(root)) {
+        Ok(Some(community)) => community,
+        Ok(None) => return Ok(Some(args)),
+        // On a phone a bad file dropped into Documents must not stop the game from
+        // starting: it plays offline and the launcher logs why.
+        Err(error) if cfg!(target_os = "ios") => {
+            let _ = SELECTION_ERROR.set(error);
+            return Ok(Some(args));
+        }
+        Err(error) => return Err(error),
+    };
+    // No update URL (a LAN descriptor for a relay on someone's PC or phone): nothing to
+    // update from, so the community is just selected.
+    if !cfg!(windows) || community.updates.url.trim().is_empty() {
         SELECTED
             .set(community)
             .map_err(|_| "community already selected")?;

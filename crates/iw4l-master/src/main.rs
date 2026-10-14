@@ -1,5 +1,6 @@
 #![forbid(unsafe_code)]
 
+mod lan;
 mod updates;
 
 use std::collections::HashMap;
@@ -94,6 +95,12 @@ enum Command {
     Status(ClientTarget),
     List(ClientTarget),
     PrintUnit(UnitSpec),
+    /// A relay for one Wi-Fi network that sets itself up (see `lan.rs`).
+    Lan {
+        dir: PathBuf,
+        port: u16,
+        address: Option<IpAddr>,
+    },
 }
 
 /// Everything `serve` will be started with. Kept next to the `serve` parser so
@@ -408,14 +415,29 @@ async fn main() -> Result<()> {
             .await
             .map_err(|_| "master list deadline (connect + RPC)")?,
         Command::PrintUnit(spec) => print_unit(&spec),
+        Command::Lan { dir, port, address } => {
+            let result = match lan::prepare(&dir, port, address) {
+                Ok(lan) => serve(lan.bind, &lan.cert, &lan.key).await,
+                Err(error) => Err(error),
+            };
+            // Started by double-clicking: keep the window open long enough to read why.
+            if let Err(error) = &result {
+                eprintln!("co-op server stopped: {error}");
+                eprintln!("Press Enter to close.");
+                let _ = std::io::stdin().read_line(&mut String::new());
+            }
+            result
+        }
     }
 }
 
 fn parse_args() -> Result<Command> {
     let mut args = std::env::args().skip(1);
-    let command = args
-        .next()
-        .ok_or("usage: iw4l-master serve|status|list|print-unit ...")?;
+    // No command (double-clicked): the Wi-Fi co-op relay.
+    let command = args.next().unwrap_or_else(|| "lan".to_owned());
+    let mut dir = None;
+    let mut port = lan::DEFAULT_PORT;
+    let mut address = None;
     let mut updates = PathBuf::from("updates");
     let mut bind = None;
     let mut cert = None;
@@ -443,6 +465,9 @@ fn parse_args() -> Result<Command> {
             "--exec" => exec = Some(PathBuf::from(value)),
             "--user" => user = Some(value),
             "--group" => group = Some(value),
+            "--dir" => dir = Some(PathBuf::from(value)),
+            "--port" => port = value.parse()?,
+            "--address" => address = Some(value.parse()?),
             _ => return Err(format!("unknown option {flag}").into()),
         }
     }
@@ -474,7 +499,21 @@ fn parse_args() -> Result<Command> {
             user: user.unwrap_or_else(|| "iw4l".to_string()),
             group: group.unwrap_or_else(|| "iw4l".to_string()),
         })),
-        _ => Err(format!("unknown command {command}").into()),
+        "lan" => Ok(Command::Lan {
+            dir: match dir {
+                Some(dir) => dir,
+                None => std::env::current_exe()?
+                    .parent()
+                    .ok_or("executable has no directory")?
+                    .join("co-op"),
+            },
+            port,
+            address,
+        }),
+        _ => Err(format!(
+            "unknown command {command} (usage: iw4l-master [lan|serve|status|list|print-unit] ...)"
+        )
+        .into()),
     }
 }
 
