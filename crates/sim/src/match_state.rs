@@ -120,6 +120,11 @@ pub struct ClientMatchState {
     /// order, when the player spawns.
     pub(crate) prespawn_weapons: Vec<(u32, bool)>,
     pub(crate) prespawn_spawn_weapon: Option<u32>,
+    /// Origin and view angles set before the player spawned. BO1 spawns at `self.origin`,
+    /// which reads zero for a player without a state here, so a spawn at the zero
+    /// vector takes these instead.
+    pub(crate) prespawn_origin: Option<[f32; 3]>,
+    pub(crate) prespawn_angles: Option<[f32; 3]>,
 
     pub(crate) look_at_killer_yaw: i32,
 

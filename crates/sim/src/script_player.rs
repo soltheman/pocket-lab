@@ -30,6 +30,17 @@ pub(crate) fn spawn(
         }
         _ => (origin, angles),
     };
+    let meta = world.client_meta_mut(id);
+    let placed_origin = meta.prespawn_origin.take();
+    let placed_angles = meta.prespawn_angles.take();
+    let (origin, angles) = if origin == [0.0; 3] {
+        (
+            placed_origin.unwrap_or(origin),
+            placed_angles.filter(|_| angles == [0.0; 3]).unwrap_or(angles),
+        )
+    } else {
+        (origin, angles)
+    };
     world.unlink_player_area(id);
     world.client_meta_mut(id).shield = None;
     let mut ps = spawn_player_state(origin, angles);

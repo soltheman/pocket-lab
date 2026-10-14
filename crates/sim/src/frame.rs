@@ -391,6 +391,9 @@ impl FrameWorld<'_> {
     pub fn set_origin(&mut self, id: ClientId, origin: [f32; 3]) -> bool {
         let old_origin = {
             let Some(ps) = self.player_mut(id) else {
+                // Not spawned yet: BO1's scripts place a connected player, then spawn
+                // them at that origin (see `script_player::spawn`).
+                self.client_meta_mut(id).prespawn_origin = Some(origin);
                 return false;
             };
             let old_origin = ps.origin;
@@ -419,6 +422,7 @@ impl FrameWorld<'_> {
 
     pub fn set_viewangles(&mut self, id: ClientId, viewangles: [f32; 3]) -> bool {
         let Some(ps) = self.player_mut(id) else {
+            self.client_meta_mut(id).prespawn_angles = Some(viewangles);
             return false;
         };
         ps.viewangles = viewangles;
