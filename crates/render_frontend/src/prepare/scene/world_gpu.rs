@@ -366,11 +366,27 @@ pub(crate) fn consume_gpu_load_progress(
         demand.overlay_gpu_wait,
         world_gen,
     );
+    let all_warm = progress.warmup.ready == progress.warmup.total && progress.waiting_n == 0;
+    let view_ready = progress.working_hits > 0 && progress.working_not_ready == 0;
     ready.pipelines = job_phase_live
         && progress.warmup.initialized
         && progress.generation == world_gen
-        && progress.warmup.ready == progress.warmup.total
-        && progress.waiting_n == 0
-        && progress.working_hits > 0
-        && progress.working_not_ready == 0;
+        && view_ready
+        && (all_warm || progressive_pipelines());
+}
+
+/// Admit the world once every pipeline the first view draws is ready, instead of every
+/// pipeline the map can use; the rest keep compiling behind the match and surfaces using
+/// them appear when theirs is ready. A phone compiles Metal pipelines slowly (an iPhone
+/// 16e did about 8 a second: Kino's 2052 took four minutes before the first frame), so
+/// iOS does this by default; `IW4L_PROGRESSIVE_PIPELINES=1|0` chooses anywhere.
+fn progressive_pipelines() -> bool {
+    static PROGRESSIVE: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
+    *PROGRESSIVE.get_or_init(|| {
+        match std::env::var("IW4L_PROGRESSIVE_PIPELINES").ok().as_deref().map(str::trim) {
+            Some("1") => true,
+            Some("0") => false,
+            _ => cfg!(target_os = "ios"),
+        }
+    })
 }
