@@ -27,6 +27,9 @@ jobs:
             ~/.cargo/registry
             target
           key: ios-ipa-${{ hashFiles('Cargo.lock') }}
+          # A version bump changes Cargo.lock; start from the last build's target
+          # instead of compiling everything again (about 8 min instead of 17).
+          restore-keys: ios-ipa-
       - name: Build iw4l for iOS
         env:
           IW4L_BUILD_NUMBER: "1"
