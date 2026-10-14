@@ -112,6 +112,15 @@ pub(crate) fn spawn(
         },
     );
     world.link_player_standing_area(id);
+    let meta = world.client_meta_mut(id);
+    let weapons = std::mem::take(&mut meta.prespawn_weapons);
+    let spawn_weapon = meta.prespawn_spawn_weapon.take();
+    for (weapon, akimbo) in weapons {
+        let _ = give_weapon(world, id, weapon, akimbo);
+    }
+    if let Some(weapon) = spawn_weapon {
+        let _ = set_spawn_weapon(world, id, weapon);
+    }
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -463,7 +472,10 @@ pub(crate) fn give_weapon(
     weapon: u32,
     akimbo: bool,
 ) -> Result<(), String> {
-    living(world, id)?;
+    if world.player(id).is_none() {
+        world.client_meta_mut(id).prespawn_weapons.push((weapon, akimbo));
+        return Ok(());
+    }
     if world.weapon_is_melee_only(weapon) {
         return Ok(());
     }
@@ -544,7 +556,10 @@ pub(crate) fn set_spawn_weapon(
     id: ClientId,
     weapon: u32,
 ) -> Result<(), String> {
-    living(world, id)?;
+    if world.player(id).is_none() {
+        world.client_meta_mut(id).prespawn_spawn_weapon = Some(weapon);
+        return Ok(());
+    }
     let facts = world
         .combat_facts_for(weapon)
         .unwrap_or_else(weapon_iw4::WeaponCombatFacts::none);

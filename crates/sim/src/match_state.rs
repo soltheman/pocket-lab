@@ -115,6 +115,12 @@ pub struct ClientMatchState {
 
     pub(crate) forced_spawn: Option<crate::SpawnPick>,
 
+    /// Weapons given (with akimbo) and the spawn weapon set before the player spawned:
+    /// BO1's singleplayer scripts arm a connected player before `spawn`. Applied, in
+    /// order, when the player spawns.
+    pub(crate) prespawn_weapons: Vec<(u32, bool)>,
+    pub(crate) prespawn_spawn_weapon: Option<u32>,
+
     pub(crate) look_at_killer_yaw: i32,
 
     pub(crate) name: [u8; 16],

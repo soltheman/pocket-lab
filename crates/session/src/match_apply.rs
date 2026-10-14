@@ -383,7 +383,18 @@ pub fn apply_prepared_match(
                 .map(|clip| (*clip).clone())
         }));
         content.set_weapon_script_names(weapons.0.script_names_table());
-        content.set_weapon_script_aliases(objective_weapons);
+        let mut script_aliases = objective_weapons;
+        // BO1's singleplayer and zombies scripts name their weapons as the zones do
+        // (m1911_zm, knife_zm), not in the multiplayer `_mp` form script names take.
+        for id in 1..weapons.0.len() as u32 {
+            if weapons.0.identity_namespace_of(id) == Some(asset_core::AssetNamespace::T5) {
+                let bare = weapons.0.name_of(id);
+                if !bare.is_empty() && !bare.ends_with("_mp") {
+                    script_aliases.push((bare.to_owned(), id));
+                }
+            }
+        }
+        content.set_weapon_script_aliases(script_aliases);
         content.set_vehicle_turrets(weapons.0.vehicle_turrets());
         content.set_vehicle_accel(
             weapons
