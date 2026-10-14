@@ -1212,9 +1212,15 @@ fn preflight_match_install(
         // BO1 sets this for its zombies maps; without it every spawned actor waits for a
         // name and rank that zombies never get.
         script_dvars.push(("zombiemode".into(), "1".into()));
-        // Debug: 1 puts new zombies in front of the player, aim also aims at them.
-        if let Ok(watch) = std::env::var("IW4L_ZM_WATCH") {
-            script_dvars.push(("iw4l_zm_watch".into(), watch));
+        // Debug modes of the zombies HUD script (iw4l_zombies/hud): IW4L_ZM_WATCH picks one
+        // (1, aim, die, buy, door, power, box, perk, nuke), IW4L_ZM_LOOK refines it.
+        for (env, dvar) in [
+            ("IW4L_ZM_WATCH", "iw4l_zm_watch"),
+            ("IW4L_ZM_LOOK", "iw4l_zm_look"),
+        ] {
+            if let Ok(value) = std::env::var(env) {
+                script_dvars.push((dvar.into(), value));
+            }
         }
     }
     script_dvars.push(("g_gametype".into(), gametype.to_owned()));

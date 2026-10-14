@@ -106,6 +106,25 @@ face_door()
     away = vectornormalize((p.origin[0] - door.origin[0], p.origin[1] - door.origin[1], 0));
     p setorigin((door.origin[0], door.origin[1], p.origin[2]) + (away[0] * 64, away[1] * 64, 0));
     p setplayerangles(vectortoangles(door.origin - (p.origin + (0, 0, 60))));
+    for (pass = 0; pass < 4; pass++)
+    {
+        pieces = getentarray(door.target, "targetname");
+        // IW4L_ZM_LOOK=leaves: once bought, turn to the door to see it open.
+        if (pass == 2 && getdvar("iw4l_zm_look") == "leaves" && pieces.size)
+            p setplayerangles(vectortoangles(pieces[0].origin - (p.origin + (0, 0, 60))));
+        logprint("door debug pass " + pass + ": " + pieces.size + " pieces for " + door.target);
+        for (i = 0; i < pieces.size; i++)
+        {
+            model = "";
+            if (isdefined(pieces[i].model))
+                model = pieces[i].model;
+            style = "";
+            if (isdefined(pieces[i].script_string))
+                style = pieces[i].script_string;
+            logprint("  " + pieces[i].classname + " " + model + " " + style + " at " + pieces[i].origin + " angles " + pieces[i].angles);
+        }
+        wait 5;
+    }
 }
 
 // Debug (IW4L_ZM_WATCH=power): the first player stands at the power switch, facing it.
