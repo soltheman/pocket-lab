@@ -29,6 +29,8 @@ pub(crate) const ZOMBIES_HUD: (&str, &str) = (
         level thread face_box();
     if (getdvar("iw4l_zm_watch") == "perk")
         level thread face_juggernog();
+    if (getdvar("iw4l_zm_watch") == "nuke")
+        level thread kill_all_zombies();
 }
 
 // Debug (IW4L_ZM_WATCH=1): every new zombie is put a few metres in front of
@@ -163,6 +165,21 @@ face_juggernog()
         p setorigin((target[0], target[1], target[2] - 40) + (away[0] * 48, away[1] * 48, 0));
         p setplayerangles(vectortoangles(target - (p.origin + (0, 0, 60))));
         return;
+    }
+}
+
+// Debug (IW4L_ZM_WATCH=nuke): every three seconds the first player kills every zombie.
+kill_all_zombies()
+{
+    for (;;)
+    {
+        wait 3;
+        players = getplayers();
+        if (!players.size)
+            continue;
+        zombies = getaiarray("axis");
+        for (i = 0; i < zombies.size; i++)
+            zombies[i] dodamage(zombies[i].health + 100, zombies[i].origin, players[0]);
     }
 }
 

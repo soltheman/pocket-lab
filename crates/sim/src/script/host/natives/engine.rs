@@ -592,7 +592,10 @@ pub(crate) fn play_sound_at(
     origin: [f32; 3],
     alias: &str,
 ) -> Result<(), String> {
-    if crate::frame::FrameWorld::from_world(world).script_sound_is_looping(alias)? {
+    if crate::frame::FrameWorld::from_world(world)
+        .script_sound_is_looping(alias)
+        .map_err(|error| format!("{error}: {alias}"))?
+    {
         return Err("cannot play a looping alias as a one-shot sound".into());
     }
     let index = crate::frame::FrameWorld::from_world(world).sound_alias_index(alias);

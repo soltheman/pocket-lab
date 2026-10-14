@@ -897,7 +897,7 @@ impl SimState {
             .data
             .script_sound_aliases
             .as_ref()
-            .map(|names| names.contains_key(&name.to_ascii_lowercase()))
+            .map(|names| names.contains_key(&self.script_sound_alias(name).to_ascii_lowercase()))
     }
 
     pub fn script_sound_is_looping(&self, name: &str) -> Result<bool, &'static str> {
@@ -908,13 +908,32 @@ impl SimState {
             .as_ref()
             .ok_or("sound alias catalog is not installed")?;
         aliases
-            .get(&name.to_ascii_lowercase())
+            .get(&self.script_sound_alias(name).to_ascii_lowercase())
             .ok_or("sound alias not found")?
             .ok_or("sound alias looping flags are unavailable")
     }
 
+    /// A script's bare alias name as the sound bank knows it: MW2's sound when there is one,
+    /// else another game's (`t5:name`: BO1 zombies' own sounds, which clients would
+    /// otherwise look for among MW2's).
+    pub fn script_sound_alias(&self, name: &str) -> String {
+        let lower = name.to_ascii_lowercase();
+        let Some(aliases) = self.content.data.script_sound_aliases.as_ref() else {
+            return name.to_owned();
+        };
+        if lower.contains(':') || aliases.contains_key(&lower) {
+            return name.to_owned();
+        }
+        ["t5", "iw5", "t6"]
+            .iter()
+            .map(|namespace| format!("{namespace}:{lower}"))
+            .find(|qualified| aliases.contains_key(qualified))
+            .unwrap_or_else(|| name.to_owned())
+    }
+
     pub fn sound_alias_index(&mut self, name: &str) -> u8 {
-        self.sound_alias_cs.index(name)
+        let name = self.script_sound_alias(name);
+        self.sound_alias_cs.index(&name)
     }
 
     pub fn effect_name_index(&mut self, name: &str) -> u8 {
