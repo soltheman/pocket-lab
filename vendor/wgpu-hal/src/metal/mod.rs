@@ -206,7 +206,12 @@ pub mod pacing {
                 .and_then(|error| unsafe { objc2::msg_send![&**error, localizedDescription] }),
         );
         let failed = GPU_ERRORS.load(Ordering::Relaxed);
-        if failed <= 12 || failed % 1000 == 0 {
+        let left = FAILED_SAMPLE_BUDGET.load(Ordering::Relaxed);
+        let budgeted = left > 0
+            && FAILED_SAMPLE_BUDGET
+                .compare_exchange(left, left - 1, Ordering::Relaxed, Ordering::Relaxed)
+                .is_ok();
+        if budgeted || failed % 1000 == 0 {
             sample(
                 &FAILED_SAMPLES,
                 format!("#{failed} ({in_flight} buffers queued) {label}"),
@@ -216,6 +221,24 @@ pub mod pacing {
             *last = Some(format!("{label}: {description}"));
         }
     }
+
+    /// Submission changes the app can switch at run time to see which one stops
+    /// command buffers failing (bits of [`MODE`]):
+    /// - [`SKIP_EMPTY`]: a command buffer no encoder was opened on (wgpu-core's
+    ///   barrier-only "Pre Pass"/"Transit" buffers, which hold nothing on Metal) is
+    ///   not committed, unless it is the submission's last (it carries the fence).
+    /// - [`ONE_BY_ONE`]: wait until each committed buffer is scheduled before the
+    ///   next is committed, so Metal can't hand several to the kernel as one.
+    /// - [`ONE_FRAME`]: wait for each present buffer to complete, so only one
+    ///   frame is on the GPU at a time.
+    pub static MODE: AtomicU32 = AtomicU32::new(0);
+    pub const SKIP_EMPTY: u32 = 1;
+    pub const ONE_BY_ONE: u32 = 2;
+    pub const ONE_FRAME: u32 = 4;
+    /// Empty command buffers left uncommitted under [`SKIP_EMPTY`].
+    pub static SKIPPED: AtomicU32 = AtomicU32::new(0);
+    /// How many more failed command buffers to describe in the log.
+    pub static FAILED_SAMPLE_BUDGET: AtomicU32 = AtomicU32::new(12);
 
     /// Command buffers committed and not yet completed, and the most at once.
     pub static IN_FLIGHT: AtomicU32 = AtomicU32::new(0);
@@ -266,6 +289,8 @@ pub mod pacing {
     /// dispatches and resources made resident through argument buffers.
     #[derive(Default)]
     pub(super) struct Contents {
+        /// An encoder (render, compute, blit, acceleration structure) was opened.
+        pub(super) encoded: bool,
         passes: alloc::vec::Vec<String>,
         pass_count: u32,
         draws: u32,
@@ -860,7 +885,17 @@ impl crate::Queue for Queue {
                 }
             };
 
-            for cmd_buffer in command_buffers {
+            let mode = pacing::MODE.load(atomic::Ordering::Relaxed);
+            for (i, cmd_buffer) in command_buffers.iter().enumerate() {
+                // IW4 Pocket: see `pacing::SKIP_EMPTY`. An uncommitted buffer gives
+                // back its slot when it is dropped.
+                if mode & pacing::SKIP_EMPTY != 0
+                    && cmd_buffer.empty
+                    && i + 1 < command_buffers.len()
+                {
+                    pacing::SKIPPED.fetch_add(1, atomic::Ordering::Relaxed);
+                    continue;
+                }
                 // IW4 Pocket: count command buffers Metal fails (with the timing hooks on).
                 // A failed frame's drawable is still presented by the present command
                 // buffer, showing whatever it last held.
@@ -878,6 +913,9 @@ impl crate::Queue for Queue {
                     pacing::note_committed();
                 }
                 cmd_buffer.raw.commit();
+                if mode & pacing::ONE_BY_ONE != 0 {
+                    cmd_buffer.raw.waitUntilScheduled();
+                }
                 // One command buffer per `end_encoding` call moves from the
                 // "created but not yet submitted" bucket into the submitted
                 // set, so update the counter.
@@ -950,6 +988,9 @@ impl crate::Queue for Queue {
             }
 
             command_buffer.commit();
+            if pacing::MODE.load(atomic::Ordering::Relaxed) & pacing::ONE_FRAME != 0 {
+                command_buffer.waitUntilCompleted();
+            }
 
             if let Some((hook, id, started)) = submitted {
                 hook(id, started.elapsed().as_nanos() as u64);
@@ -1474,6 +1515,8 @@ unsafe impl Sync for CommandEncoder {}
 pub struct CommandBuffer {
     raw: Retained<ProtocolObject<dyn MTLCommandBuffer>>,
     queue_shared: Arc<QueueShared>,
+    /// IW4 Pocket: no encoder was ever opened on it (see `pacing::SKIP_EMPTY`).
+    empty: bool,
 }
 
 impl crate::DynCommandBuffer for CommandBuffer {}

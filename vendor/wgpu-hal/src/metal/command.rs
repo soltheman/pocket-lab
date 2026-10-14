@@ -155,6 +155,7 @@ impl super::CommandEncoder {
     }
 
     fn enter_blit(&mut self) -> Retained<ProtocolObject<dyn MTLBlitCommandEncoder>> {
+        self.contents.encoded = true;
         if self.state.blit.is_none() {
             self.leave_acceleration_structure_builder();
             debug_assert!(self.state.render.is_none() && self.state.compute.is_none());
@@ -259,6 +260,7 @@ impl super::CommandEncoder {
     fn enter_acceleration_structure_builder(
         &mut self,
     ) -> Retained<ProtocolObject<dyn MTLAccelerationStructureCommandEncoder>> {
+        self.contents.encoded = true;
         if self.state.acceleration_structure_builder.is_none() {
             self.leave_blit();
             debug_assert!(
@@ -296,6 +298,7 @@ impl super::CommandEncoder {
     }
 
     fn begin_pass(&mut self) {
+        self.contents.encoded = true;
         self.state.reset();
         self.leave_blit();
         self.leave_acceleration_structure_builder();
@@ -530,6 +533,7 @@ impl crate::CommandEncoder for super::CommandEncoder {
         debug_assert!(self.state.pending_timer_queries.is_empty());
 
         let raw = self.raw_cmd_buf.take().unwrap();
+        let empty = !self.contents.encoded;
         // IW4 Pocket: name what the buffer holds, so a failed one can be told apart.
         if super::pacing::HOOKS.get().is_some() {
             let label = raw
@@ -541,6 +545,7 @@ impl crate::CommandEncoder for super::CommandEncoder {
         Ok(super::CommandBuffer {
             raw,
             queue_shared: Arc::clone(&self.queue_shared),
+            empty,
         })
     }
 

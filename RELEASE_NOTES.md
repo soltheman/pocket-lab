@@ -1,6 +1,9 @@
-# Pocket Lab 0.3.11
+# Pocket Lab 0.3.12
 
 Smoother on the phone, every touch button does its job, and co-op over Wi-Fi.
+
+**New in 0.3.12**
+- A self-test for the shaking. 0.3.11's log shows about 11 of the roughly 41 batches of GPU work the game sends each frame failing with "Insufficient Memory", even batches with nothing in them. So the problem is in how the work is handed to the GPU, not in what is drawn. Starting 8 seconds into a match, the game tries five changes to that hand-off for 10 seconds each (no pacing; not sending empty batches; sending each batch on its own; one frame on the GPU at a time; all of them together), logs how many batches fail under each, then keeps the best one. The picture may stutter or slow down during that minute.
 
 **New in 0.3.11**
 - Still no fix for the shaking. 0.3.10's log ruled out graphics memory: the graphics chip held 102 MB of its 5.4 GB limit when the "Insufficient Memory" failures began. So one batch of GPU work is going over some per-batch limit. The log now describes each failed batch (its drawing passes and screen size, number of draws and triangles, texture uploads, bound resources, how many batches were queued) next to batches that worked.

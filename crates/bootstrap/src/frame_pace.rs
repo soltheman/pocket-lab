@@ -43,7 +43,13 @@ mod ios {
                 presented: stats::on_presented,
             });
             stats::register(app, pace);
-            app.add_systems(Last, log_gpu_errors);
+            let paced_us = pacing::MIN_PRESENT_US.load(Ordering::Relaxed);
+            app.add_systems(Last, log_gpu_errors).add_systems(
+                Last,
+                move |trial: Local<GpuTrial>, screen: Option<Res<frame::AppScreen>>| {
+                    gpu_trial(trial, screen, paced_us)
+                },
+            );
         }
         app.add_systems(Last, log_gpu_memory);
         if pace.snap_active() {
@@ -128,6 +134,112 @@ mod ios {
         }
         diag::info!(World, "gpu memory: {}", gpu_memory_line());
         *logged = (held, Some(Instant::now()));
+    }
+
+    /// The submission changes tried in a match, each for [`TRIAL_SECS`]: their name,
+    /// `pacing::MODE` bits, and whether presents stay paced.
+    const TRIALS: [(&str, u32, bool); 6] = [
+        ("as before", 0, true),
+        ("present pacing off", 0, false),
+        ("empty batches not sent", pacing::SKIP_EMPTY, true),
+        ("each batch sent alone", pacing::ONE_BY_ONE, true),
+        ("one frame on the GPU at a time", pacing::ONE_FRAME, true),
+        (
+            "all of the above",
+            pacing::SKIP_EMPTY | pacing::ONE_BY_ONE | pacing::ONE_FRAME,
+            false,
+        ),
+    ];
+    const TRIAL_SECS: u64 = 10;
+    /// Seconds in the match before the first trial, so loading is over.
+    const TRIAL_SETTLE_SECS: u64 = 8;
+
+    #[derive(Default)]
+    struct GpuTrial {
+        in_match: Option<Instant>,
+        /// The trial running, when it started, and the counters then.
+        running: Option<(usize, Instant, u32, u32, u32)>,
+        /// (trial, failed, completed) for each finished trial.
+        results: Vec<(usize, u32, u32)>,
+        done: bool,
+    }
+
+    fn apply_trial(index: usize, paced_us: u32) {
+        let (_, mode, paced) = TRIALS[index];
+        pacing::MODE.store(mode, Ordering::Relaxed);
+        pacing::MIN_PRESENT_US.store(if paced { paced_us } else { 0 }, Ordering::Relaxed);
+    }
+
+    /// Once in a match, runs each of [`TRIALS`] for a while and logs how many command
+    /// buffers failed under it; then keeps the one with the fewest failures.
+    fn gpu_trial(
+        mut trial: Local<GpuTrial>,
+        screen: Option<Res<frame::AppScreen>>,
+        paced_us: u32,
+    ) {
+        if trial.done {
+            return;
+        }
+        let in_match = matches!(
+            screen.as_deref(),
+            Some(frame::AppScreen::ClassSelect | frame::AppScreen::InGame)
+        );
+        if !in_match {
+            return;
+        }
+        let now = Instant::now();
+        let entered = *trial.in_match.get_or_insert(now);
+        let counters = || {
+            (
+                pacing::GPU_ERRORS.load(Ordering::Relaxed),
+                pacing::GPU_OK.load(Ordering::Relaxed),
+                pacing::SKIPPED.load(Ordering::Relaxed),
+            )
+        };
+        let Some((index, started, failed0, ok0, skipped0)) = trial.running else {
+            if now.duration_since(entered).as_secs() >= TRIAL_SETTLE_SECS {
+                let (failed, ok, skipped) = counters();
+                apply_trial(0, paced_us);
+                pacing::FAILED_SAMPLE_BUDGET.store(4, Ordering::Relaxed);
+                trial.running = Some((0, now, failed, ok, skipped));
+                diag::warn!(World, "gpu test: trying {}", TRIALS[0].0);
+            }
+            return;
+        };
+        if now.duration_since(started).as_secs() < TRIAL_SECS {
+            return;
+        }
+        let (failed, ok, skipped) = counters();
+        let (failed, ok, skipped) = (failed - failed0, ok - ok0, skipped - skipped0);
+        diag::warn!(
+            World,
+            "gpu test: {}: {failed} batch(es) failed, {ok} completed, {skipped} empty not sent ({}% failed)",
+            TRIALS[index].0,
+            if failed + ok == 0 { 0 } else { 100 * failed / (failed + ok) }
+        );
+        trial.results.push((index, failed, ok));
+        let next = index + 1;
+        if next < TRIALS.len() {
+            apply_trial(next, paced_us);
+            pacing::FAILED_SAMPLE_BUDGET.store(4, Ordering::Relaxed);
+            let (failed, ok, skipped) = counters();
+            trial.running = Some((next, Instant::now(), failed, ok, skipped));
+            diag::warn!(World, "gpu test: trying {}", TRIALS[next].0);
+            return;
+        }
+        // Fewest failed per completed; ties go to the earlier (cheaper) one.
+        let rate = |&(_, failed, ok): &(usize, u32, u32)| {
+            u64::from(failed) * 1_000_000 / u64::from((failed + ok).max(1))
+        };
+        let best = trial
+            .results
+            .iter()
+            .min_by_key(|result| rate(result))
+            .map_or(0, |&(index, ..)| index);
+        apply_trial(best, paced_us);
+        trial.running = None;
+        trial.done = true;
+        diag::warn!(World, "gpu test: done; keeping {}", TRIALS[best].0);
     }
 
     #[derive(Resource)]
