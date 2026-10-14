@@ -1,6 +1,6 @@
 # Pocket Lab 0.1.1
 
-Fixes the screen not fitting the phone (the app asked iOS for a 1280x720 PC window) and names the map on the loading screen. If the Black Ops folder is missing the app still closes, but `iw4l-boot.log` now says where the folder goes. It opens straight into a walkable map from your own Black Ops files; there are no enemies, weapons or HUD yet.
+Fixes the screen not fitting the phone (the app asked iOS for a 1280x720 PC window), compiles graphics three at a time instead of one (the first load on an iPhone 16e was over three minutes), and names the map on the loading screen. If the Black Ops folder is missing the app still closes, but `iw4l-boot.log` now says where the folder goes. It opens straight into a walkable map from your own Black Ops files; there are no enemies, weapons or HUD yet.
 
 **Setup**
 1. Install `Pocket Lab.ipa` with SideStore and open the app once (it makes its folders, then stops at a "games not found" message or a black screen).

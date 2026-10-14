@@ -64,10 +64,12 @@ impl Tier {
         if !ios { return u64::MAX; }
         match self { Tier::Low => 0, Tier::Mid => 64, Tier::High => 256 }
     }
-    /// Shader compile workers (0 = whole pool).
+    /// Shader compile workers (0 = whole pool). Pocket Lab: a 3.3 GB iPhone 16e compiling
+    /// Kino one pipeline at a time was still at 762 of 2052 after 75 s with 1.4 GB free,
+    /// and Metal compiles in its own process, so even Low takes three.
     fn shader_workers_default(self, ios: bool) -> u64 {
         if !ios { return 0; }
-        match self { Tier::Low => 1, Tier::Mid | Tier::High => 2 }
+        match self { Tier::Low => 3, Tier::Mid | Tier::High => 4 }
     }
     /// Keep the walked match for an instant same-map reload. It pins every decoded
     /// image, so on iOS it is off for every tier: the only device run on a 6 GB phone
@@ -226,13 +228,13 @@ mod tests {
     fn platform_defaults_and_invalid_values() {
         let ios = MemorySettings::parse(true, Tier::Low, None, None, None, None, None);
         assert_eq!(ios.fpv_retain_bytes, 0);
-        assert_eq!(ios.effective_shader_workers(4), 1);
+        assert_eq!(ios.effective_shader_workers(4), 3);
         assert!(ios.move_images);
         assert!(!ios.resident_map);
         assert!(ios.ios_bc);
         let invalid = MemorySettings::parse(true, Tier::Low, Some("-1"), Some("0"), Some("bad"), Some("bad"), Some("bad"));
         assert_eq!(invalid.fpv_retain_bytes, 0);
-        assert_eq!(invalid.shader_workers, 1);
+        assert_eq!(invalid.shader_workers, 3);
         assert!(!invalid.resident_map);
         assert!(invalid.ios_bc);
         let desktop = MemorySettings::parse(false, Tier::High, None, None, None, None, None);
@@ -265,11 +267,11 @@ mod tests {
     #[test]
     fn tiers_set_defaults_and_env_still_wins() {
         let low = MemorySettings::parse(true, Tier::Low, None, None, None, None, None);
-        assert_eq!((low.fpv_retain_bytes, low.effective_shader_workers(4), low.resident_map), (0, 1, false));
+        assert_eq!((low.fpv_retain_bytes, low.effective_shader_workers(4), low.resident_map), (0, 3, false));
         let mid = MemorySettings::parse(true, Tier::Mid, None, None, None, None, None);
-        assert_eq!((mid.fpv_retain_bytes, mid.effective_shader_workers(4), mid.resident_map), (64 << 20, 2, false));
+        assert_eq!((mid.fpv_retain_bytes, mid.effective_shader_workers(4), mid.resident_map), (64 << 20, 4, false));
         let high = MemorySettings::parse(true, Tier::High, None, None, None, None, None);
-        assert_eq!((high.fpv_retain_bytes, high.effective_shader_workers(4), high.resident_map), (256 << 20, 2, false));
+        assert_eq!((high.fpv_retain_bytes, high.effective_shader_workers(4), high.resident_map), (256 << 20, 4, false));
         let forced = MemorySettings::parse(true, Tier::Low, Some("128"), Some("3"), None, Some("1"), None);
         assert_eq!((forced.fpv_retain_bytes, forced.effective_shader_workers(4), forced.resident_map), (128 << 20, 3, true));
     }
