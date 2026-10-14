@@ -28,6 +28,28 @@ use crate::plugins::{add_runtime_plugins, add_runtime_plugins_with_role};
 /// Where a launch with no map lands when only Black Ops is installed: Kino der Toten.
 const BO1_ONLY_START_ZONE: &str = "t5:zombie_theater";
 
+/// The window defaults, made for a phone on iOS. A windowed iOS window takes the requested
+/// size as its view's frame (an iPhone 16e asked for 1280x720 got a 1186x699 pt view on an
+/// 844x390 pt screen), so it is borderless fullscreen there: the screen's own size. The
+/// home indicator stays out of the way of the touch controls.
+fn phone_window() -> Window {
+    #[cfg(target_os = "ios")]
+    {
+        Window {
+            mode: bevy::window::WindowMode::BorderlessFullscreen(
+                bevy::window::MonitorSelection::Primary,
+            ),
+            prefers_home_indicator_hidden: true,
+            prefers_status_bar_hidden: true,
+            ..default()
+        }
+    }
+    #[cfg(not(target_os = "ios"))]
+    {
+        Window::default()
+    }
+}
+
 /// `IW4L_WINDOW_SIZE=844x390` opens the desktop window at a phone's logical size, to check
 /// layouts (the iPhone 16e in landscape is 844x390); 1280x720 otherwise.
 fn window_resolution() -> bevy::window::WindowResolution {
@@ -382,7 +404,7 @@ fn run_menu(
             primary_window: Some(Window {
                 title: "iw4l".into(),
                 resolution: window_resolution(),
-                ..default()
+                ..phone_window()
             }),
             ..default()
         },
@@ -609,7 +631,7 @@ fn run_map(
                     window_resolution()
                 },
                 present_mode,
-                ..default()
+                ..phone_window()
             }),
             ..default()
         },
