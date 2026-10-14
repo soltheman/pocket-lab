@@ -21,6 +21,10 @@ pub(crate) const ZOMBIES_HUD: (&str, &str) = (
         level thread down_first_player();
     if (getdvar("iw4l_zm_watch") == "buy")
         level thread face_wall_buy();
+    if (getdvar("iw4l_zm_watch") == "door")
+        level thread face_door();
+    if (getdvar("iw4l_zm_watch") == "power")
+        level thread face_power_switch();
 }
 
 // Debug (IW4L_ZM_WATCH=1): every new zombie is put a few metres in front of
@@ -64,6 +68,53 @@ face_wall_buy()
     away = vectornormalize(p.origin - buy.origin);
     p setorigin(buy.origin + (away[0] * 48, away[1] * 48, 0) - (0, 0, 40));
     p setplayerangles(vectortoangles(buy.origin - (p.origin + (0, 0, 60))));
+}
+
+// Debug (IW4L_ZM_WATCH=door): the first player gets 10000 points and stands at the
+// nearest door or debris, facing it.
+face_door()
+{
+    wait 8;
+    players = getplayers();
+    all = getentarray("zombie_door", "targetname");
+    debris = getentarray("zombie_debris", "targetname");
+    for (i = 0; i < debris.size; i++)
+        all[all.size] = debris[i];
+    // Ones bought with points (not the doors the power opens).
+    doors = [];
+    for (i = 0; i < all.size; i++)
+    {
+        if (!isdefined(all[i].script_noteworthy) || all[i].script_noteworthy != "electric_door")
+            doors[doors.size] = all[i];
+    }
+    if (!players.size || !doors.size)
+        return;
+    p = players[0];
+    p.score = 10000;
+    door = doors[0];
+    for (i = 1; i < doors.size; i++)
+    {
+        if (distancesquared(doors[i].origin, p.origin) < distancesquared(door.origin, p.origin))
+            door = doors[i];
+    }
+    away = vectornormalize((p.origin[0] - door.origin[0], p.origin[1] - door.origin[1], 0));
+    p setorigin((door.origin[0], door.origin[1], p.origin[2]) + (away[0] * 64, away[1] * 64, 0));
+    p setplayerangles(vectortoangles(door.origin - (p.origin + (0, 0, 60))));
+}
+
+// Debug (IW4L_ZM_WATCH=power): the first player stands at the power switch, facing it.
+face_power_switch()
+{
+    wait 8;
+    players = getplayers();
+    switch_trigger = getent("use_elec_switch", "targetname");
+    if (!players.size || !isdefined(switch_trigger))
+        return;
+    p = players[0];
+    target = switch_trigger.origin;
+    away = vectornormalize((p.origin[0] - target[0], p.origin[1] - target[1], 0));
+    p setorigin((target[0], target[1], target[2] - 40) + (away[0] * 48, away[1] * 48, 0));
+    p setplayerangles(vectortoangles(target - (p.origin + (0, 0, 60))));
 }
 
 // Debug (IW4L_ZM_WATCH=die): the first player takes a killing blow after 35 seconds.
