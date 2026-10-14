@@ -3,8 +3,76 @@
 //! recovered runtime error, logged once per call site and counted per name, so the
 //! scripts install and run around it. A real implementation registered anywhere else
 //! wins; only names still unbound get a stub.
+use bevy_ecs::prelude::World;
+
 use crate::script::Namespace::{Function, Method};
+use crate::script::host::arrays::new_array;
 use crate::script::host::registry::{NativeRegistry, unavailable};
+use crate::script::{Runtime, Value};
+
+/// Every player the scripts know, connected or still connecting, in client order.
+fn player_objects(world: &World) -> Vec<Value> {
+    world
+        .resource::<Runtime>()
+        .players
+        .values()
+        .map(|slot| Value::Object(slot.object))
+        .collect()
+}
+
+/// The builtins implemented so far; `register` stubs the rest.
+fn register_implemented(registry: &mut NativeRegistry) {
+    registry.register(Function, "getplayers", |world, _, _| {
+        let players = player_objects(world);
+        new_array(world, players)
+    });
+    // Solo or local co-op: everyone expected is connected once their slot exists.
+    registry.register(Function, "getnumconnectedplayers", |world, _, _| {
+        Ok(Value::Int(player_objects(world).len() as i32))
+    });
+    registry.register(Function, "getnumexpectedplayers", |world, _, _| {
+        Ok(Value::Int(player_objects(world).len() as i32))
+    });
+    // No AI actors exist yet: every AI query is empty.
+    registry.register(Function, "getaiarray", |world, _, _| new_array(world, Vec::new()));
+    registry.register(Function, "getaispeciesarray", |world, _, _| {
+        new_array(world, Vec::new())
+    });
+    // Spawners are the map's `actor_*` entities.
+    registry.register(Function, "getspawnerarray", |world, _, _| {
+        let runtime = world.resource::<Runtime>();
+        let spawners: Vec<Value> = runtime
+            .entities
+            .iter()
+            .filter(|(_, entity)| entity.classname.starts_with("actor_"))
+            .map(|(id, _)| Value::Object(*id))
+            .collect();
+        new_array(world, spawners)
+    });
+    registry.register(Function, "setsaveddvar", |world, _, args| {
+        let name = crate::script::host::args::string(args, 0)?;
+        let value = match args.get(1) {
+            Some(Value::Int(n)) => n.to_string(),
+            Some(Value::Float(f)) => f.to_string(),
+            Some(Value::String(s)) => s.to_string(),
+            _ => String::new(),
+        };
+        super::iw4::set_dvar(world, &name, &value);
+        Ok(Value::Undefined)
+    });
+    // Players are the only sentients until actors exist.
+    registry.register(Function, "issentient", |world, _, args| {
+        let Some(Value::Object(id)) = args.first() else {
+            return Ok(Value::Int(0));
+        };
+        let is_player = world
+            .resource::<Runtime>()
+            .players
+            .values()
+            .any(|slot| slot.object == *id);
+        Ok(Value::Int(i32::from(is_player)))
+    });
+}
 
 macro_rules! stubs {
     ($registry:expr; $($namespace:ident $name:literal),* $(,)?) => {$(
@@ -15,6 +83,7 @@ macro_rules! stubs {
 }
 
 pub(crate) fn register(registry: &mut NativeRegistry) {
+    register_implemented(registry);
     stubs! { registry;
         Function "absangleclamp180",
         Function "activateclientexploder",
