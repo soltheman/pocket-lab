@@ -172,6 +172,7 @@ pub(crate) fn select_usables(world: &mut World) {
         .copied()
         .collect();
     let mut selected = std::collections::BTreeMap::new();
+    let mut runtime = std::mem::take(&mut *world.resource_mut::<Runtime>());
     let mut frame = FrameWorld::from_world(world);
     for client in clients {
         let id = ClientId(client);
@@ -188,18 +189,24 @@ pub(crate) fn select_usables(world: &mut World) {
             ps.origin[1],
             ps.origin[2] + ps.view_height_current,
         ];
+        // A use trigger counts only while the player stands in it, and one the view
+        // enters beats one merely stood in; anything else usable counts within reach.
+        // Then the nearest wins.
         let nearest = usables
             .iter()
             .filter(|(_, _, usable, policy)| {
                 !usable.barred.contains(&client) && policy.allows(&frame, client)
             })
-            .map(|(object, at, usable, _)| {
+            .filter_map(|(object, at, usable, _)| {
                 let d2: f32 = (0..3).map(|i| (at[i] - eye[i]).powi(2)).sum();
-                (d2, *object, usable)
+                match super::triggers::use_trigger_reach(&mut runtime, &frame, *object, client) {
+                    Some(None) => None,
+                    Some(Some(looks)) => Some((!looks, d2, *object, usable)),
+                    None => (d2 <= USE_RADIUS * USE_RADIUS).then_some((true, d2, *object, usable)),
+                }
             })
-            .filter(|(d2, _, _)| *d2 <= USE_RADIUS * USE_RADIUS)
-            .min_by(|a, b| a.0.total_cmp(&b.0));
-        let Some((_, object, usable)) = nearest else {
+            .min_by(|a, b| a.0.cmp(&b.0).then(a.1.total_cmp(&b.1)));
+        let Some((_, _, object, usable)) = nearest else {
             continue;
         };
         selected.insert(client, object);
@@ -210,5 +217,6 @@ pub(crate) fn select_usables(world: &mut World) {
             ps.cursor_hint_string = usable.hint;
         }
     }
-    world.resource_mut::<Runtime>().use_selected = selected;
+    runtime.use_selected = selected;
+    *world.resource_mut::<Runtime>() = runtime;
 }

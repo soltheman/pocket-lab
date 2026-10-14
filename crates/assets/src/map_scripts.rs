@@ -76,7 +76,9 @@ face_wall_buy()
     }
     away = vectornormalize(p.origin - buy.origin);
     p setorigin(buy.origin + (away[0] * 48, away[1] * 48, 0) - (0, 0, 40));
-    p setplayerangles(vectortoangles(buy.origin - (p.origin + (0, 0, 60))));
+    // Aim once landed: the trigger is a plate on the wall, a few units high.
+    wait 1;
+    p setplayerangles(vectortoangles(buy.origin - p geteye()));
 }
 
 // Debug (IW4L_ZM_WATCH=door): the first player gets 10000 points and stands at the
@@ -107,8 +109,10 @@ face_door()
             door = doors[i];
     }
     away = vectornormalize((p.origin[0] - door.origin[0], p.origin[1] - door.origin[1], 0));
-    p setorigin((door.origin[0], door.origin[1], p.origin[2]) + (away[0] * 64, away[1] * 64, 0));
+    p setorigin((door.origin[0], door.origin[1], p.origin[2]) + (away[0] * 24, away[1] * 24, 0));
     p setplayerangles(vectortoangles(door.origin - (p.origin + (0, 0, 60))));
+    wait 1;
+    logprint("door debug: player " + p.origin + " touching the door trigger: " + p istouching(door));
     for (pass = 0; pass < 4; pass++)
     {
         pieces = getentarray(door.target, "targetname");

@@ -832,6 +832,32 @@ impl Volume<'_> {
 
 const LOOK_AT_REACH: f32 = 128.0;
 
+/// A use trigger as something for `client` to use: `None` when `object` is not a use
+/// trigger with a volume (any usable thing in reach qualifies), `Some(None)` when out
+/// of the player's reach, and `Some(Some(looks))` when in it, `looks` saying whether
+/// the view ray enters it. A player standing at a wall buy next to a door gets the one
+/// they face.
+pub(crate) fn use_trigger_reach(
+    runtime: &mut Runtime,
+    frame: &FrameWorld,
+    object: u64,
+    client: u32,
+) -> Option<Option<bool>> {
+    if fires(&runtime.entities.get(&object)?.classname) != Some(Fires::Use) {
+        return None;
+    }
+    let player = runtime.players.get(&client)?.object;
+    let volume = volume(runtime, frame, object)?;
+    let looks = looks_into(frame, client, &volume);
+    // One that must be looked at (a wall buy: a plate on the wall, 3 units deep) is
+    // used from where the view reaches it; any other is stood in (a door, debris).
+    if runtime.require_look_at.contains(&object) {
+        return Some(looks.then_some(true));
+    }
+    let (mins, maxs) = toucher(runtime, frame, player);
+    Some(volume.touches(mins, maxs).then_some(looks))
+}
+
 fn looks_into(frame: &FrameWorld, client: u32, volume: &Volume<'_>) -> bool {
     let Some(ps) = frame.player(crate::ClientId(client)) else {
         return false;
@@ -842,11 +868,10 @@ fn looks_into(frame: &FrameWorld, client: u32, volume: &Volume<'_>) -> bool {
         ps.origin[2] + ps.view_height_current,
     ];
     let (forward, _, _) = math_iw4::angle_vectors(ps.viewangles);
-    (0..=16).any(|step| {
-        let reach = LOOK_AT_REACH * step as f32 / 16.0;
-        let at = std::array::from_fn(|i| eye[i] + forward[i] * reach);
-        volume.touches(at, at)
-    })
+    // The whole view segment: a wall buy's trigger is a plate 3 units deep, which
+    // points sampled along the ray step over.
+    let end = std::array::from_fn(|i| eye[i] + forward[i] * LOOK_AT_REACH);
+    volume.crosses(eye, end)
 }
 
 fn toucher(runtime: &mut Runtime, frame: &FrameWorld, object: u64) -> ([f32; 3], [f32; 3]) {
