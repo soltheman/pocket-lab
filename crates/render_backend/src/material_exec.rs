@@ -142,6 +142,13 @@ enum ExecutionShareExtra {
     Instance { depth_hack: bool },
     Unique(u32),
     MarkMesh,
+    /// A world surface drawn away from where the BSP has it: a brush model (BO1
+    /// door, window board) at its live pose. Its own run, so the world matrix it
+    /// sets never reaches the static world's draws.
+    PosedWorld {
+        matrix: [u32; 16],
+        probe: Option<u8>,
+    },
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
@@ -153,6 +160,10 @@ struct OverlayKeepKey {
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 enum OverlayKeepExtra {
     World(Option<u8>),
+    PosedWorld {
+        matrix: [u32; 16],
+        probe: Option<u8>,
+    },
     ViewmodelCodeMesh,
     Lighting {
         handle: u32,
@@ -203,6 +214,12 @@ fn execution_share_extra(
 ) -> ExecutionShareExtra {
     match draw.kind {
         RetainedDrawKind::MarkMesh { .. } => ExecutionShareExtra::MarkMesh,
+        RetainedDrawKind::World { .. } if let Some(matrix) = posed_world_bits(draw) => {
+            ExecutionShareExtra::PosedWorld {
+                matrix,
+                probe: per_surface_reflection_sh(frame, draw).map(|(probe, _)| probe),
+            }
+        }
         RetainedDrawKind::World { .. } => match per_surface_reflection_sh(frame, draw) {
             Some((probe, _)) => ExecutionShareExtra::ReflectionProbe(probe),
             None => ExecutionShareExtra::Identity,
@@ -247,6 +264,20 @@ fn execution_share_key(
     }
 }
 
+/// The pose of a world draw that is not at the identity (a brush model's).
+fn posed_world_matrix(draw: &RetainedDrawItem) -> Option<Mat4> {
+    match draw.kind {
+        RetainedDrawKind::World {
+            world_from_local, ..
+        } if world_from_local != Mat4::IDENTITY => Some(world_from_local),
+        _ => None,
+    }
+}
+
+fn posed_world_bits(draw: &RetainedDrawItem) -> Option<[u32; 16]> {
+    posed_world_matrix(draw).map(|matrix| matrix.to_cols_array().map(f32::to_bits))
+}
+
 fn instance_matrix_bits(draw: &RetainedDrawItem) -> Option<[u32; 16]> {
     match draw.kind {
         RetainedDrawKind::Smodel {
@@ -282,7 +313,11 @@ fn overlay_keep_key(frame: &MaterialExecFrame, draw: &RetainedDrawItem) -> Overl
             viewmodel: true, ..
         } => OverlayKeepExtra::ViewmodelCodeMesh,
         RetainedDrawKind::World { .. } => {
-            OverlayKeepExtra::World(per_surface_reflection_sh(frame, draw).map(|(probe, _)| probe))
+            let probe = per_surface_reflection_sh(frame, draw).map(|(probe, _)| probe);
+            match posed_world_bits(draw) {
+                Some(matrix) => OverlayKeepExtra::PosedWorld { matrix, probe },
+                None => OverlayKeepExtra::World(probe),
+            }
         }
         RetainedDrawKind::CodeMesh { .. } => OverlayKeepExtra::World(None),
         RetainedDrawKind::MarkMesh {
@@ -449,7 +484,27 @@ fn overlay_draw_material(
                 need,
             );
         }
+        RetainedDrawKind::World { .. } => overlay_posed_world(runtime, draw, scratch, need),
         _ => {}
+    }
+}
+
+/// A posed world draw's (brush model's) world matrices; a BSP draw keeps the base's.
+fn overlay_posed_world(
+    runtime: MaterialExecView<'_>,
+    draw: &RetainedDrawItem,
+    scratch: &mut RuntimeCodeSources,
+    need: OverlayCodeNeed,
+) {
+    if let Some(world_from_local) = posed_world_matrix(draw) {
+        overlay_smodel_world_matrix(
+            scratch,
+            runtime.frame.view_origin,
+            world_from_local,
+            runtime.clip_from_world,
+            runtime.view_from_world,
+            need,
+        );
     }
 }
 
@@ -528,6 +583,7 @@ fn overlay_draw_obj_only(
                 );
             }
         }
+        RetainedDrawKind::World { .. } => overlay_posed_world(runtime, draw, scratch, need),
         _ => {}
     }
 }

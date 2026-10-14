@@ -12,7 +12,8 @@ use fastfile_t5::size as t5_sz;
 use fastfile_t5::{GfxWorldGeometry, ZonePtr, ZoneStream};
 
 use crate::world_draw::{
-    CameraRangeKind, CameraSurfRange, CameraSurfRanges, DpvsWorldData, OwnedPortal,
+    CameraRangeKind, CameraSurfRange, CameraSurfRanges, DpvsWorldData, GfxBrushModelBounds,
+    GfxBrushModelSurfs, OwnedPortal,
     SurfaceDrawFields, WorldBatch, WorldDraw, WorldLightmap, WorldLightmapGap, WorldPrimaryLight,
     WorldReflectionProbe, WorldVertexPayload,
 };
@@ -83,6 +84,46 @@ fn iw4_ptr(p: fastfile_t5::Ptr) -> Iw4Ptr {
         block: p.block,
         offset: p.offset,
     }
+}
+
+/// The `*N` brush submodels (doors, window boards, debris). T5's `GfxBrushModel`
+/// (60 bytes) is `writable { mins, maxs, mip1radiusSq }` (0..28), `bounds[2][3]`
+/// as mins then maxs (28..52), `u32 surfaceCount` (52), `u32 startSurfIndex` (56);
+/// IW4's stores mid/half bounds and u16 counts. T5 has no no-decal count.
+fn decode_t5_brush_models(
+    s: &ZoneStream<'_>,
+    geometry: &GfxWorldGeometry,
+) -> Result<(Vec<GfxBrushModelSurfs>, Vec<GfxBrushModelBounds>), WorldMeshError> {
+    let mut surfs = Vec::with_capacity(geometry.model_count);
+    let mut bounds = Vec::with_capacity(geometry.model_count);
+    let Some(models) = geometry.models else {
+        return Ok((surfs, bounds));
+    };
+    let surface_limit = geometry.surface_count;
+    for i in 0..geometry.model_count {
+        let model = models.at(i * t5_sz::GFX_BRUSH_MODEL);
+        let f = |off| s.f32_at(model, off).map_err(|_| WorldMeshError::NoGeometry);
+        let u = |off| s.u32_at(model, off).map_err(|_| WorldMeshError::NoGeometry);
+        let (count, start) = (u(52)? as usize, u(56)? as usize);
+        // A range outside the world's surfaces (or past u16) draws nothing.
+        let (count, start) = if start + count <= surface_limit && start + count <= 0xffff {
+            (count as u16, start as u16)
+        } else {
+            (0, 0)
+        };
+        surfs.push(GfxBrushModelSurfs {
+            start_surf: start,
+            surface_count: count,
+            surface_count_no_decal: count,
+        });
+        let mins = [f(28)?, f(32)?, f(36)?];
+        let maxs = [f(40)?, f(44)?, f(48)?];
+        bounds.push(GfxBrushModelBounds {
+            mid: std::array::from_fn(|k| (mins[k] + maxs[k]) * 0.5),
+            half: std::array::from_fn(|k| (maxs[k] - mins[k]) * 0.5),
+        });
+    }
+    Ok((surfs, bounds))
 }
 
 pub fn build_t5_world_draw(
@@ -458,6 +499,8 @@ pub fn build_t5_world_draw(
     }
     let vertex_layer = expanded;
 
+    let (brush_models, brush_model_bounds) = decode_t5_brush_models(s, &geometry)?;
+
     let t5_sun_light = geometry
         .sun_light
         .map(|p| {
@@ -497,8 +540,8 @@ pub fn build_t5_world_draw(
             surface_primary_lights,
             sort_key_distortion: None,
             capture: world_capture_from_casters(surface_casts_sun_shadow),
-            brush_models: Vec::new(),
-            brush_model_bounds: Vec::new(),
+            brush_models,
+            brush_model_bounds,
             surface_materials,
             primary_lights,
             light_defs: s

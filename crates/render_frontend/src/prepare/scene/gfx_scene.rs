@@ -66,6 +66,7 @@ pub(crate) fn occupy_script_brush_scene(
     presented: Option<Res<net::PresentedSnapshot>>,
     runtimes: Query<(&net::CEntity, &net::CEntityRuntime)>,
     mut gfx_scene: ResMut<HostGfxScene>,
+    mut census_log: Local<Option<std::time::Instant>>,
 ) {
     let Some(world) = world else {
         return;
@@ -81,9 +82,18 @@ pub(crate) fn occupy_script_brush_scene(
         .map(|snapshot| net::ServerTime::from_tick(snapshot.tick).ms())
         .unwrap_or(0);
     let mut live = Vec::new();
+    let mut census = [0u32; 5];
     for (cent, runtime) in &runtimes {
         let entnum = u32::from(cent.number());
         let dobj_present = gfx_scene.scene.scene_ent_live(entnum);
+        if runtime.next_state.e_type == entity_iw4::ET_SCRIPTMOVER {
+            census[0] += 1;
+            census[1] += u32::from(runtime.next_state.solid == entity_iw4::SCRIPT_MOVER_BMODEL_SOLID);
+            census[2] += u32::from(dobj_present);
+            census[3] +=
+                u32::from(runtime.next_state.e_flags & entity_iw4::CG_SCRIPT_MOVER_NODRAW != 0);
+            census[4] += u32::from(runtime.next_state.index != 0);
+        }
         let hidden = !dobj_present
             && runtime.next_state.e_type == entity_iw4::ET_SCRIPTMOVER
             && runtime.next_state.solid == entity_iw4::SCRIPT_MOVER_BMODEL_SOLID
@@ -110,6 +120,19 @@ pub(crate) fn occupy_script_brush_scene(
             entnum,
             hidden,
         });
+    }
+    if census_log.is_none_or(|at| at.elapsed().as_secs() >= 30) {
+        *census_log = Some(std::time::Instant::now());
+        diag::info!(
+            World,
+            "script movers on the client: {} (bmodel solid {}, with a model {}, nodraw {}, nonzero index {}); {} live brush claims",
+            census[0],
+            census[1],
+            census[2],
+            census[3],
+            census[4],
+            live.len()
+        );
     }
     occupy_script_brushes(
         &mut gfx_scene.scene,

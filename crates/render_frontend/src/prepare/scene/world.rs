@@ -1722,3 +1722,33 @@ pub(crate) fn cell_caster_bits(dpvs: &WorldDpvs, sun_dir: [f32; 3]) -> Vec<u32> 
     generate_shadow_map_caster_cells(&graph, view_dir, &mut bits);
     bits
 }
+
+#[cfg(test)]
+mod bmodel_pose_tests {
+    use super::*;
+
+    /// A live script brush's pose (scene quat from its angles) matches the pose the
+    /// map gives it at load (axis from angles), so a door is drawn where it stands.
+    #[test]
+    fn scene_quat_pose_matches_authored_axis() {
+        let origin = [120.0, -340.5, 64.0];
+        for angles in [
+            [0.0, 0.0, 0.0],
+            [0.0, 90.0, 0.0],
+            [0.0, -135.0, 0.0],
+            [15.0, 30.0, 0.0],
+            [10.0, 200.0, -25.0],
+        ] {
+            let live = transform_from_gfx_placement(
+                origin,
+                render_scene::scene_quat_from_angles(angles),
+            )
+            .to_matrix();
+            let authored = mat4_from_origin_axis(origin, bmodel_axis_from_angles(angles));
+            assert!(
+                live.abs_diff_eq(authored, 1e-4),
+                "angles {angles:?}: live {live:?} authored {authored:?}"
+            );
+        }
+    }
+}

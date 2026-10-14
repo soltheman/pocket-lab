@@ -89,7 +89,143 @@ pub fn register_dyn_ent_brush_systems(app: &mut App) {
             drain_dpvs_ent_cmds
                 .after(frame::WorkerCmdSet::CellSceneEnt)
                 .in_set(frame::WorkerCmdSet::DpvsEnt),
+        )
+        .add_systems(
+            Update,
+            emit_script_brush_colour
+                .after(exec_cell_scene_ent_cmds)
+                .after(exec_cell_dyn_brush_cmds)
+                .before(crate::assemble::drawsurf::ingest_drawsurf_list)
+                .in_set(frame::RenderSet::Anim),
         );
+}
+
+/// Off-screen pose for a brush model that is hidden or gone, so the shadow passes
+/// (which walk every brush model) don't draw it where it was authored.
+const GONE_BMODEL_POSE: Mat4 = Mat4::from_cols(
+    Vec4::X,
+    Vec4::Y,
+    Vec4::Z,
+    Vec4::new(0.0, 0.0, -1.0e6, 1.0),
+);
+
+/// `script_brushmodel` movers (BO1 doors, window boards, debris, exploder chunks):
+/// colour draws for the ones the scene-entity cell walk found visible, at their
+/// live pose. Hidden or deleted ones have no scene brush and draw nothing.
+fn emit_script_brush_colour(
+    gfx: Res<HostGfxScene>,
+    mut scene: Option<ResMut<WorldScene>>,
+    mut stats: Option<ResMut<DpvsFrameStats>>,
+    mut logged: Local<Option<std::time::Instant>>,
+) {
+    let Some(scene) = scene.as_mut() else {
+        return;
+    };
+    if scene.script_brush_models.is_empty() {
+        return;
+    }
+    let log_now = logged.is_none_or(|at| at.elapsed().as_secs() >= 30);
+    let mut census = [0u32; 6];
+    let baked_material_keys: Vec<Option<u64>> = scene
+        .runtime_material_catalog
+        .materials
+        .iter()
+        .map(|material| material.baked_draw_surf)
+        .collect();
+    let batch_primary_lights: Vec<u8> = scene
+        .batches
+        .iter()
+        .map(|batch| batch.primary_light_index)
+        .collect();
+    let authored: Vec<u32> = scene
+        .script_brush_models
+        .iter()
+        .map(|brush| brush.cmodel_handle)
+        .collect();
+    let Some(cull) = scene.cull.as_mut() else {
+        return;
+    };
+    // Every script brush model starts gone; a live, shown mover puts it back.
+    for &index in &authored {
+        if let Some(pose) = cull.bmodel_world_from_local.get_mut(index as usize) {
+            *pose = GONE_BMODEL_POSE;
+        }
+    }
+    let walked = gfx.scene.scene_ent_walked;
+    let mut already = HashSet::new();
+    for item in &cull.draw_items {
+        for offset in 0..item.run {
+            already.insert(item.surf.saturating_add(offset));
+        }
+    }
+    let mut pose_id = crate::assemble::drawsurf::list::CONTENT_ID_SEED;
+    let mut added = 0u32;
+    for brush in &gfx.scene.scene_brushes {
+        census[0] += 1;
+        // Live movers carry their entity number; the authored stand-ins don't.
+        let Some(entnum) = brush.param_4 else {
+            continue;
+        };
+        census[1] += 1;
+        let index = brush.model_index as usize;
+        let Some(model) = cull.brush_models.get(index).copied() else {
+            continue;
+        };
+        if index == 0 || model.surface_count == 0 {
+            continue;
+        }
+        census[2] += 1;
+        let quat = brush.quat.unwrap_or([0.0, 0.0, 0.0, 1.0]);
+        let pose = crate::prepare::scene::world::transform_from_gfx_placement(brush.origin, quat)
+            .to_matrix();
+        if let Some(slot) = cull.bmodel_world_from_local.get_mut(index) {
+            *slot = pose;
+        }
+        if walked && !gfx.scene.scene_ent_visible(u32::from(entnum)) {
+            continue;
+        }
+        census[3] += 1;
+        crate::assemble::drawsurf::list::mix_content_id(&mut pose_id, index as u64);
+        for word in pose.to_cols_array() {
+            crate::assemble::drawsurf::list::mix_content_id(&mut pose_id, u64::from(word.to_bits()));
+        }
+        let (span_added, span_refused) = append_bmodel_colour_span(
+            cull,
+            model.start_surf,
+            model.surface_count,
+            &mut already,
+            &baked_material_keys,
+            &batch_primary_lights,
+        );
+        added = added.saturating_add(span_added);
+        census[4] += span_added;
+        census[5] += span_refused;
+    }
+    if log_now {
+        *logged = Some(std::time::Instant::now());
+        diag::info!(
+            World,
+            "script brushes: {} in scene, {} live, {} with surfaces ({} brush models), {} visible (walked={walked}); surfaces drawn {}, refused {}",
+            census[0],
+            census[1],
+            census[2],
+            cull.brush_models.len(),
+            census[3],
+            census[4],
+            census[5]
+        );
+    }
+    if added == 0 {
+        return;
+    }
+    refresh_draw_items_id(cull);
+    // A door that swings keeps the same draw items; its pose must still reach
+    // the retained list.
+    crate::assemble::drawsurf::list::mix_content_id(&mut cull.draw_items_id, pose_id);
+    if let Some(stats) = stats.as_mut() {
+        stats.keys = cull.draw_items.len() as u32;
+        stats.rebinds = draw_item_rebinds(&cull.draw_items);
+    }
 }
 
 fn link_dyn_ent_brush_cells(

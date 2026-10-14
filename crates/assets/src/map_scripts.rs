@@ -26,6 +26,8 @@ pub(crate) const ZOMBIES_HUD: (&str, &str) = (
         level thread face_door();
     if (getdvar("iw4l_zm_watch") == "power")
         level thread face_power_switch();
+    if (getdvar("iw4l_zm_watch") == "window")
+        level thread face_window();
     if (getdvar("iw4l_zm_watch") == "box")
         level thread face_box();
     if (getdvar("iw4l_zm_watch") == "perk")
@@ -134,6 +136,29 @@ face_door()
         }
         wait 5;
     }
+}
+
+// Debug (IW4L_ZM_WATCH=window): the first player stands back from the nearest boarded
+// window, facing it.
+face_window()
+{
+    wait 8;
+    players = getplayers();
+    windows = common_scripts\utility::getstructarray("exterior_goal", "targetname");
+    if (!players.size || !windows.size)
+        return;
+    p = players[0];
+    w = windows[0];
+    for (i = 1; i < windows.size; i++)
+    {
+        if (distancesquared(windows[i].origin, p.origin) < distancesquared(w.origin, p.origin))
+            w = windows[i];
+    }
+    away = vectornormalize((p.origin[0] - w.origin[0], p.origin[1] - w.origin[1], 0));
+    p setorigin((w.origin[0], w.origin[1], p.origin[2]) + (away[0] * 96, away[1] * 96, 0));
+    p setplayerangles(vectortoangles(w.origin - (p.origin + (0, 0, 60))));
+    wait 1;
+    logprint("window debug: player " + p.origin + " window " + w.origin);
 }
 
 // Debug (IW4L_ZM_WATCH=power): the first player stands at the power switch, facing it.

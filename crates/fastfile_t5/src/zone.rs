@@ -559,6 +559,11 @@ pub struct GfxWorldGeometry {
     pub dpvs_static: Option<Ptr>,
 
     pub bounds: Option<[u32; 6]>,
+
+    /// `GfxBrushModel` array (`size::GFX_BRUSH_MODEL` each): the `*N` submodels
+    /// that `script_brushmodel` entities draw.
+    pub models: Option<Ptr>,
+    pub model_count: usize,
 }
 
 #[derive(Clone, Copy, Debug)]

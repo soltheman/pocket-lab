@@ -1,6 +1,14 @@
-# Pocket Lab 0.3.13
+# Pocket Lab 0.3.14
 
 Smoother on the phone, every touch button does its job, and co-op over Wi-Fi.
+
+**New in 0.3.14**
+- Doors, debris and the boards on the windows now show. They are pieces of level geometry Black Ops' scripts move and hide, and none had ever been drawn, for three reasons:
+  - the game never read them from the map file;
+  - the marker saying "this object is one of those pieces" was dropped on its way from the game to the renderer;
+  - the GPU code placed every piece of level geometry where the map was built, ignoring where the scripts had moved it.
+  Checked on PC: the foyer door, the doorway under the lobby arch and a boarded window all show. Each piece is drawn where the game currently has it and not at all once hidden, so boards a zombie tears off should disappear and a bought door should swing open. That part isn't checked on screen yet.
+- Co-op: every player needs 0.3.14; it can't join a game run by an older version.
 
 **New in 0.3.13**
 - Likely fix for the shaking, flashing and doubled HUD. 0.3.12's self-test separated the batches of GPU work that really fail from the ones that only failed alongside them. The failing ones carry nothing but GPU timestamps. A built-in timing tool was writing timestamps into the GPU's work around every rendering step, every frame, and the iPhone rejects that work with "Insufficient Memory". Each rejection also took the rest of that frame's work with it, which showed as old, black or doubled frames. The timing tool no longer uses GPU timestamps on iPhone.
