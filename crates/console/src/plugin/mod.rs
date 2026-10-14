@@ -112,6 +112,26 @@ impl Plugin for ConsolePlugin {
                     .chain(),
             )
             .add_systems(PreUpdate, feed_console_keyboard.before(InputSystems))
+            .insert_resource(crate::touch_controls::touch_gameplay_resource())
+            .init_resource::<crate::touch_controls::TouchFrame>()
+            .init_resource::<crate::touch_controls::TouchState>()
+            .add_systems(
+                PreUpdate,
+                (
+                    crate::touch_controls::update_touch_ownership,
+                    crate::touch_controls::read_touch_controls,
+                )
+                    .chain()
+                    .after(InputSystems)
+                    .before(publish_client_action_input),
+            )
+            .add_systems(
+                Update,
+                (
+                    crate::touch_controls::update_touch_overlay,
+                    crate::touch_controls::handle_touch_commands.after(ConsoleDispatchSet),
+                ),
+            )
             .init_resource::<frame::ActivePad>()
             .init_resource::<frame::InputDevices>()
             .add_systems(
@@ -333,6 +353,10 @@ fn publish_client_action_input(
         Res<PresentedSnapshot>,
         Res<net::LocalPresentClient>,
     ),
+    (touch, mut touch_held): (
+        Res<crate::touch_controls::TouchFrame>,
+        Local<std::collections::BTreeSet<(u32, i32)>>,
+    ),
 ) {
     if time.elapsed_secs() - physical.mouse_activity_start > 0.3 {
         physical.mouse_activity = 0.0;
@@ -434,6 +458,7 @@ fn publish_client_action_input(
         }
         let keys = out.client.keys;
         out.scripted_ids.clear();
+        touch_held.clear();
         out.client = input_iw4::ClientInput {
             keys,
             ..Default::default()
@@ -499,6 +524,26 @@ fn publish_client_action_input(
             out.mouse_x += event.delta.x;
             out.mouse_y += event.delta.y;
         }
+        // Touch: the stick adds to the pad's movement, looking fingers drag like a mouse
+        // (sensitivity, FOV and ADS scaling apply), and each button holds its input on
+        // its own key number.
+        out.pad_move = [
+            (out.pad_move[0] + touch.move_axes[0]).clamp(-1.0, 1.0),
+            (out.pad_move[1] + touch.move_axes[1]).clamp(-1.0, 1.0),
+        ];
+        out.mouse_x += touch.look_px[0];
+        out.mouse_y += touch.look_px[1];
+        let pressed: Vec<(u32, i32)> = touch.held.difference(&touch_held).copied().collect();
+        let lifted: Vec<(u32, i32)> = touch_held.difference(&touch.held).copied().collect();
+        for (id, key_num) in pressed {
+            input_cmd(&mut out.client, id, key_num, now, frame);
+        }
+        for (id, key_num) in lifted {
+            if let Some(up_id) = key_up_command_id(id) {
+                input_cmd(&mut out.client, up_id, key_num, now, frame);
+            }
+        }
+        touch_held.clone_from(&touch.held);
         let mouse_moved = out.mouse_x != 0.0 || out.mouse_y != 0.0;
         if mouse_moved {
             devices.aiming_with_pad = false;
@@ -640,6 +685,7 @@ fn setup_console(
     mut registry: ResMut<ConsoleRegistry>,
     mut binds: ResMut<KeyBinds>,
     weapon_completions: Res<crate::weapon_dispatch::WeaponArgCompletions>,
+    touch: Res<crate::touch_controls::TouchGameplay>,
 ) {
     binds.apply_defaults();
     if registry.resolve("hold").is_none() {
@@ -744,6 +790,7 @@ fn setup_console(
     }
     crate::weapon_dispatch::register_weapon_commands(&mut registry, &weapon_completions);
     crate::debug_move::register_debug_move_commands(&mut registry);
+    crate::touch_controls::register_touch_commands(&mut registry);
     crate::saved_position::register_saved_position_commands(&mut registry);
     crate::debug_script_mover::register_debug_script_mover_commands(&mut registry);
     crate::debug_draw_method::register_debug_draw_method_commands(&mut registry);
@@ -903,6 +950,7 @@ fn setup_console(
         });
     commands.insert_resource(ConsolePrompt(prompt_entity.expect("console prompt entity")));
     commands.insert_resource(ConsoleLog(log_entity.expect("console log entity")));
+    crate::touch_controls::spawn_touch_overlay(&mut commands, font.clone(), touch.enabled);
     crate::debug_move::spawn_showpos_hud(&mut commands, font);
 }
 

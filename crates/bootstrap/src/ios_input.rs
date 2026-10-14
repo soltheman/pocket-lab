@@ -197,10 +197,23 @@ fn touch_as_mouse(
     mut windows: Query<(Entity, &mut Window), With<PrimaryWindow>>,
     mut buttons: MessageWriter<MouseButtonInput>,
     mut active: Local<Option<u64>>,
+    touch_layer: Option<Res<console::touch_controls::TouchGameplay>>,
 ) {
     let Ok((entity, mut window)) = windows.single_mut() else {
         return;
     };
+    // In a match the touch controls own every finger; a tap is not a click (MOUSE1 fires).
+    if touch_layer.is_some_and(|layer| layer.owns_touches) {
+        touches.clear();
+        if active.take().is_some() {
+            buttons.write(MouseButtonInput {
+                button: MouseButton::Left,
+                state: ButtonState::Released,
+                window: entity,
+            });
+        }
+        return;
+    }
     for touch in touches.read() {
         match touch.phase {
             TouchPhase::Started => {

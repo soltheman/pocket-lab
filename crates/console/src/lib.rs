@@ -36,6 +36,7 @@ mod saved_position;
 mod startup;
 pub mod suggest;
 mod synthetic_input;
+pub mod touch_controls;
 mod user_settings;
 mod weapon_dispatch;
 
