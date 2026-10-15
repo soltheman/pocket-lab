@@ -1,6 +1,13 @@
-# Pocket Lab 0.3.18
+# Pocket Lab 0.3.19
 
 Smoother on the phone, every touch button does its job, and co-op over Wi-Fi.
+
+**New in 0.3.19**
+- Fewer of Black Ops' scripts stop partway through. Each of these used to stop the script that ran into it:
+  - Sounds that tell the script when they've finished (voice lines waiting their turn) played, then stopped their script. They now report back about 2 seconds later.
+  - Asking whether a player has a weapon this game has no definition for (the zombie-kill voice lines ask about the sickle) stopped the script instead of answering no.
+  - Comparing two lists, and a dozen engine calls this game has nothing to show for yet: the teleporter's "transported" screen, rope collision, a wall gun's hidden parts, head gibs, vision sets, saving, and similar.
+- Checked on PC: those script errors no longer appear in a match. Each effect isn't checked on screen one by one; the teleporter in particular still needs a play-through.
 
 **New in 0.3.18**
 - Power-ups drop. When a zombie dies, Black Ops' script finds the floor under it with a ground check this game didn't have yet. The script stopped there every time, so nothing ever dropped. Checked on PC: an Insta-Kill skull, a Max Ammo and a Double Points dropped inside the lobby, each looked like the real thing, and walking onto the Double Points picked it up and doubled the points.

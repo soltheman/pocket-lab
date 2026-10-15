@@ -30,6 +30,43 @@ fn anim_name(args: &[Value], index: usize) -> Result<String, String> {
 
 /// The builtins implemented so far; `register` stubs the rest.
 fn register_implemented(registry: &mut NativeRegistry) {
+    // Engine state BO1 sets that nothing here shows yet (rope collision, water, network
+    // stats, threat groups, the teleporter's "transported" screen state, a wall gun's
+    // hidden parts, AI event listeners). Accepted, so the scripts calling them carry on
+    // instead of stopping there (Kino's teleporter intro stopped at `settransported`).
+    for name in [
+        "ropesetflag",
+        "watersimenable",
+        "reportmtu",
+        "createthreatbiasgroup",
+        "savegame",
+        "stopallrumbles",
+        "visionsetnaked",
+    ] {
+        registry.register(Function, name, |_, _, _| Ok(Value::Undefined));
+    }
+    // No vision sets are applied here: the default one.
+    registry.register(Method, "getvisionsetnaked", |_, _, _| Ok(Value::string("")));
+    registry.register(Function, "getvisionsetnaked", |_, _, _| Ok(Value::string("")));
+    registry.register(Method, "visionsetnaked", |_, _, _| Ok(Value::Undefined));
+    for name in [
+        "settransported",
+        "useweaponhidetags",
+        "addaieventlistener",
+        "setexploderid",
+        // A zombie's head popping off: not shown yet.
+        "gib",
+        // The game-over "fake death" makes players untouchable; nothing hurts them then.
+        "enableinvulnerability",
+        "disableinvulnerability",
+    ] {
+        registry.register(Method, name, |world, receiver, _| {
+            super::engine::entity_id(world, receiver)?;
+            Ok(Value::Undefined)
+        });
+    }
+    // No gas weapons in Kino.
+    registry.register(Function, "weaponisgasweapon", |_, _, _| Ok(Value::Int(0)));
     // `groundtrace(start, end, hit_characters, ignore_ent)`: `bullettrace` against what
     // stops a body (floors, walls, clip). BO1 drops power-ups and finds the floor under a
     // dying zombie with it.

@@ -11,6 +11,8 @@ use crate::script::{Arc, ArrayKey, BTreeMap, Namespace, NativeRegistry, Resource
 use bevy_ecs::prelude::World;
 
 const ZERO: [f32; 3] = [0.0; 3];
+/// How long after `playsound(alias, notify)` its notify fires.
+const PLAYSOUND_NOTIFY_MS: i64 = 2000;
 
 fn runtime(world: &mut World) -> bevy_ecs::world::Mut<'_, Runtime> {
     world.resource_mut::<Runtime>()
@@ -709,9 +711,10 @@ fn weapon_facts(
         return Ok(Default::default());
     }
     let frame = crate::frame::FrameWorld::from_world(world);
-    let index = frame
-        .weapon_index_by_script_name(&name)
-        .ok_or_else(|| format!("unknown weapon '{name}'"))?;
+    // A weapon with no definition here (BO1's AI weapons, `ak47_zm`) has no facts.
+    let Some(index) = frame.weapon_index_by_script_name(&name) else {
+        return Ok(Default::default());
+    };
     Ok(frame.weapon_combat_row(index).unwrap_or_default())
 }
 
@@ -1543,8 +1546,15 @@ fn register_sound_and_fx(registry: &mut NativeRegistry) {
             let alias = string(args, 0)?;
             let origin = origin_of(world, receiver)?;
             play_sound_at(world, origin, &alias)?;
-            if args.len() != 1 {
-                return Err("expected one sound alias argument".into());
+            // BO1's `playsound(alias, notify)`: the entity is notified once the sound has
+            // played (its voice lines wait on it). The sound's length isn't known here,
+            // so a typical line's.
+            if let Some(Value::String(done)) = args.get(1) {
+                let due = super::super::players::now_ms(world) + PLAYSOUND_NOTIFY_MS;
+                world
+                    .resource_mut::<Runtime>()
+                    .timed_notifies
+                    .push((due, receiver.clone(), Arc::from(done.as_ref())));
             }
             Ok(Value::Undefined)
         });

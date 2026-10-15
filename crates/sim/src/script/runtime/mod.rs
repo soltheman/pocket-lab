@@ -414,9 +414,10 @@ pub(super) fn to_text(value: &Value) -> Option<String> {
 fn equality(a: Value, b: Value) -> Result<bool, String> {
     let (a, b) = weaker(a, b);
     Ok(match (&a, &b) {
-        (Value::Array(_), _) | (_, Value::Array(_)) => {
-            return Err("cannot compare arrays".into());
-        }
+        // Arrays are references: the same array, or not (BO1's `is_in_array` compares
+        // arrays of arrays).
+        (Value::Array(_), Value::Array(_)) => a == b,
+        (Value::Array(_), _) | (_, Value::Array(_)) => false,
         (Value::Undefined, Value::Undefined) => true,
         (Value::Object(_), Value::Object(_)) => a == b,
         (Value::String(x), Value::String(y)) => x == y,
@@ -1291,6 +1292,18 @@ pub(crate) fn advance_scheduler(world: &mut World) {
     world.resource_mut::<Runtime>().last_tick = Some(tick);
     let now = i64::from(tick.0) * i64::from(crate::MATCH_TICK_MS);
     super::host::mechanics::deliver_finished(world);
+    {
+        let mut runtime = world.resource_mut::<Runtime>();
+        if !runtime.timed_notifies.is_empty() {
+            let (due, later): (Vec<_>, Vec<_>) = std::mem::take(&mut runtime.timed_notifies)
+                .into_iter()
+                .partition(|(at, ..)| *at <= now);
+            runtime.timed_notifies = later;
+            for (_, receiver, name) in due {
+                runtime.pending_notifies.push((receiver, name, Vec::new()));
+            }
+        }
+    }
     deliver_external(world, now);
     let threads: Vec<_> = world
         .query::<(Entity, &Thread)>()

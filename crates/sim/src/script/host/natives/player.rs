@@ -1477,7 +1477,11 @@ fn register_inventory(registry: &mut NativeRegistry) {
     });
     registry.register(Method, "hasweapon", |world, receiver, args| {
         let id = client_of(world, receiver)?;
-        let weapon = player_weapon(world, id, args, 0)?;
+        // A weapon the game has no definition for is one the player hasn't got (BO1's
+        // kill lines ask about `sickle_knife_zm`).
+        let Ok(weapon) = player_weapon(world, id, args, 0) else {
+            return Ok(Value::Int(0));
+        };
         Ok(Value::Int(
             script_player::has_weapon(&FrameWorld::from_world(world), id, weapon).into(),
         ))

@@ -45,6 +45,8 @@ pub(crate) struct Runtime {
     pub(crate) tables: Arc<BTreeMap<String, StringTable>>,
     pub(crate) rng: u32,
     pub(crate) pending_notifies: Vec<(Value, Arc<str>, Vec<Value>)>,
+    /// Notifies due at a script time (ms): `playsound(alias, "done")`'s once it has played.
+    pub(crate) timed_notifies: Vec<(i64, Value, Arc<str>)>,
     pub(crate) signals: Vec<Arc<str>>,
     pub(crate) engine: host::entities::EngineState,
     pub(crate) players: BTreeMap<u32, host::players::PlayerSlot>,
