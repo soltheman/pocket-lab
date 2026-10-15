@@ -224,6 +224,42 @@ fn graph_end(
         .or_else(|| near.first().copied())
 }
 
+/// The nodes a route may start at for an actor at `at`: the nearest few in sight of it,
+/// each costing the way onto it (height counted double: another floor is further than
+/// it looks), else the nearest.
+fn route_starts(
+    world: &mut World,
+    object: u64,
+    nav: &crate::actor_nav::ActorNav,
+    at: [f32; 3],
+) -> Vec<(usize, f32)> {
+    let near = nav.nearest_k(at, 6);
+    let cost = |node: usize| {
+        let n = nav.nodes[node];
+        let rise = 2.0 * (n[2] - at[2]);
+        (flat_distance(at, n).powi(2) + rise * rise).sqrt()
+    };
+    let seen: Vec<(usize, f32)> = near
+        .iter()
+        .copied()
+        .filter(|&node| {
+            let n = nav.nodes[node];
+            clear_between(
+                world,
+                object,
+                [at[0], at[1], at[2] + 40.0],
+                [n[0], n[1], n[2] + 40.0],
+            )
+        })
+        .map(|node| (node, cost(node)))
+        .collect();
+    if seen.is_empty() {
+        near.first().map(|&node| vec![(node, cost(node))]).unwrap_or_default()
+    } else {
+        seen
+    }
+}
+
 /// Where to steer this tick toward `target`: the next node of a walk-graph route when the
 /// map has one and both ends are on it, else straight at the target.
 fn steer_point(
@@ -247,13 +283,25 @@ fn steer_point(
         .routed_to
         .is_none_or(|was| flat_distance(was, target) > REPLAN_MOVE);
     if moved || now >= state.replan_ms {
-        let start = graph_end(world, object, &nav, origin);
+        // Inside, the route joins where the whole way is shortest (see `route_starts`);
+        // on the way to its window, at the nearest node as before (window entry relies on it).
+        let inside = truthy(
+            &world
+                .resource_mut::<Runtime>()
+                .object_field(object, "completed_emerging_into_playable_area"),
+        );
+        let starts = if inside {
+            route_starts(world, object, &nav, origin)
+        } else {
+            graph_end(world, object, &nav, origin)
+                .map(|node| vec![(node, 0.0)])
+                .unwrap_or_default()
+        };
         let goal = graph_end(world, object, &nav, target);
         // Around closed doors and debris (their `disconnectpaths`).
         let blocks = &world.resource::<Runtime>().nav_blocks;
-        let nodes = start
-            .zip(goal)
-            .and_then(|(start, goal)| nav.route_nodes_open(start, goal, blocks))
+        let nodes = goal
+            .and_then(|goal| nav.route_nodes_from(&starts, goal, blocks))
             .unwrap_or_default();
         state.route = nodes.iter().map(|&node| nav.nodes[node]).collect();
         state.route_traverse = std::iter::once(false)
@@ -284,9 +332,15 @@ fn steer_point(
         if state.route.is_empty() {
             raise(world, Value::Object(object), "bad_path", Vec::new());
         }
-        // The first node is where it stands already, unless a traversal starts there: it
-        // has to get onto it first.
-        if state.route.len() > 1 && !state.route_traverse.get(1).copied().unwrap_or(false) {
+        // The first node is where the route joins. Outside, it is where the actor stands:
+        // skip it. Inside, skip it once the actor is nearer the next node than it is
+        // (passed it), unless a traversal starts there: it has to get onto it first.
+        let keep_entry = inside
+            && state.route.len() > 1
+            && (state.route_traverse.get(1).copied().unwrap_or(false)
+                || flat_distance(origin, state.route[1])
+                    >= flat_distance(state.route[0], state.route[1]));
+        if state.route.len() > 1 && !keep_entry {
             state.route.remove(0);
             state.route_traverse.remove(0);
         }

@@ -28,6 +28,8 @@ pub(crate) const ZOMBIES_HUD: (&str, &str) = (
         level thread face_power_switch();
     if (getdvar("iw4l_zm_watch") == "window")
         level thread face_window();
+    if (getdvar("iw4l_zm_watch") == "at")
+        level thread stand_at();
     if (getdvar("iw4l_zm_watch") == "box")
         level thread face_box();
     if (getdvar("iw4l_zm_watch") == "perk")
@@ -135,6 +137,37 @@ face_door()
             logprint("  " + pieces[i].classname + " " + model + " " + style + " at " + pieces[i].origin + " angles " + pieces[i].angles);
         }
         wait 5;
+    }
+}
+
+// Debug (IW4L_ZM_WATCH=at): the first player stands at IW4L_ZM_X/Y/Z looking along
+// IW4L_ZM_YAW/PITCH, kept there, and ignored by zombies. IW4L_ZM_LOOK=bait: zombies come
+// for it instead, and it can't go down.
+stand_at()
+{
+    wait 8;
+    players = getplayers();
+    if (!players.size)
+        return;
+    p = players[0];
+    bait = getdvar("iw4l_zm_look") == "bait";
+    if (bait)
+        p setmaxhealth(100000);
+    else
+        p.ignoreme = true;
+    at = (getdvarfloat("iw4l_zm_x"), getdvarfloat("iw4l_zm_y"), getdvarfloat("iw4l_zm_z"));
+    look = (getdvarfloat("iw4l_zm_pitch"), getdvarfloat("iw4l_zm_yaw"), 0);
+    p setorigin(at);
+    p setplayerangles(look);
+    wait 1;
+    logprint("stand debug: player " + p.origin + " looking " + look);
+    for (;;)
+    {
+        wait 0.5;
+        p setorigin(at);
+        p setplayerangles(look);
+        if (bait)
+            p.health = 100000;
     }
 }
 

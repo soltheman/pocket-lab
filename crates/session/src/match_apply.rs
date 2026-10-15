@@ -1236,9 +1236,15 @@ fn preflight_match_install(
         script_dvars.push(("zombiemode".into(), "1".into()));
         // Debug modes of the zombies HUD script (iw4l_zombies/hud): IW4L_ZM_WATCH picks one
         // (1, aim, die, buy, door, power, box, perk, nuke), IW4L_ZM_LOOK refines it.
+        // IW4L_ZM_WATCH=at takes IW4L_ZM_X/Y/Z/YAW/PITCH: where to stand and look.
         for (env, dvar) in [
             ("IW4L_ZM_WATCH", "iw4l_zm_watch"),
             ("IW4L_ZM_LOOK", "iw4l_zm_look"),
+            ("IW4L_ZM_X", "iw4l_zm_x"),
+            ("IW4L_ZM_Y", "iw4l_zm_y"),
+            ("IW4L_ZM_Z", "iw4l_zm_z"),
+            ("IW4L_ZM_YAW", "iw4l_zm_yaw"),
+            ("IW4L_ZM_PITCH", "iw4l_zm_pitch"),
         ] {
             if let Ok(value) = std::env::var(env) {
                 script_dvars.push((dvar.into(), value));

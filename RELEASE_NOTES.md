@@ -1,6 +1,10 @@
-# Pocket Lab 0.3.15
+# Pocket Lab 0.3.16
 
 Smoother on the phone, every touch button does its job, and co-op over Wi-Fi.
+
+**New in 0.3.16**
+- Zombies coming down the lobby stairs no longer get stuck halfway, walking up and down on the spot. Halfway down, the nearest path point is a dead end that only leads back up to the landing. Each time a zombie re-planned (once a second) it started from that point, so it turned back up, then down again on the next plan. A zombie that is inside now starts its route from whichever point makes the whole way shortest.
+  Checked on PC, 3 minutes with the player at the foot of those stairs: zombies stuck for 30 seconds or more went from 10 (6 on the stairs) to 2, and none on the stairs. Those 2 were outside one lobby window that zombies sometimes can't get through; that was already happening before and is next.
 
 **New in 0.3.15**
 - Zombies no longer plan their way through closed doors. Black Ops marks every closed door and debris pile as blocking the paths through it, and unblocks them when you buy it; the game ignored both, so zombies walked into closed doors and kept pressing against them. Checked on PC: the door pieces block between 2 and 27 path links each at the start of a match.

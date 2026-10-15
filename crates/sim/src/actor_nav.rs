@@ -172,18 +172,32 @@ impl ActorNav {
         goal: usize,
         blocks: &NavLinkBlocks,
     ) -> Option<Vec<usize>> {
-        if start >= self.nodes.len() || goal >= self.nodes.len() {
+        self.route_nodes_from(&[(start, 0.0)], goal, blocks)
+    }
+
+    /// The cheapest route to `goal` from any of `starts`, each with what getting onto it
+    /// costs. An actor between two nodes enters at the one that makes the whole way
+    /// shortest, not the nearest: on a staircase the nearest can be a dead end that only
+    /// leads back up.
+    pub fn route_nodes_from(
+        &self,
+        starts: &[(usize, f32)],
+        goal: usize,
+        blocks: &NavLinkBlocks,
+    ) -> Option<Vec<usize>> {
+        if goal >= self.nodes.len() || starts.iter().any(|&(start, _)| start >= self.nodes.len()) {
             return None;
-        }
-        if start == goal {
-            return Some(vec![goal]);
         }
         let h = |index: usize| distance(self.nodes[index], self.nodes[goal]);
         let mut best = vec![f32::INFINITY; self.nodes.len()];
         let mut came = vec![u32::MAX; self.nodes.len()];
         let mut open = BinaryHeap::new();
-        best[start] = 0.0;
-        open.push((Reverse(Ordered(h(start))), start as u32));
+        for &(start, cost) in starts {
+            if cost < best[start] {
+                best[start] = cost;
+                open.push((Reverse(Ordered(cost + h(start))), start as u32));
+            }
+        }
         let mut expanded = 0;
         while let Some((_, node)) = open.pop() {
             let node = node as usize;
@@ -285,6 +299,37 @@ mod tests {
             vec![[0.0, 0.0, 0.0], [100.0, 100.0, 0.0], [200.0, 0.0, 0.0]]
         );
         assert!(nav.route([0.0, 0.0, 0.0], [900.0, 0.0, 0.0]).is_none());
+    }
+
+    /// Kino's lobby stairs: halfway down, the nearest node is a dead end that only leads
+    /// back up to the landing. Entering at it sent the zombie up, then down again on the
+    /// next plan, for ever; the route now enters at the node that makes the way shortest.
+    #[test]
+    fn enters_the_route_where_the_whole_way_is_shortest() {
+        let nav = ActorNav {
+            nodes: vec![
+                [-370.0, -984.0, 186.0],  // 0: dead end on the stairs
+                [-362.0, -821.0, 253.0],  // 1: the landing
+                [-298.0, -1029.0, 210.0], // 2: further down the stairs
+                [-240.0, -1426.0, 112.0], // 3: the lobby floor
+            ],
+            adj: vec![
+                vec![(1, 164.0)],
+                vec![(0, 164.0), (2, 218.0)],
+                vec![(1, 218.0), (3, 400.0)],
+                vec![(2, 400.0)],
+            ],
+            snap: 512.0,
+            traversals: Default::default(),
+        };
+        let blocks = NavLinkBlocks::default();
+        // Standing between the dead end (40 away) and the next node down (140 away).
+        let route = nav
+            .route_nodes_from(&[(0, 40.0), (2, 140.0)], 3, &blocks)
+            .unwrap();
+        assert_eq!(route, vec![2, 3]);
+        // From the dead end alone the only way is back up first.
+        assert_eq!(nav.route_nodes_open(0, 3, &blocks).unwrap(), vec![0, 1, 2, 3]);
     }
 
     /// A door across the straight way: closed, the route goes round it (or there is
