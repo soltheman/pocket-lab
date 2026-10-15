@@ -148,6 +148,9 @@ pub(crate) struct Actor {
     home_z: f32,
 }
 
+/// How far above or below its goal an actor may be and still be at it.
+const GOAL_HEIGHT: f32 = 80.0;
+
 /// No headway for this long and the actor hops to where it steers, when that is in sight
 /// and near (a rail, a ledge, a step too tall for the walk).
 const STUCK_MS: i64 = 800;
@@ -273,7 +276,16 @@ fn steer_point(
     let Some(nav) = nav(world) else {
         return target;
     };
-    let close = flat_distance(origin, target) < 96.0 && (origin[2] - target[2]).abs() < 40.0;
+    // Near and in plain sight: straight at it. Near behind a wall (a window's attack spot
+    // round the corner of its frame), still by the route, or it walks into the wall.
+    let close = flat_distance(origin, target) < 96.0
+        && (origin[2] - target[2]).abs() < 40.0
+        && clear_between(
+            world,
+            object,
+            [origin[0], origin[1], origin[2] + 40.0],
+            [target[0], target[1], target[2] + 40.0],
+        );
     if close || nav.is_empty() {
         state.route.clear();
         state.route_traverse.clear();
@@ -1187,7 +1199,11 @@ fn think(
         let to = [at[0] - origin[0], at[1] - origin[1]];
         let distance = (to[0] * to[0] + to[1] * to[1]).sqrt();
         let arrive = if goal.is_some() { radius } else { REACH };
-        if distance > arrive {
+        // On its goal's floor too (the engine's goal height): a zombie upstairs right
+        // above its window has not reached it; it walks on and, when no route leads
+        // there, raises `bad_path` so BO1 picks another window.
+        let level = (at[2] - origin[2]).abs() <= GOAL_HEIGHT;
+        if distance > arrive || !level {
             let via = steer_point(world, object, state, origin, at, now);
             steering = Some(via);
             let to = [via[0] - origin[0], via[1] - origin[1]];

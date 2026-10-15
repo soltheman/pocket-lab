@@ -1,6 +1,12 @@
-# Pocket Lab 0.3.16
+# Pocket Lab 0.3.17
 
 Smoother on the phone, every touch button does its job, and co-op over Wi-Fi.
+
+**New in 0.3.17**
+- Zombies no longer get stranded outside windows before they come in:
+  - A zombie within a few steps of its spot at a window walked straight at it, even with a wall in between. At one lobby window that spot is round the corner of the frame, so it pressed into the wall for good. Now it only walks straight when nothing is in the way.
+  - A zombie upstairs, right above a ground-floor window, counted as having arrived at it. It then tried to tear boards 240 units below it. Arriving now needs it on the same floor. Black Ops then sees the window is out of reach and sends it to another.
+  Checked on PC with two 3-minute tests (player at the start and at the foot of the lobby stairs): no zombie was stuck anywhere, against 10 in 0.3.15.
 
 **New in 0.3.16**
 - Zombies coming down the lobby stairs no longer get stuck halfway, walking up and down on the spot. Halfway down, the nearest path point is a dead end that only leads back up to the landing. Each time a zombie re-planned (once a second) it started from that point, so it turned back up, then down again on the next plan. A zombie that is inside now starts its route from whichever point makes the whole way shortest.

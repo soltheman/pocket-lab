@@ -161,6 +161,26 @@ stand_at()
     p setplayerangles(look);
     wait 1;
     logprint("stand debug: player " + p.origin + " looking " + look);
+    // IW4L_ZM_LOOK=probe: what a trace along the look direction hits, at knee, waist and
+    // chest height (where a zombie walking that way would be stopped).
+    if (getdvar("iw4l_zm_look") == "probe")
+    {
+        forward = anglestoforward((0, look[1], 0));
+        for (h = 20; h <= 60; h += 20)
+        {
+            start = at + (0, 0, h);
+            end = start + (forward[0] * 200, forward[1] * 200, 0);
+            t = bullettrace(start, end, false, p);
+            what = "world";
+            if (isdefined(t["entity"]))
+            {
+                what = t["entity"].classname;
+                if (isdefined(t["entity"].targetname))
+                    what = what + " " + t["entity"].targetname;
+            }
+            logprint("probe debug: height " + h + " fraction " + t["fraction"] + " hit " + t["position"] + " " + what);
+        }
+    }
     for (;;)
     {
         wait 0.5;
