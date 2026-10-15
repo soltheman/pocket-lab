@@ -356,8 +356,36 @@ kill_all_zombies()
         if (!players.size)
             continue;
         zombies = getaiarray("axis");
+        // IW4L_ZM_LOOK=near: only the ones that got in and reached the player (a power-up
+        // dropped outside the playable area is thrown away).
+        near = getdvar("iw4l_zm_look") == "near";
         for (i = 0; i < zombies.size; i++)
+        {
+            if (near && distancesquared(zombies[i].origin, players[0].origin) > 200 * 200)
+                continue;
             zombies[i] dodamage(zombies[i].health + 100, zombies[i].origin, players[0]);
+        }
+        if (near)
+            players[0].health = players[0].maxhealth;
+        // Power-ups on the ground now, and BO1's drop bookkeeping.
+        models = getentarray("script_model", "classname");
+        dropped = "";
+        for (i = 0; i < models.size; i++)
+        {
+            if (isdefined(models[i].powerup_name))
+            {
+                dropped = dropped + " " + models[i].powerup_name + "@" + models[i].origin;
+                // Look at it for a screenshot, then (a round of the loop later) step onto it.
+                if (near && isdefined(models[i].iw4l_seen))
+                    players[0] setorigin(models[i].origin - (0, 0, 40));
+                else if (near)
+                    players[0] setplayerangles(vectortoangles(models[i].origin - players[0] geteye()));
+                models[i].iw4l_seen = true;
+            }
+        }
+        if (near)
+            logprint("nuke debug: insta kill " + level.zombie_vars["zombie_insta_kill"] + ", point scalar " + level.zombie_vars["zombie_point_scalar"]);
+        logprint("nuke debug: killed " + zombies.size + ", score " + players[0].score + ", drops this round " + level.powerup_drop_count + ", on the ground:" + dropped);
     }
 }
 

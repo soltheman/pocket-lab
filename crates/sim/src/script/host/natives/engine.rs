@@ -1627,6 +1627,47 @@ fn register_entity_state(registry: &mut NativeRegistry) {
     entity_accepts!["willneverchange", "laseron", "laseroff", "logstring",];
 }
 
+/// A trace's result as scripts read it: `fraction`, `position`, `entity`, `normal` and
+/// `surfacetype` (`bullettrace`, and BO1's `groundtrace` with what stops a body).
+pub(crate) fn trace_result(
+    world: &mut World,
+    start: [f32; 3],
+    end: [f32; 3],
+    mask: u32,
+    ignore: TraceIgnore,
+) -> Result<Value, String> {
+    let outcome = entity_trace(world, start, end, mask, ignore);
+    let (fraction, normal, collider) = match outcome {
+        TraceOutcome::Hit {
+            fraction,
+            normal,
+            collider,
+            ..
+        } => (fraction, normal, Some(collider)),
+        TraceOutcome::StartSolid { collider, .. } => (0.0, ZERO, collider),
+        _ => (1.0, ZERO, None),
+    };
+    let (normal, surface) = match collider {
+        Some(collider) if fraction < 1.0 => (normal, surface_name(collider)),
+        _ => {
+            let d = sub(end, start);
+            let len = dot(d, d).sqrt();
+            (if len > 0.0 { scale(d, 1.0 / len) } else { ZERO }, "none")
+        }
+    };
+    let entity = collider.map_or(Value::Undefined, |c| collider_entity(world, c));
+    keyed_array(
+        world,
+        vec![
+            ("fraction", Value::Float(fraction)),
+            ("position", Value::Vector(lerp(start, end, fraction))),
+            ("entity", entity),
+            ("normal", Value::Vector(normal)),
+            ("surfacetype", Value::string(surface)),
+        ],
+    )
+}
+
 fn register_traces(registry: &mut NativeRegistry) {
     use Namespace::{Function, Method};
 
@@ -1634,36 +1675,7 @@ fn register_traces(registry: &mut NativeRegistry) {
         let (start, end) = (vector(args, 0)?, vector(args, 1)?);
         let mask = shot_mask(args)?;
         let ignore = trace_ignore(world, args.get(3));
-        let outcome = entity_trace(world, start, end, mask, ignore);
-        let (fraction, normal, collider) = match outcome {
-            TraceOutcome::Hit {
-                fraction,
-                normal,
-                collider,
-                ..
-            } => (fraction, normal, Some(collider)),
-            TraceOutcome::StartSolid { collider, .. } => (0.0, ZERO, collider),
-            _ => (1.0, ZERO, None),
-        };
-        let (normal, surface) = match collider {
-            Some(collider) if fraction < 1.0 => (normal, surface_name(collider)),
-            _ => {
-                let d = sub(end, start);
-                let len = dot(d, d).sqrt();
-                (if len > 0.0 { scale(d, 1.0 / len) } else { ZERO }, "none")
-            }
-        };
-        let entity = collider.map_or(Value::Undefined, |c| collider_entity(world, c));
-        keyed_array(
-            world,
-            vec![
-                ("fraction", Value::Float(fraction)),
-                ("position", Value::Vector(lerp(start, end, fraction))),
-                ("entity", entity),
-                ("normal", Value::Vector(normal)),
-                ("surfacetype", Value::string(surface)),
-            ],
-        )
+        trace_result(world, start, end, mask, ignore)
     });
     registry.register(Function, "bullettracepassed", |world, _, args| {
         let (start, end) = (vector(args, 0)?, vector(args, 1)?);

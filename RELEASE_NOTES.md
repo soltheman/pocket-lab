@@ -1,6 +1,9 @@
-# Pocket Lab 0.3.17
+# Pocket Lab 0.3.18
 
 Smoother on the phone, every touch button does its job, and co-op over Wi-Fi.
+
+**New in 0.3.18**
+- Power-ups drop. When a zombie dies, Black Ops' script finds the floor under it with a ground check this game didn't have yet. The script stopped there every time, so nothing ever dropped. Checked on PC: an Insta-Kill skull, a Max Ammo and a Double Points dropped inside the lobby, each looked like the real thing, and walking onto the Double Points picked it up and doubled the points.
 
 **New in 0.3.17**
 - Zombies no longer get stranded outside windows before they come in:

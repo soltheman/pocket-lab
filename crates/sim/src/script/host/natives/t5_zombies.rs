@@ -30,6 +30,23 @@ fn anim_name(args: &[Value], index: usize) -> Result<String, String> {
 
 /// The builtins implemented so far; `register` stubs the rest.
 fn register_implemented(registry: &mut NativeRegistry) {
+    // `groundtrace(start, end, hit_characters, ignore_ent)`: `bullettrace` against what
+    // stops a body (floors, walls, clip). BO1 drops power-ups and finds the floor under a
+    // dying zombie with it.
+    registry.register(Function, "groundtrace", |world, _, args| {
+        let (start, end) = (
+            super::super::args::vector(args, 0)?,
+            super::super::args::vector(args, 1)?,
+        );
+        let ignore = super::engine::trace_ignore(world, args.get(3));
+        super::engine::trace_result(
+            world,
+            start,
+            end,
+            crate::bullet_collision::MASK_PLAYER_SOLID,
+            ignore,
+        )
+    });
     registry.register(Function, "getplayers", |world, _, _| {
         let players = player_objects(world);
         new_array(world, players)
