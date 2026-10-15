@@ -2162,7 +2162,12 @@ pub(crate) fn script_slide(
 /// frames are player clip, so zombies climb in where players cannot climb out).
 const CONTENTS_PLAYERCLIP: u32 = 0x0001_0000;
 
-/// An AI actor's walk: the slide with monster solidity, so player clip does not stop it.
+/// Monster clip: brushes that stop AI, not players. With player clip it makes the clip
+/// ramp over stairs whose steps do not collide (Kino's back stairwell).
+const CONTENTS_MONSTERCLIP: u32 = 0x0002_0000;
+
+/// An AI actor's walk: the slide with monster solidity: player clip does not stop it,
+/// monster clip does.
 pub(crate) fn actor_slide(
     world: &mut World,
     object: u64,
@@ -2174,7 +2179,7 @@ pub(crate) fn actor_slide(
         object,
         origin,
         slide,
-        crate::bullet_collision::MASK_PLAYER_SOLID & !CONTENTS_PLAYERCLIP,
+        (crate::bullet_collision::MASK_PLAYER_SOLID & !CONTENTS_PLAYERCLIP) | CONTENTS_MONSTERCLIP,
     )
 }
 

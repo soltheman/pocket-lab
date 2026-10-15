@@ -69,7 +69,7 @@ pub(crate) fn attach(runtime: &mut Runtime, value: Detached) -> Result<Value, St
     }
 }
 
-fn symbol_name(runtime: &Runtime, id: u32) -> Option<Arc<str>> {
+pub(crate) fn symbol_name(runtime: &Runtime, id: u32) -> Option<Arc<str>> {
     let program = runtime.program.as_ref()?;
     program.symbols.get(id as usize).cloned().or_else(|| {
         runtime

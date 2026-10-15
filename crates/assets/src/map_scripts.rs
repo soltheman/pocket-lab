@@ -159,6 +159,18 @@ stand_at()
     look = (getdvarfloat("iw4l_zm_pitch"), getdvarfloat("iw4l_zm_yaw"), 0);
     p setorigin(at);
     p setplayerangles(look);
+    // IW4L_ZM_OPEN=1: every door and debris pile the player could buy opens (Black Ops'
+    // own forced unlock), so zombies come from the whole map.
+    if (getdvar("iw4l_zm_open") == "1")
+    {
+        all = getentarray("zombie_door", "targetname");
+        debris = getentarray("zombie_debris", "targetname");
+        for (i = 0; i < debris.size; i++)
+            all[all.size] = debris[i];
+        for (i = 0; i < all.size; i++)
+            all[i] notify("trigger", p, true);
+        logprint("open debug: forced " + all.size + " doors and debris open");
+    }
     wait 1;
     logprint("stand debug: player " + p.origin + " looking " + look);
     // IW4L_ZM_LOOK=probe: what a trace along the look direction hits, at knee, waist and

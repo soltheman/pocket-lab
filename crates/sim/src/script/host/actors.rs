@@ -347,18 +347,33 @@ fn steer_point(
         // The first node is where the route joins. Outside, it is where the actor stands:
         // skip it. Inside, skip it once the actor is nearer the next node than it is
         // (passed it), unless a traversal starts there: it has to get onto it first.
+        // Nearer on the map is not nearer by the way when the next node is out of sight:
+        // at the top of a flight of stairs, the node at its foot is behind the rail.
         let keep_entry = inside
             && state.route.len() > 1
             && (state.route_traverse.get(1).copied().unwrap_or(false)
                 || flat_distance(origin, state.route[1])
-                    >= flat_distance(state.route[0], state.route[1]));
+                    >= flat_distance(state.route[0], state.route[1])
+                || !clear_between(
+                    world,
+                    object,
+                    [origin[0], origin[1], origin[2] + 40.0],
+                    [
+                        state.route[1][0],
+                        state.route[1][1],
+                        state.route[1][2] + 40.0,
+                    ],
+                ));
         if state.route.len() > 1 && !keep_entry {
             state.route.remove(0);
             state.route_traverse.remove(0);
         }
     }
     while let Some(next) = state.route.first() {
-        if flat_distance(origin, *next) < NODE_REACHED && (origin[2] - next[2]).abs() < 48.0 {
+        // Nodes sit about 32 above the floor, more over the clip ramp on a flight of
+        // stairs (Kino's back stairwell: 62), so one up to the goal height counts.
+        let rise = next[2] - origin[2];
+        if flat_distance(origin, *next) < NODE_REACHED && rise < GOAL_HEIGHT && rise > -48.0 {
             state.route.remove(0);
             if !state.route_traverse.is_empty() {
                 state.route_traverse.remove(0);
@@ -684,7 +699,28 @@ pub(crate) fn spawn_from_spawner(
     let presence = super::presence::spawn_presence(world, origin)?;
     let number = FrameWorld::from_world(world).gentity_number(presence);
     let mut runtime = world.resource_mut::<Runtime>();
+    // The spawner's script keys and `target` go to the actor it spawns, as the engine
+    // spawns an AI from its spawner's key/values: BO1 reads them on the zombie
+    // (`script_string` "zombie_chaser" skips the windows, "riser" climbs out of the
+    // ground, `target` names the window it heads for).
+    let inherited: Vec<(u32, Value)> = runtime
+        .objects
+        .get(&spawner)
+        .map(|fields| {
+            fields
+                .iter()
+                .filter(|(symbol, _)| {
+                    super::restart::symbol_name(&runtime, **symbol)
+                        .is_some_and(|name| name.starts_with("script_") || &*name == "target")
+                })
+                .map(|(symbol, value)| (*symbol, value.clone()))
+                .collect()
+        })
+        .unwrap_or_default();
     let id = runtime.create_entity(EntityKind::Actor, &classname)?;
+    if let Some(fields) = runtime.objects.get_mut(&id) {
+        fields.extend(inherited);
+    }
     runtime.set_object_field(id, "origin", Value::Vector(origin));
     runtime.set_object_field(id, "angles", Value::Vector([0.0, angles[1], 0.0]));
     runtime.set_object_field(id, "model", Value::string(&model));
@@ -1277,13 +1313,45 @@ fn think(
     {
         diag::info!(
             Sim,
-            "actor debug: {object} at [{:.0}, {:.0}, {:.0}] headed {headed:?} goal {:?} reached {} in play {in_play} attacking {attacking}",
+            "actor debug: {object} at [{:.0}, {:.0}, {:.0}] headed {headed:?} goal {:?} reached {} in play {in_play} attacking {attacking} via {:?} route {:?}",
             moved[0],
             moved[1],
             moved[2],
             state.goal,
             state.goal_reached,
+            steering.map(|v| v.map(|c| c as i32)),
+            state
+                .route
+                .iter()
+                .take(3)
+                .map(|n| n.map(|c| c as i32))
+                .collect::<Vec<_>>(),
         );
+        // IW4L_ACTOR_FLOOR=1: what is under and ahead of it, per kind of collision.
+        if std::env::var_os("IW4L_ACTOR_FLOOR").is_some() {
+            let mut rows = Vec::new();
+            for (what, mask) in [
+                ("solid", crate::bullet_collision::CONTENTS_SOLID),
+                ("playerclip", 0x0001_0000),
+                ("monsterclip", 0x0002_0000),
+                ("player", crate::bullet_collision::MASK_PLAYER_SOLID),
+            ] {
+                let down = super::natives::engine::entity_trace(
+                    world,
+                    [moved[0], moved[1], moved[2] + 100.0],
+                    [moved[0], moved[1], moved[2] - 100.0],
+                    mask,
+                    Default::default(),
+                );
+                rows.push(format!("{what} {down:?}"));
+            }
+            diag::info!(
+                Sim,
+                "actor floor: {object} at {:?}: {}",
+                moved.map(|v| v as i32),
+                rows.join(" | ")
+            );
+        }
     }
     {
         let mut runtime = world.resource_mut::<Runtime>();

@@ -1,6 +1,19 @@
-# Pocket Lab 0.3.21
+# Pocket Lab 0.3.22
 
 Smoother on the phone, every touch button does its job, and co-op over Wi-Fi.
+
+**New in 0.3.22**
+- Zombie pathfinding, mostly for once doors are open:
+  - **Zombies follow their spawner's instructions.** Each place zombies spawn tells Black Ops how they should come in, and none of it ever reached the zombie:
+    - Half of Kino's 50 spawn points (back rooms, balconies, stage) send their zombies straight at you instead of to a window. Those zombies went looking for a window anyway. Where their room has no way to one, they stood still until Black Ops removed them about a minute later.
+    - The two spawn points by the lobby name the window their zombies use. Their zombies instead picked one of the 3 nearest windows at random, so upstairs zombies sometimes went for a downstairs window. Following that instruction needed a path-point lookup the game didn't have.
+  - **Zombies no longer fall through the back stairwell.** Its steps are a ramp that only stops players and AI, and the game only applied the player part, so zombies dropped into the room below, where there are no paths. They now climb the stairs to their window.
+  - **Zombies no longer bounce at the top of the east stairs.** On their way to the theater, some zombies headed straight for a point at the foot of the stairs, hit the rail, and went back and forth.
+- Checked on PC, 3 minutes per test, player unkillable so zombies keep coming:
+  - every door forced open, player at the start: 29 of 30 zombies got inside and none got stuck (the last had spawned 14 seconds before the end). In 0.3.21: 23 of 36.
+  - every door forced open, player in the theater: none stuck; 6 of 7 crossed the map to the player.
+  - doors closed, player at the start and at the foot of the lobby stairs: no zombie stuck, same as 0.3.21.
+- Not checked yet: the theater's own spawn points, including two where zombies climb out of the ground. In my tests the theater never switched on as an area, because the player was moved there rather than walking in. They now get their instructions like the others, but I haven't seen them spawn.
 
 **New in 0.3.21**
 - The low walls under Kino's boarded windows show again. They're the splintered wooden panels zombies climb over. Black Ops keeps those two models in the map's language file (`en_zombie_theater`), and the map itself only refers to them by name. The game never looked there for models, so all 12 were missing and left a gap down to the floor. They now load from that file, are solid like the rest of the map, and zombies still climb in over them. Checked on PC:

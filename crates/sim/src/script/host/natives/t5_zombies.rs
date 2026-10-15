@@ -383,7 +383,6 @@ pub(crate) fn register(registry: &mut NativeRegistry) {
         Method "getmotionangle",
         Function "getmovedelta",
         Method "getnegotiationendnode",
-        Function "getnode",
         Function "getnotetracksindelta",
         Function "getnumconnectedplayers",
         Function "getnumexpectedplayers",

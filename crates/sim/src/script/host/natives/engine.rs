@@ -303,6 +303,26 @@ fn matching_entities(world: &mut World, args: &[Value]) -> Result<Vec<u64>, Stri
         .collect())
 }
 
+fn matching_nodes(world: &mut World, args: &[Value]) -> Result<Vec<u64>, String> {
+    let value = string(args, 0)?;
+    let key = string(args, 1)?.to_ascii_lowercase();
+    let mut runtime = runtime(world);
+    let field = runtime.symbol(&key);
+    let runtime = &*runtime;
+    Ok(runtime
+        .engine
+        .map_nodes
+        .iter()
+        .copied()
+        .filter(|id| {
+            matches!(
+                runtime.objects.get(id).and_then(|f| f.get(&field)),
+                Some(Value::String(s)) if **s == *value
+            )
+        })
+        .collect())
+}
+
 fn classname_prefix(world: &World, ids: Vec<u64>, prefix: &str) -> Vec<u64> {
     let runtime = world.resource::<Runtime>();
     ids.into_iter()
@@ -779,6 +799,19 @@ fn register_entities(registry: &mut NativeRegistry) {
 
     registry.register(Function, "getent", |world, _, args| {
         single(matching_entities(world, args)?, "getent")
+    });
+    // `GetNode(value, key)` / `GetNodeArray(value, key)`: the map's path nodes whose key
+    // (targetname, target, script_noteworthy, ...) holds that value.
+    registry.register(Function, "getnode", |world, _, args| {
+        single(matching_nodes(world, args)?, "getnode")
+    });
+    registry.register(Function, "getnodearray", |world, _, args| {
+        let ids = matching_nodes(world, args)?;
+        objects(world, ids)
+    });
+    registry.register(Function, "getallnodes", |world, _, _| {
+        let ids = runtime(world).engine.map_nodes.clone();
+        objects(world, ids)
     });
     registry.register(Function, "getentarray", |world, _, args| {
         let ids = if args.is_empty() {

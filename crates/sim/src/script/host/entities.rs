@@ -114,6 +114,8 @@ pub fn parse_entity_string(text: &str) -> Vec<Vec<(String, String)>> {
 #[derive(Clone, Debug, Default)]
 pub(crate) struct EngineState {
     pub worldspawn: BTreeMap<String, String>,
+    /// The map's path nodes as script objects, in map order.
+    pub map_nodes: Vec<u64>,
     pub world: Option<u64>,
     pub team_scores: BTreeMap<String, i32>,
     pub team_radar: BTreeMap<String, i32>,
@@ -435,6 +437,7 @@ impl Runtime {
             Value::Array(id) => Some(id),
             _ => None,
         };
+        self.engine.map_nodes.clear();
         let t5 = self
             .program
             .as_ref()
@@ -459,7 +462,39 @@ impl Runtime {
                 self.engine.world = Some(world);
                 continue;
             }
-            if classname.is_empty() || classname.starts_with("node_") {
+            if classname.is_empty() {
+                continue;
+            }
+            // Path nodes are not entities; `GetNode`/`GetNodeArray` find them by a key.
+            if let Some(kind) = classname.strip_prefix("node_") {
+                let id = self.new_object()?;
+                for (key, value) in pairs {
+                    let key = key.to_ascii_lowercase();
+                    let value = match key.as_str() {
+                        "origin" | "angles" => Value::Vector(vector(value)),
+                        "classname" => continue,
+                        _ => Value::string(value),
+                    };
+                    self.set_object_field(id, &key, value);
+                }
+                let node_type = match kind {
+                    "pathnode" => "Path",
+                    "negotiation_begin" => "Begin",
+                    "negotiation_end" => "End",
+                    "cover_stand" => "Cover Stand",
+                    "cover_crouch" => "Cover Crouch",
+                    "cover_prone" => "Cover Prone",
+                    "concealment_stand" => "Conceal Stand",
+                    "concealment_crouch" => "Conceal Crouch",
+                    "concealment_prone" => "Conceal Prone",
+                    "guard" => "Guard",
+                    "ambush" => "Ambush",
+                    "exposed" => "Exposed",
+                    "turret" => "Turret",
+                    _ => kind,
+                };
+                self.set_object_field(id, "type", Value::string(node_type));
+                self.engine.map_nodes.push(id);
                 continue;
             }
             let id = if classname == "script_struct" {

@@ -994,6 +994,53 @@ impl fastfile_t5::AssetLinkSink for ZoneWalkSink {
             s.f32_at(node, ORIGIN_OFF + 4)?,
             s.f32_at(node, ORIGIN_OFF + 8)?,
         ]);
+        // IW4L_NODE_PROBE="x y z r": the type, names and links of the nodes near a point.
+        if let Ok(probe) = std::env::var("IW4L_NODE_PROBE") {
+            let v: Vec<f32> = probe
+                .split([' ', ','])
+                .filter_map(|v| v.trim().parse().ok())
+                .collect();
+            let at = paths.nodes[index];
+            if let [x, y, z, r] = v[..]
+                && (at[0] - x).powi(2) + (at[1] - y).powi(2) + (at[2] - z).powi(2) <= r * r
+            {
+                let name = |offset| {
+                    s.u16_at(node, offset)
+                        .ok()
+                        .filter(|&id| id != 0)
+                        .and_then(|id| self.strings_t5.get(s, id))
+                        .unwrap_or("")
+                        .to_owned()
+                };
+                let raw: Vec<String> = (0..ORIGIN_OFF / 2)
+                    .map(|i| format!("{:04x}", s.u16_at(node, i * 2).unwrap_or(0)))
+                    .collect();
+                let mut link_rows = Vec::new();
+                if let Some(links) = links {
+                    for i in 0..link_count {
+                        let link = links.at(i * LINK);
+                        link_rows.push(format!(
+                            "{}:{:.0}:{}:{}",
+                            s.u16_at(link, 4).unwrap_or(0),
+                            s.f32_at(link, 0).unwrap_or(0.0),
+                            s.u8_at(link, 6).unwrap_or(0),
+                            s.u8_at(link, 7).unwrap_or(0)
+                        ));
+                    }
+                }
+                diag::info!(
+                    World,
+                    "node probe {index} at {:?}: raw [{}] targetname {:?} linkname {:?} noteworthy {:?} target {:?} animscript {:?} links {link_rows:?}",
+                    at.map(|v| v as i32),
+                    raw.join(" "),
+                    name(6),
+                    name(8),
+                    name(10),
+                    name(12),
+                    name(14),
+                );
+            }
+        }
         let mut out = Vec::with_capacity(link_count);
         if let Some(links) = links {
             for i in 0..link_count {

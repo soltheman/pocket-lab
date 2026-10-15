@@ -1641,6 +1641,7 @@ impl Runtime {
             pending.extend(args.iter().cloned());
         }
         pending.extend(self.engine.world.map(Value::Object));
+        pending.extend(self.engine.map_nodes.iter().copied().map(Value::Object));
         pending.extend(
             self.engine
                 .objectives
