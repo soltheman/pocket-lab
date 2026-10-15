@@ -1716,6 +1716,7 @@ impl ZoneLane for T6Lane {
         progress: &LoadProgress,
         _shared_surfaces: asset_model::SharedXModelSurfaces,
         material_seed: asset_material::MaterialCatalog,
+        _donor_xmodels: super::DonorXModels,
         _common_film_visions: &mut BTreeMap<
             String,
             Result<asset_world::FilmVision, asset_world::FilmVisionParseError>,

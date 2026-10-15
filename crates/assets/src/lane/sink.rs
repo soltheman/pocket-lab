@@ -1653,6 +1653,10 @@ pub(crate) struct MaterialPopulationSink {
     pub scripts: crate::ScriptSources,
 
     pub sound: Option<asset_audio::ZoneSoundCapture>,
+
+    /// Set: keep the zone's XModels by name (see `ZoneLane::load_map_language_population`).
+    pub donor_xmodels: Option<super::DonorXModels>,
+    strings_t5: fastfile_t5::ScriptStrings,
 }
 
 impl MaterialPopulationSink {
@@ -1843,7 +1847,9 @@ impl fastfile_iw5::AssetLinkSink for MaterialPopulationSink {
 }
 
 impl fastfile_t5::AssetSink for MaterialPopulationSink {
-    fn set_script_strings(&mut self, _strings: fastfile_t5::ScriptStrings) {}
+    fn set_script_strings(&mut self, strings: fastfile_t5::ScriptStrings) {
+        self.strings_t5 = strings;
+    }
 
     fn load_asset(
         &mut self,
@@ -1867,6 +1873,22 @@ impl fastfile_t5::AssetLinkSink for MaterialPopulationSink {
         insert_slot: Option<fastfile_t5::Ptr>,
     ) -> fastfile_t5::Result<()> {
         self.materials.t5_loaded(stream, ty, slot, insert_slot);
+        if ty == fastfile_t5::AssetType::XModel
+            && let Some(donors) = self.donor_xmodels.as_mut()
+            && let Some(geometry) = stream.latest_xmodel()
+            && let Ok(mesh) =
+                asset_world::build_t5_xmodel_mesh(stream, geometry, Some(&self.materials))
+            && !mesh.name.starts_with(',')
+        {
+            let skel = asset_model::capture_xmodel_skel_t5(
+                stream,
+                &self.strings_t5,
+                geometry,
+                &self.materials,
+            )
+            .map(std::sync::Arc::new);
+            donors.insert(mesh.name.clone(), super::DonorXModel { mesh, skel });
+        }
         Ok(())
     }
 

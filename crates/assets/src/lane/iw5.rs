@@ -135,6 +135,7 @@ impl ZoneLane for Iw5Lane {
         progress: &LoadProgress,
         shared_surfaces: asset_model::SharedXModelSurfaces,
         material_seed: asset_material::MaterialCatalog,
+        _donor_xmodels: super::DonorXModels,
         _common_film_visions: &mut std::collections::BTreeMap<
             String,
             Result<asset_world::FilmVision, asset_world::FilmVisionParseError>,
@@ -805,6 +806,7 @@ impl ZoneLane for Iw5Lane {
             report,
             cac_tables: sink.stats_tables.into_values().collect(),
             scripts: sink.scripts,
+            donor_xmodels: Default::default(),
         }
     }
 }

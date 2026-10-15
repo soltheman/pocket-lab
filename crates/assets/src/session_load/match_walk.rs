@@ -2,17 +2,18 @@ use super::*;
 
 static NEXT_PRODUCTS_ID: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(1);
 
-/// BO1 keeps some of a zombies map's character materials in the map's language archive
-/// (en_zombie_theater holds the zombie body materials the map zone names as references),
-/// so that archive's materials join the seed before the map walk links against it.
+/// BO1 keeps some of a zombies map's character materials and models in the map's language
+/// archive (en_zombie_theater holds the zombie body materials and the low walls under Kino's
+/// windows, which the map zone names only as references), so that archive's materials join
+/// the seed before the map walk links against it, and its XModels go along for the map walk.
 fn walk_map_language_materials(
     map_path: &std::path::Path,
     progress: &LoadProgress,
     seed: MaterialCatalog,
     report: &mut Vec<String>,
-) -> MaterialCatalog {
+) -> (MaterialCatalog, crate::lane::DonorXModels) {
     let Some(stem) = map_path.file_stem().and_then(|stem| stem.to_str()) else {
-        return seed;
+        return (seed, Default::default());
     };
     let found = match asset_transport::discover::find_t5_localized_zone(map_path, None, stem) {
         Ok(Some(found)) => found,
@@ -20,11 +21,11 @@ fn walk_map_language_materials(
             report.push(format!(
                 "map language materials: no language archive for {stem}"
             ));
-            return seed;
+            return (seed, Default::default());
         }
         Err(error) => {
             report.push(format!("map language materials: {error}"));
-            return seed;
+            return (seed, Default::default());
         }
     };
     let image = match open_zone_shared(&found.path) {
@@ -34,17 +35,18 @@ fn walk_map_language_materials(
                 "map language materials: {}: {error}",
                 found.zone_name
             ));
-            return seed;
+            return (seed, Default::default());
         }
     };
     let before = seed.materials.len();
-    let pop = lane(image.game).load_material_population(&found.path, &image, progress, seed);
+    let pop = lane(image.game).load_map_language_population(&found.path, &image, progress, seed);
     report.push(format!(
-        "map language materials: {} added {} materials",
+        "map language materials: {} added {} materials and {} xmodels",
         found.zone_name,
         pop.materials.materials.len().saturating_sub(before),
+        pop.donor_xmodels.len(),
     ));
-    pop.materials
+    (pop.materials, pop.donor_xmodels)
 }
 
 pub(super) async fn walk_prepared_match(
@@ -180,12 +182,12 @@ pub(super) async fn walk_prepared_match(
                 asset_core::ZoneGame::Iw5 => iw5_shared_surfaces,
                 _ => shared_surfaces,
             };
-            let material_seed = if game == asset_core::ZoneGame::T5
+            let (material_seed, donor_xmodels) = if game == asset_core::ZoneGame::T5
                 && zone_name.starts_with("zombie_")
             {
                 walk_map_language_materials(&path, &progress, material_seed, &mut language_report)
             } else {
-                material_seed
+                (material_seed, Default::default())
             };
             (
                 lane(game).load_world(
@@ -194,6 +196,7 @@ pub(super) async fn walk_prepared_match(
                     &progress,
                     shared_surfaces,
                     material_seed,
+                    donor_xmodels,
                     &mut common_film_visions,
                 ),
                 Some(asset_core::AssetNamespace::from_zone_game(game)),

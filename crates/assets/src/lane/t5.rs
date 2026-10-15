@@ -64,6 +64,7 @@ impl ZoneLane for T5Lane {
         progress: &LoadProgress,
         _shared_surfaces: asset_model::SharedXModelSurfaces,
         material_seed: asset_material::MaterialCatalog,
+        donor_xmodels: super::DonorXModels,
         _common_film_visions: &mut std::collections::BTreeMap<
             String,
             Result<asset_world::FilmVision, asset_world::FilmVisionParseError>,
@@ -115,6 +116,8 @@ impl ZoneLane for T5Lane {
         let mut sink = ZoneWalkSink::default();
         let seeded_techsets = material_seed.technique_set_facts().to_vec();
         sink.seed_materials(material_seed);
+        let donor_count = donor_xmodels.len();
+        sink.map_xmodels.set_donors(donor_xmodels);
         sink.set_capture_zone(asset_core::ZoneOwner::from_zone_path(path));
         sink.set_capture_ns(asset_core::AssetNamespace::T5);
         sink.sound = Some(asset_audio::ZoneSoundCapture::for_map(
@@ -138,6 +141,12 @@ impl ZoneLane for T5Lane {
             )),
         }
         stage.set_completed(sink.walked as u64);
+        if donor_count > 0 {
+            report.push(format!(
+                "map xmodels from the language archive: {} of {donor_count} used",
+                sink.map_xmodels.take_donors_used(),
+            ));
+        }
         report.push(format!(
             "pointer drift: {} unsettled offsets",
             stream.unsettled_offsets()
@@ -723,68 +732,94 @@ impl ZoneLane for T5Lane {
         progress: &LoadProgress,
         material_seed: asset_material::MaterialCatalog,
     ) -> MaterialPopulation {
-        let _ = progress;
-        let zone_name = path.file_stem().map_or_else(
-            || "startup".to_owned(),
-            |stem| stem.to_string_lossy().into_owned(),
-        );
-        let header = match image.t5_header() {
-            Ok(header) => header,
-            Err(error) => {
-                return MaterialPopulation {
-                    materials: material_seed,
-                    report: vec![format!("startup materials: T5 zone header: {error}")],
-                    ..Default::default()
-                };
-            }
-        };
-        let mut memory = T5ZoneMemory::for_header(&header);
-        let mut stream = match memory.stream(&image.bytes) {
-            Ok(stream) => stream,
-            Err(error) => {
-                return MaterialPopulation {
-                    materials: material_seed,
-                    report: vec![format!("startup materials: T5 zone arenas: {error}")],
-                    ..Default::default()
-                };
-            }
-        };
-        let mut sink = MaterialPopulationSink::default();
-        sink.seed_materials(material_seed);
-        sink.set_capture_zone(asset_core::ZoneOwner::from_zone_path(path));
-        sink.set_capture_ns(asset_core::AssetNamespace::T5);
-        sink.sound = asset_audio::ZoneSoundCapture::claim_common(
-            path,
-            asset_audio::ZoneGame::T5,
-            "material population",
-        );
-        let walk = fastfile_t5::load_zone(&mut stream, &mut sink);
-        if let Some(sound) = sink.sound.take() {
-            sound.deposit(walk.as_ref().map(|_| ()).map_err(|e| e.to_string()));
+        t5_material_population(path, image, progress, material_seed, false)
+    }
+
+    fn load_map_language_population(
+        &self,
+        path: &Path,
+        image: &ZoneImage,
+        progress: &LoadProgress,
+        material_seed: asset_material::MaterialCatalog,
+    ) -> MaterialPopulation {
+        t5_material_population(path, image, progress, material_seed, true)
+    }
+}
+
+/// `keep_xmodels`: also keep every XModel the zone defines, for a map zone that names
+/// them by reference.
+fn t5_material_population(
+    path: &Path,
+    image: &ZoneImage,
+    progress: &LoadProgress,
+    material_seed: asset_material::MaterialCatalog,
+    keep_xmodels: bool,
+) -> MaterialPopulation {
+    let _ = progress;
+    let zone_name = path.file_stem().map_or_else(
+        || "startup".to_owned(),
+        |stem| stem.to_string_lossy().into_owned(),
+    );
+    let header = match image.t5_header() {
+        Ok(header) => header,
+        Err(error) => {
+            return MaterialPopulation {
+                materials: material_seed,
+                report: vec![format!("startup materials: T5 zone header: {error}")],
+                ..Default::default()
+            };
         }
-        let mut report = Vec::new();
-        if let Err(error) = walk {
-            report.push(format!(
-                "startup materials: T5 walk stopped after {} assets — {error}",
-                sink.walked
-            ));
+    };
+    let mut memory = T5ZoneMemory::for_header(&header);
+    let mut stream = match memory.stream(&image.bytes) {
+        Ok(stream) => stream,
+        Err(error) => {
+            return MaterialPopulation {
+                materials: material_seed,
+                report: vec![format!("startup materials: T5 zone arenas: {error}")],
+                ..Default::default()
+            };
         }
-        let memory = sink.materials.image_memory();
+    };
+    let mut sink = MaterialPopulationSink::default();
+    sink.seed_materials(material_seed);
+    if keep_xmodels {
+        sink.donor_xmodels = Some(super::DonorXModels::new());
+    }
+    sink.set_capture_zone(asset_core::ZoneOwner::from_zone_path(path));
+    sink.set_capture_ns(asset_core::AssetNamespace::T5);
+    sink.sound = asset_audio::ZoneSoundCapture::claim_common(
+        path,
+        asset_audio::ZoneGame::T5,
+        "material population",
+    );
+    let walk = fastfile_t5::load_zone(&mut stream, &mut sink);
+    if let Some(sound) = sink.sound.take() {
+        sound.deposit(walk.as_ref().map(|_| ()).map_err(|e| e.to_string()));
+    }
+    let mut report = Vec::new();
+    if let Err(error) = walk {
         report.push(format!(
+            "startup materials: T5 walk stopped after {} assets — {error}",
+            sink.walked
+        ));
+    }
+    let memory = sink.materials.image_memory();
+    report.push(format!(
             "startup material walk: zone={zone_name} assets={} materials={} images={} decoded={} fpv=0 weapons=0 (materials-only sink; not load_common_mp)",
             sink.walked,
             sink.materials.materials.len(),
             memory.images,
             memory.decoded_images,
         ));
-        MaterialPopulation {
-            walked: sink.walked,
-            light_defs: Vec::new(),
-            materials: sink.materials,
-            report,
-            cac_tables: sink.stats_tables.into_values().collect(),
-            scripts: sink.scripts,
-        }
+    MaterialPopulation {
+        walked: sink.walked,
+        light_defs: Vec::new(),
+        materials: sink.materials,
+        report,
+        cac_tables: sink.stats_tables.into_values().collect(),
+        scripts: sink.scripts,
+        donor_xmodels: sink.donor_xmodels.unwrap_or_default(),
     }
 }
 

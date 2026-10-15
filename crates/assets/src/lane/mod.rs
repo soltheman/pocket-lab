@@ -133,6 +133,15 @@ pub struct CommonCensus {
     pub t6_content: Option<t6::T6Content>,
 }
 
+/// An XModel a BO1 map zone names only by reference (`,name`), captured from the archive
+/// that defines it (the map's language archive).
+pub struct DonorXModel {
+    pub mesh: asset_world::ModelMesh,
+    pub skel: Option<std::sync::Arc<asset_model::ModelSkel>>,
+}
+
+pub type DonorXModels = std::collections::HashMap<String, DonorXModel>;
+
 pub struct MaterialPopulation {
     pub materials: asset_material::MaterialCatalog,
     pub light_defs: Vec<asset_world::CapturedLightDef>,
@@ -140,6 +149,7 @@ pub struct MaterialPopulation {
     pub report: Vec<String>,
     pub cac_tables: Vec<asset_game::CapturedStringTable>,
     pub scripts: crate::ScriptSources,
+    pub donor_xmodels: DonorXModels,
 }
 
 impl Default for MaterialPopulation {
@@ -151,6 +161,7 @@ impl Default for MaterialPopulation {
             report: Vec::new(),
             cac_tables: Vec::new(),
             scripts: crate::ScriptSources::default(),
+            donor_xmodels: DonorXModels::new(),
         }
     }
 }
@@ -168,6 +179,7 @@ pub trait ZoneLane: Send + Sync {
         shared_surfaces: asset_model::SharedXModelSurfaces,
 
         material_seed: asset_material::MaterialCatalog,
+        donor_xmodels: DonorXModels,
         common_film_visions: &mut std::collections::BTreeMap<
             String,
             Result<asset_world::FilmVision, asset_world::FilmVisionParseError>,
@@ -190,6 +202,18 @@ pub trait ZoneLane: Send + Sync {
         progress: &LoadProgress,
         material_seed: asset_material::MaterialCatalog,
     ) -> MaterialPopulation;
+
+    /// `load_material_population` for a map's language archive: also keeps the archive's
+    /// XModels, which the map zone may name only by reference.
+    fn load_map_language_population(
+        &self,
+        path: &Path,
+        image: &ZoneImage,
+        progress: &LoadProgress,
+        material_seed: asset_material::MaterialCatalog,
+    ) -> MaterialPopulation {
+        self.load_material_population(path, image, progress, material_seed)
+    }
 }
 
 pub fn lane(game: ZoneGame) -> &'static dyn ZoneLane {

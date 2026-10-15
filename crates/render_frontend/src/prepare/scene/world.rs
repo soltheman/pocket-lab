@@ -1369,7 +1369,8 @@ pub fn world_scene_from_draw(
                     .find(|range| (range.begin..range.end).contains(&(surf as u32)))
                     .map(|range| format!("{:?}", range.kind));
                 rows.push(format!(
-                    "{surf} {material} tris {} range {} [{:.0} {:.0} {:.0}]..[{:.0} {:.0} {:.0}]",
+                    "{surf} {material} lightmap {} tris {} range {} [{:.0} {:.0} {:.0}]..[{:.0} {:.0} {:.0}]",
+                    draw.surface_lightmap_indices.get(surf).copied().unwrap_or(255),
                     count / 3,
                     ranged.unwrap_or_else(|| "none".into()),
                     lo[0],
@@ -1459,7 +1460,7 @@ pub fn world_scene_from_draw(
         }),
     };
     let sky_model = draw.sky_model.take().map(&convert_model);
-    let static_model_meshes = world
+    let static_model_meshes: Vec<WorldStaticModelMesh> = world
         .static_model_meshes
         .into_iter()
         .map(convert_model)
@@ -1482,6 +1483,85 @@ pub fn world_scene_from_draw(
             })
         })
         .collect::<Vec<_>>();
+
+    // IW4L_SURF_PROBE also lists the static models, script models and script brush
+    // models placed within r + 96 of the point (window sills, frames and the like).
+    if let Ok(probe) = std::env::var("IW4L_SURF_PROBE") {
+        let v: Vec<f32> = probe
+            .split([' ', ','])
+            .filter_map(|s| s.trim().parse().ok())
+            .collect();
+        if let [x, y, z, r] = v[..] {
+            let reach = r + 96.0;
+            let brush_model_bounds_probe = &draw.brush_model_bounds;
+            let near = |o: [f32; 3]| {
+                ((o[0] - x).powi(2) + (o[1] - y).powi(2) + (o[2] - z).powi(2)).sqrt() <= reach
+            };
+            let smodels: Vec<String> = static_model_instances
+                .iter()
+                .flatten()
+                .filter(|i| near(i.origin))
+                .map(|i| {
+                    let name = static_model_meshes
+                        .get(i.mesh)
+                        .map_or("?", |m: &WorldStaticModelMesh| m.name.as_str());
+                    format!("{name} at {:?}", i.origin.map(|v| v as i32))
+                })
+                .collect();
+            let scripted: Vec<String> = world
+                .script_model_instances
+                .iter()
+                .filter(|p| near(p.lighting_origin))
+                .map(|p| format!("{:?} at {:?}", p.current_model, p.lighting_origin.map(|v| v as i32)))
+                .collect();
+            // By the brush's own bounds placed at its origin, not just the origin.
+            let brushes: Vec<String> = world
+                .script_brush_models
+                .iter()
+                .filter(|b| {
+                    let Some(bounds) = brush_model_bounds_probe.get(b.cmodel_handle as usize)
+                    else {
+                        return near(b.origin);
+                    };
+                    (0..3).all(|k| {
+                        let mid = b.origin[k] + bounds.mid[k];
+                        ([x, y, z][k] - mid).abs() <= bounds.half[k] + r
+                    })
+                })
+                .map(|b| {
+                    let bounds = brush_model_bounds_probe.get(b.cmodel_handle as usize);
+                    let surfs: Vec<&str> = draw
+                        .brush_models
+                        .get(b.cmodel_handle as usize)
+                        .map(|m| {
+                            let start = usize::from(m.start_surf);
+                            (start..start + usize::from(m.surface_count))
+                                .map(|s| {
+                                    surface_material_asset_ids
+                                        .get(s)
+                                        .copied()
+                                        .flatten()
+                                        .and_then(|i| global_materials.materials.get(i.order()))
+                                        .map_or("<none>", |m| m.name.as_str())
+                                })
+                                .collect()
+                        })
+                        .unwrap_or_default();
+                    format!(
+                        "*{} at {:?} mid {:?} half {:?} surfaces {surfs:?}",
+                        b.cmodel_handle,
+                        b.origin.map(|v| v as i32),
+                        bounds.map(|v| v.mid.map(|v| v as i32)),
+                        bounds.map(|v| v.half.map(|v| v as i32))
+                    )
+                })
+                .collect();
+            diag::info!(
+                World,
+                "model probe at [{x}, {y}, {z}] within {reach}: static models {smodels:?}; script models {scripted:?}; script brush models {brushes:?}"
+            );
+        }
+    }
 
     let script_model_instances = world
         .script_model_instances

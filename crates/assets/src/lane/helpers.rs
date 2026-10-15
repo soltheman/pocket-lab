@@ -27,6 +27,11 @@ pub(crate) struct MapXModelCatalog {
     scene_assets: MapXModelSceneCatalog,
 
     t5_destructibles: HashMap<String, Result<T5DestructibleInitial, &'static str>>,
+
+    /// XModels this zone names only by reference (`,name`), from the archive that defines
+    /// them.
+    donors: super::DonorXModels,
+    donors_used: usize,
 }
 
 struct T5DestructibleInitial {
@@ -45,6 +50,16 @@ impl MapXModelCatalog {
             }
         }
         Some(self.meshes.remove(index))
+    }
+
+    pub(crate) fn set_donors(&mut self, donors: super::DonorXModels) {
+        self.donors = donors;
+    }
+
+    /// How many references the donors resolved; drops the donors.
+    pub(crate) fn take_donors_used(&mut self) -> usize {
+        self.donors = Default::default();
+        self.donors_used
     }
 
     pub(crate) fn set_capture_zone(&mut self, zone: asset_core::ZoneOwner) {
@@ -111,16 +126,45 @@ impl MapXModelCatalog {
             self.failed += 1;
             return;
         };
-        let Ok(mesh) = build_t5_xmodel_mesh(stream, geometry, Some(materials)) else {
-            self.failed += 1;
-            return;
+        let skel_failed = MapXModelSceneAsset::Unavailable {
+            reason: "T5 XModel scene skeleton capture failed",
+        };
+        let (mesh, scene_asset) = match build_t5_xmodel_mesh(stream, geometry, Some(materials)) {
+            Ok(mesh) => {
+                let scene_asset =
+                    asset_model::capture_xmodel_skel_t5(stream, strings, geometry, materials)
+                        .map(|skel| MapXModelSceneAsset::T5(std::sync::Arc::new(skel)))
+                        .unwrap_or(skel_failed);
+                (mesh, scene_asset)
+            }
+            Err(error) => {
+                let name = geometry
+                    .name
+                    .and_then(|p| stream.cstr(p).ok())
+                    .unwrap_or("?");
+                // A `,name` asset is a reference to an XModel another zone defines (BO1 keeps
+                // some of a zombies map's models in its language archive).
+                let donor = name
+                    .strip_prefix(',')
+                    .and_then(|name| self.donors.get(name));
+                let Some(donor) = donor else {
+                    self.failed += 1;
+                    diag::warn!(
+                        World,
+                        "map xmodel {name:?} at {slot:?} not captured: {error:?}"
+                    );
+                    return;
+                };
+                self.donors_used += 1;
+                let scene_asset = donor
+                    .skel
+                    .clone()
+                    .map(MapXModelSceneAsset::T5)
+                    .unwrap_or(skel_failed);
+                (donor.mesh.clone(), scene_asset)
+            }
         };
         let scene_key = MapXModelAssetKey(mesh.name.clone());
-        let scene_asset = asset_model::capture_xmodel_skel_t5(stream, strings, geometry, materials)
-            .map(|skel| MapXModelSceneAsset::T5(std::sync::Arc::new(skel)))
-            .unwrap_or(MapXModelSceneAsset::Unavailable {
-                reason: "T5 XModel scene skeleton capture failed",
-            });
         self.scene_assets.insert(scene_key, scene_asset);
         let index = self.meshes.len();
         self.meshes.push(mesh);
@@ -639,9 +683,17 @@ pub(crate) fn link_model_placements(
     };
 
     if static_error.is_none() {
+        let mut unresolved_at = Vec::new();
         for (slot, placement) in placements.into_iter().enumerate() {
             let Some(source_mesh) = catalog.mesh_index(placement.model_slot) else {
                 gaps += 1;
+                if unresolved_at.len() < 80 {
+                    unresolved_at.push(format!(
+                        "{:?} at {:?}",
+                        placement.model_slot,
+                        placement.origin.map(|v| v as i32)
+                    ));
+                }
                 continue;
             };
             let mesh = take_mesh(source_mesh);
@@ -665,6 +717,14 @@ pub(crate) fn link_model_placements(
                 primary_light_index: placement.primary_light_index,
                 flags: placement.flags,
             });
+        }
+        if !unresolved_at.is_empty() {
+            diag::info!(
+                World,
+                "static models with no captured model ({}): {}",
+                unresolved_at.len(),
+                unresolved_at.join("; ")
+            );
         }
     } else {
         gaps = gaps.saturating_add(smodel_count);
