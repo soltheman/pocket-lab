@@ -212,13 +212,15 @@ impl ZoneLane for T5Lane {
             for links in &mut paths.links {
                 links.retain(|(to, _)| *to < count);
             }
+            paths.traversals.retain(|(_, to)| *to < count);
             std::sync::Arc::new(paths)
         });
         if let Some(paths) = &ai_paths {
             report.push(format!(
-                "AI path nodes: {} nodes, {} links",
+                "AI path nodes: {} nodes, {} links ({} traversals)",
                 paths.nodes.len(),
-                paths.links.iter().map(Vec::len).sum::<usize>()
+                paths.links.iter().map(Vec::len).sum::<usize>(),
+                paths.traversals.len()
             ));
         }
         let script_sound = std::mem::take(&mut sink.script_sound).finish();

@@ -574,6 +574,7 @@ fn share_navigation_with_actors(
             })
             .collect(),
         snap: nav::SNAP_IN.min(192.0),
+        traversals: Default::default(),
     });
 }
 

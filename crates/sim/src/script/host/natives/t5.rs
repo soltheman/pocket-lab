@@ -1386,11 +1386,70 @@ fn register_entity(registry: &mut NativeRegistry) {
         "enablelinkto",
         "setforcenocull",
         "setrevivehintstring",
-        "connectpaths",
-        "disconnectpaths",
         "clientsyssetstate",
         "sendfaceevent",
     );
+    // A closed door's pieces and debris close the walk-graph links through them, and
+    // reopen them once bought (BO1 `_zombiemode_blockers`). Without this, zombies route
+    // through closed doors and push against them.
+    registry.register(Method, "disconnectpaths", |world, receiver, _| {
+        let id = super::engine::entity_id(world, receiver)?;
+        let Some(nav) = super::super::actors::nav(world) else {
+            return Ok(Value::Undefined);
+        };
+        let Some((mins, maxs)) = entity_world_box(world, id, receiver) else {
+            return Ok(Value::Undefined);
+        };
+        let links = nav.links_through(mins, maxs);
+        let through = links.len();
+        let closed = world
+            .resource_mut::<Runtime>()
+            .nav_blocks
+            .disconnect(id, links);
+        diag::info!(
+            Sim,
+            "disconnectpaths: entity {id} box {:?}..{:?} closes {closed} walk links ({through} pass through it)",
+            mins.map(|v| v as i32),
+            maxs.map(|v| v as i32)
+        );
+        Ok(Value::Undefined)
+    });
+    registry.register(Method, "connectpaths", |world, receiver, _| {
+        let id = super::engine::entity_id(world, receiver)?;
+        let opened = world.resource_mut::<Runtime>().nav_blocks.connect(id);
+        diag::info!(Sim, "connectpaths: entity {id} reopens {opened} walk links");
+        Ok(Value::Undefined)
+    });
+}
+
+/// A brush entity's world-space box: its `*N` model's bounds turned by its angles and
+/// moved to its origin. `None` for an entity with no brush model.
+fn entity_world_box(
+    world: &mut World,
+    id: u64,
+    receiver: &Value,
+) -> Option<([f32; 3], [f32; 3])> {
+    let (local_mins, local_maxs) = super::super::triggers::entity_bounds(world, id);
+    if local_mins == local_maxs {
+        return None;
+    }
+    let origin = vector_field(world, receiver, "origin");
+    let axis = math_iw4::angles_to_axis(vector_field(world, receiver, "angles"));
+    let mut mins = [f32::MAX; 3];
+    let mut maxs = [f32::MIN; 3];
+    for corner in 0..8 {
+        let local = [
+            if corner & 1 == 0 { local_mins[0] } else { local_maxs[0] },
+            if corner & 2 == 0 { local_mins[1] } else { local_maxs[1] },
+            if corner & 4 == 0 { local_mins[2] } else { local_maxs[2] },
+        ];
+        for k in 0..3 {
+            let v = origin[k] + local[0] * axis[0][k] + local[1] * axis[1][k] + local[2] * axis[2][k];
+            mins[k] = mins[k].min(v);
+            maxs[k] = maxs[k].max(v);
+        }
+    }
+    Some((mins, maxs))
 }
 
 fn register_platform(registry: &mut NativeRegistry) {

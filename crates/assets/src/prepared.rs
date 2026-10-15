@@ -57,6 +57,9 @@ pub struct MapFacts {
 pub struct AiPathGraph {
     pub nodes: Vec<[f32; 3]>,
     pub links: Vec<Vec<(u32, f32)>>,
+    /// Links that are traversals (`pathlink_s.negotiationLink`): a jump down, a climb
+    /// up, a mantle — not walkable, played as a move from one end to the other.
+    pub traversals: Vec<(u32, u32)>,
 }
 
 #[derive(Clone, Debug, Default, PartialEq)]

@@ -76,6 +76,8 @@ pub(crate) struct Runtime {
     pub(crate) pending_deletes: Vec<u64>,
     pub(crate) vehicles: BTreeMap<u64, host::vehicles::Heli>,
     pub(crate) actors: BTreeMap<u64, host::actors::Actor>,
+    /// Walk-graph links closed by `disconnectpaths` (closed doors, debris).
+    pub(crate) nav_blocks: crate::actor_nav::NavLinkBlocks,
     pub(crate) planes: BTreeMap<u64, host::vehicles::Plane>,
     pub(crate) use_selected: BTreeMap<u32, u64>,
     pub(crate) t5: host::natives::t5::T5State,

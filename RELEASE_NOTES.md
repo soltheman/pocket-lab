@@ -1,6 +1,12 @@
-# Pocket Lab 0.3.14
+# Pocket Lab 0.3.15
 
 Smoother on the phone, every touch button does its job, and co-op over Wi-Fi.
+
+**New in 0.3.15**
+- Zombies no longer plan their way through closed doors. Black Ops marks every closed door and debris pile as blocking the paths through it, and unblocks them when you buy it; the game ignored both, so zombies walked into closed doors and kept pressing against them. Checked on PC: the door pieces block between 2 and 27 path links each at the start of a match.
+- Zombies use the map's own jump-down and climb-up spots (54 in Kino), going up then across or across then down instead of walking into the ledge.
+- A zombie stuck against a rail or ledge it could hop over no longer gets refused because of walls that only block players.
+- Not yet seen on screen: a zombie using a jump or climb spot (none needed one in a 2-minute test standing at the start).
 
 **New in 0.3.14**
 - Doors, debris and the boards on the windows now show. They are pieces of level geometry Black Ops' scripts move and hide, and none had ever been drawn, for three reasons:

@@ -974,7 +974,7 @@ impl fastfile_t5::AssetSink for ZoneWalkSink {
 
 impl fastfile_t5::AssetLinkSink for ZoneWalkSink {
     /// `pathnode_constant_t.vOrigin` sits after the type, flags, names and animscript;
-    /// `pathlink_s` is `{ fDist, nodeNum, .. }`.
+    /// `pathlink_s` is `{ fDist, nodeNum, disconnectCount, negotiationLink, .. }`.
     fn capture_path_node(
         &mut self,
         s: &fastfile_t5::ZoneStream<'_>,
@@ -998,7 +998,11 @@ impl fastfile_t5::AssetLinkSink for ZoneWalkSink {
         if let Some(links) = links {
             for i in 0..link_count {
                 let link = links.at(i * LINK);
-                out.push((u32::from(s.u16_at(link, 4)?), s.f32_at(link, 0)?.max(1.0)));
+                let to = u32::from(s.u16_at(link, 4)?);
+                out.push((to, s.f32_at(link, 0)?.max(1.0)));
+                if s.u8_at(link, 7)? != 0 {
+                    paths.traversals.push((index as u32, to));
+                }
             }
         }
         paths.links.push(out);

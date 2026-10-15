@@ -95,6 +95,32 @@ struct Traverse {
     ms: i64,
     /// Through its window (BO1 waits on the traverse notifies), not an unsticking hop.
     window: bool,
+    /// Over a ledge (a traversal link or a hop): up before across when climbing, across
+    /// before down when dropping, so it doesn't pass through the ledge's corner.
+    ledge: bool,
+}
+
+impl Traverse {
+    /// Where it is `t` (0..1) of the way through.
+    fn at(&self, t: f32) -> [f32; 3] {
+        let mut at: [f32; 3] = std::array::from_fn(|i| self.from[i] + (self.to[i] - self.from[i]) * t);
+        if self.ledge {
+            let rise = self.to[2] - self.from[2];
+            let share = if rise > 0.0 {
+                (t / 0.4).min(1.0)
+            } else {
+                ((t - 0.5) / 0.5).max(0.0)
+            };
+            at[2] = self.from[2] + rise * share;
+        }
+        at
+    }
+}
+
+/// How long a traversal (or hop) from `from` to `to` takes.
+fn ledge_ms(from: [f32; 3], to: [f32; 3]) -> i64 {
+    let rise = (to[2] - from[2]).abs();
+    (500.0 + flat_distance(from, to) * 3.0 + rise * 4.0).clamp(500.0, 2500.0) as i64
 }
 
 #[derive(Clone, Debug, Default)]
@@ -112,6 +138,8 @@ pub(crate) struct Actor {
     climbed: bool,
     /// The walk-graph route toward `routed_to`, next node first, and when to plan again.
     route: Vec<[f32; 3]>,
+    /// Per route node: reaching it from the node before is a traversal (jump, climb).
+    route_traverse: Vec<bool>,
     routed_to: Option<[f32; 3]>,
     replan_ms: i64,
     /// Since when its walk has made no headway, and where it was steering.
@@ -127,15 +155,17 @@ const HOP_REACH: f32 = 260.0;
 /// Fallen this far below its spawn: out of the map, so it dies.
 const FELL_OUT: f32 = 1500.0;
 
-/// Nothing solid between two points (the actor itself aside).
+/// Nothing solid between two points (the actor itself aside), by what stops an actor's
+/// walk: player clip (rails, ledge edges kept from players) doesn't.
 fn clear_between(world: &mut World, object: u64, a: [f32; 3], b: [f32; 3]) -> bool {
+    const CONTENTS_PLAYERCLIP: u32 = 0x0001_0000;
     let ignore = super::natives::engine::trace_ignore(world, Some(&Value::Object(object)));
     matches!(
         super::natives::engine::entity_trace(
             world,
             a,
             b,
-            crate::bullet_collision::MASK_PLAYER_SOLID,
+            crate::bullet_collision::MASK_PLAYER_SOLID & !CONTENTS_PLAYERCLIP,
             ignore,
         ),
         crate::bullet_collision::TraceOutcome::Miss { .. }
@@ -163,7 +193,7 @@ const REPLAN_MOVE: f32 = 96.0;
 const NODE_REACHED: f32 = 28.0;
 
 /// The graph actors route over: the map's own path nodes, else the baked walk graph.
-fn nav(world: &mut World) -> Option<std::sync::Arc<crate::actor_nav::ActorNav>> {
+pub(crate) fn nav(world: &mut World) -> Option<std::sync::Arc<crate::actor_nav::ActorNav>> {
     FrameWorld::from_world(world).ai_nav().or_else(|| {
         world
             .get_resource::<crate::actor_nav::BakedActorNav>()
@@ -210,6 +240,7 @@ fn steer_point(
     let close = flat_distance(origin, target) < 96.0 && (origin[2] - target[2]).abs() < 40.0;
     if close || nav.is_empty() {
         state.route.clear();
+        state.route_traverse.clear();
         return target;
     }
     let moved = state
@@ -218,10 +249,20 @@ fn steer_point(
     if moved || now >= state.replan_ms {
         let start = graph_end(world, object, &nav, origin);
         let goal = graph_end(world, object, &nav, target);
-        state.route = start
+        // Around closed doors and debris (their `disconnectpaths`).
+        let blocks = &world.resource::<Runtime>().nav_blocks;
+        let nodes = start
             .zip(goal)
-            .and_then(|(start, goal)| nav.route_between(start, goal))
+            .and_then(|(start, goal)| nav.route_nodes_open(start, goal, blocks))
             .unwrap_or_default();
+        state.route = nodes.iter().map(|&node| nav.nodes[node]).collect();
+        state.route_traverse = std::iter::once(false)
+            .chain(
+                nodes
+                    .windows(2)
+                    .map(|pair| nav.traversals.contains(&(pair[0] as u32, pair[1] as u32))),
+            )
+            .collect();
         if std::env::var_os("IW4L_ACTOR_DEBUG").is_some() {
             diag::info!(
                 Sim,
@@ -243,14 +284,52 @@ fn steer_point(
         if state.route.is_empty() {
             raise(world, Value::Object(object), "bad_path", Vec::new());
         }
-        // The first node is where it stands already.
-        if state.route.len() > 1 {
+        // The first node is where it stands already, unless a traversal starts there: it
+        // has to get onto it first.
+        if state.route.len() > 1 && !state.route_traverse.get(1).copied().unwrap_or(false) {
             state.route.remove(0);
+            state.route_traverse.remove(0);
         }
     }
     while let Some(next) = state.route.first() {
         if flat_distance(origin, *next) < NODE_REACHED && (origin[2] - next[2]).abs() < 48.0 {
             state.route.remove(0);
+            if !state.route_traverse.is_empty() {
+                state.route_traverse.remove(0);
+            }
+            // At a traversal's start: jump down, climb up or mantle to its end, as the
+            // map's traverse animscripts would carry it.
+            // Only once inside: getting in through its window is the window climb's.
+            let inside = truthy(
+                &world
+                    .resource_mut::<Runtime>()
+                    .object_field(object, "completed_emerging_into_playable_area"),
+            );
+            if inside
+                && state.route_traverse.first().copied().unwrap_or(false)
+                && let Some(&end) = state.route.first()
+            {
+                state.route.remove(0);
+                state.route_traverse.remove(0);
+                state.traverse = Some(Traverse {
+                    from: origin,
+                    to: end,
+                    start_ms: now,
+                    ms: ledge_ms(origin, end),
+                    window: false,
+                    ledge: true,
+                });
+                play(world, object, state, pick(&TRAVERSE_CLIPS, object));
+                if std::env::var_os("IW4L_ACTOR_DEBUG").is_some() {
+                    diag::info!(
+                        Sim,
+                        "actor debug: {object} traverses {:?} -> {:?}",
+                        origin.map(|v| v as i32),
+                        end.map(|v| v as i32)
+                    );
+                }
+                return end;
+            }
         } else {
             break;
         }
@@ -850,6 +929,7 @@ fn window_climb(runtime: &mut Runtime, object: u64, origin: [f32; 3]) -> Option<
         start_ms: 0,
         ms: TRAVERSE_MS,
         window: true,
+        ledge: false,
     })
 }
 
@@ -974,8 +1054,7 @@ fn think(
     }
     if let Some(climb) = state.traverse.clone() {
         let t = ((now - climb.start_ms) as f32 / climb.ms.max(1) as f32).clamp(0.0, 1.0);
-        let at: [f32; 3] =
-            std::array::from_fn(|i| climb.from[i] + (climb.to[i] - climb.from[i]) * t);
+        let at = climb.at(t);
         let yaw = (climb.to[1] - climb.from[1]).atan2(climb.to[0] - climb.from[0]);
         {
             let mut runtime = world.resource_mut::<Runtime>();
@@ -1116,6 +1195,7 @@ fn think(
                     start_ms: now,
                     ms: ms.clamp(400, 1500),
                     window: false,
+                    ledge: true,
                 });
             }
         }

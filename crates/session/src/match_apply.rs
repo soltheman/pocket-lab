@@ -415,6 +415,7 @@ pub fn apply_prepared_match(
                 nodes: paths.nodes.clone(),
                 adj: paths.links.clone(),
                 snap: 512.0,
+                traversals: paths.traversals.iter().copied().collect(),
             });
         }
         content.set_anim_notes(xanims.0.names().filter_map(|name| {
