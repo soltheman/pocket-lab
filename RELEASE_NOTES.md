@@ -6,7 +6,7 @@ Smoother on the phone, every touch button does its job, and co-op over Wi-Fi.
 - The low walls under Kino's boarded windows show again. They're the splintered wooden panels zombies climb over. Black Ops keeps those two models in the map's language file (`en_zombie_theater`), and the map itself only refers to them by name. The game never looked there for models, so all 12 were missing and left a gap down to the floor. They now load from that file, are solid like the rest of the map, and zombies still climb in over them. Checked on PC:
   - the lobby window shows its wall where it showed a black gap before;
   - two 3-minute tests (player at the start, then right next to that window): no zombie got stuck, and as many came in through that window as before.
-- Not fixed yet: perk bottles and the teddy bear in the mystery box are missing the same way, but they live in a different file that the game doesn't read yet. Zombies that lose their legs don't crawl.
+- Not fixed yet: perk bottles and the teddy bear in the mystery box are missing the same way. They aren't in the language file, and where they are is next. Zombies that lose their legs don't crawl.
 
 **New in 0.3.20**
 - Zombies no longer T-pose when they lose a limb. Since 0.3.19, Black Ops' limb-loss script runs to the end (before, it stopped early). It swaps the zombie's body for a damaged one, and this game treated the swap as a brand-new model with no animation. The animation now carries on through the swap. Checked on PC: zombies that lost an arm keep walking and reaching.
