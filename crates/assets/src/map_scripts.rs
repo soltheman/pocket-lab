@@ -359,10 +359,27 @@ kill_all_zombies()
         // IW4L_ZM_LOOK=near: only the ones that got in and reached the player (a power-up
         // dropped outside the playable area is thrown away).
         near = getdvar("iw4l_zm_look") == "near";
+        // IW4L_ZM_LOOK=gib: zombies that reach the player lose an arm (as a body shot can
+        // do), are looked at, and are left alive.
+        gib = getdvar("iw4l_zm_look") == "gib";
         for (i = 0; i < zombies.size; i++)
         {
-            if (near && distancesquared(zombies[i].origin, players[0].origin) > 200 * 200)
+            if ((near || gib) && distancesquared(zombies[i].origin, players[0].origin) > 200 * 200)
                 continue;
+            if (gib)
+            {
+                if (!isdefined(zombies[i].iw4l_gibbed))
+                {
+                    zombies[i].iw4l_gibbed = true;
+                    zombies[i].a.gib_ref = "right_arm";
+                    zombies[i] thread animscripts\zombie_death::do_gib();
+                    logprint("gib debug: zombie at " + zombies[i].origin + " loses its right arm");
+                }
+                players[0] setplayerangles(vectortoangles(zombies[i].origin + (0, 0, 40) - players[0] geteye()));
+                players[0] setmaxhealth(100000);
+                players[0].health = 100000;
+                continue;
+            }
             zombies[i] dodamage(zombies[i].health + 100, zombies[i].origin, players[0]);
         }
         if (near)

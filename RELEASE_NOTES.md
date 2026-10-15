@@ -1,6 +1,10 @@
-# Pocket Lab 0.3.19
+# Pocket Lab 0.3.20
 
 Smoother on the phone, every touch button does its job, and co-op over Wi-Fi.
+
+**New in 0.3.20**
+- Zombies no longer T-pose when they lose a limb. Since 0.3.19, Black Ops' limb-loss script runs to the end (before, it stopped early). It swaps the zombie's body for a damaged one, and this game treated the swap as a brand-new model with no animation. The animation now carries on through the swap. Checked on PC: zombies that lost an arm keep walking and reaching.
+- Not fixed yet: zombies that lose their legs should switch to crawling and don't. The black areas behind some windows are still black: the rooms there exist in the map data and are marked to be drawn, and the reason they show black is still being tracked down.
 
 **New in 0.3.19**
 - Fewer of Black Ops' scripts stop partway through. Each of these used to stop the script that ran into it:

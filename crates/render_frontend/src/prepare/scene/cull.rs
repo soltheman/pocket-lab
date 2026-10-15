@@ -222,8 +222,15 @@ pub fn apply_dpvs_cull(
     let mut vis = VisBits::new(&mut words);
     let mut scratch = WalkScratch::new();
     let mut walk_stats = dpvs_iw4::WalkStats::default();
+    // IW4L_ALL_CELLS=1: every cell visible, to tell culling from missing surfaces.
+    let all_cells = std::env::var_os("IW4L_ALL_CELLS").is_some();
     match eye_cell {
         Some(cell) if single_cell => vis.set(cell),
+        Some(_) if all_cells => {
+            for cell in 0..dpvs.cell_count {
+                vis.set(cell);
+            }
+        }
 
         Some(cell) => {
             let mut cell_clips = vec![CellClipPlanes::EMPTY; dpvs.cell_count];
@@ -307,6 +314,11 @@ pub fn apply_dpvs_cull(
                 &mut vis_data,
                 &mut aabb_stats,
             );
+        }
+        // IW4L_ALL_CELLS=2: every static surface too, past its bounds test.
+        if std::env::var("IW4L_ALL_CELLS").as_deref() == Ok("2") {
+            vis_data.surface_vis.fill(1);
+            vis_data.smodel_vis.fill(1);
         }
     }
 

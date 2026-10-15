@@ -1328,6 +1328,67 @@ pub fn world_scene_from_draw(
             .collect(),
         cell_caster_bits: Vec::new(),
     };
+    // IW4L_SURF_PROBE="x y z r": the world surfaces within r of a point, their material
+    // and whether a camera range draws them, to find surfaces that never show.
+    if let Ok(probe) = std::env::var("IW4L_SURF_PROBE") {
+        let v: Vec<f32> = probe
+            .split([' ', ','])
+            .filter_map(|s| s.trim().parse().ok())
+            .collect();
+        if let [x, y, z, r] = v[..] {
+            let at = [x, y, z];
+            let mut rows = Vec::new();
+            for (surf, &(first, count)) in draw.surface_index_ranges.iter().enumerate() {
+                let mut lo = [f32::MAX; 3];
+                let mut hi = [f32::MIN; 3];
+                for i in first..first.saturating_add(count) {
+                    let Some(p) = draw
+                        .packed_indices
+                        .get(i as usize)
+                        .and_then(|&vi| draw.positions.get(vi as usize))
+                    else {
+                        continue;
+                    };
+                    for k in 0..3 {
+                        lo[k] = lo[k].min(p[k]);
+                        hi[k] = hi[k].max(p[k]);
+                    }
+                }
+                if !(0..3).all(|k| lo[k] - r <= at[k] && at[k] <= hi[k] + r) {
+                    continue;
+                }
+                let material = surface_material_asset_ids
+                    .get(surf)
+                    .copied()
+                    .flatten()
+                    .and_then(|m| global_materials.materials.get(m.order()))
+                    .map_or("<none>", |m| m.name.as_str());
+                let ranged = dpvs
+                    .camera_ranges
+                    .iter()
+                    .find(|range| (range.begin..range.end).contains(&(surf as u32)))
+                    .map(|range| format!("{:?}", range.kind));
+                rows.push(format!(
+                    "{surf} {material} tris {} range {} [{:.0} {:.0} {:.0}]..[{:.0} {:.0} {:.0}]",
+                    count / 3,
+                    ranged.unwrap_or_else(|| "none".into()),
+                    lo[0],
+                    lo[1],
+                    lo[2],
+                    hi[0],
+                    hi[1],
+                    hi[2]
+                ));
+            }
+            diag::info!(
+                World,
+                "surface probe at {at:?} r {r}: {} surfaces (static {}): {}",
+                rows.len(),
+                dpvs.static_surface_count,
+                rows.join(" | ")
+            );
+        }
+    }
     if let Some(light) = draw
         .primary_lights
         .iter()

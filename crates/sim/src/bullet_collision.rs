@@ -386,6 +386,24 @@ impl AuthorityDObjState {
         self.pose_request = xmodel_runtime::DObjPoseRequest::bind_pose();
     }
 
+    /// `replace_model` for a script's `SetModel` on a living, animating entity: the
+    /// animation belongs to the entity, not the model, and carries on (as IW's XAnim
+    /// tree does). BO1 gibs a zombie by setting its damaged torso as the main model;
+    /// dropping the walk there left the whole body in its bind pose (a T-pose).
+    pub fn replace_model_keep_anim(
+        &mut self,
+        model: &str,
+        capability: Option<std::sync::Arc<xmodel_runtime::RetainedModelCapability>>,
+    ) {
+        let play = self.play_anim.take();
+        let tree = self.semantic_state.tree.take();
+        self.replace_model(model, capability);
+        if let (Some(play), Some(tree)) = (play, tree) {
+            self.play_anim = Some(play);
+            self.semantic_state.tree = Some(tree);
+        }
+    }
+
     pub fn set_attachments(&mut self, attachments: &[(&str, &str)]) {
         let mut models = vec![xmodel_runtime::DObjModelDescriptor {
             model: self.current_model.clone(),

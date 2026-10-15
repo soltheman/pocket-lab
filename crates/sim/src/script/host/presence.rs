@@ -414,7 +414,7 @@ fn present_model(frame: &mut FrameWorld, want: &Wanted) {
         (None, _) => row.dobj = None,
         (Some(model), Some(dobj)) => {
             if dobj.current_model != **model {
-                dobj.replace_model(model, capability);
+                dobj.replace_model_keep_anim(model, capability);
             }
         }
         (Some(model), None) => {
