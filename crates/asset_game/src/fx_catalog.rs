@@ -630,6 +630,39 @@ impl FxCatalog {
                     elem.vis_samples.get(..4),
                     elem.visuals
                 );
+                let v = &elem.view;
+                let f = |at: usize| {
+                    elem.vis_samples
+                        .get(at..at + 4)
+                        .map(|b| f32::from_le_bytes([b[0], b[1], b[2], b[3]]))
+                };
+                diag::info!(
+                    World,
+                    "fx probe {name} elem {i}: type {} flags {:#x} spawn {} {} range {} {} cull {} delay {}+{} life {}+{} visuals {} size0 {:?} {:?} scale {:?} vel {:?} origin {:?} radius {} {} gravity {} {} sort {} lighting {}",
+                    v.elem_type,
+                    v.flags,
+                    v.spawn_a,
+                    v.spawn_b,
+                    v.spawn_range_base,
+                    v.spawn_range_amplitude,
+                    v.spawn_frustum_cull_radius,
+                    v.spawn_delay_msec_base,
+                    v.spawn_delay_msec_amplitude,
+                    v.life_span_msec_base,
+                    v.life_span_msec_amplitude,
+                    v.visual_count,
+                    f(12),
+                    f(16),
+                    f(20),
+                    elem.vel_graph_local.first(),
+                    v.spawn_origin,
+                    v.spawn_offset_radius_base,
+                    v.spawn_offset_radius_amplitude,
+                    v.gravity_base,
+                    v.gravity_amplitude,
+                    v.sort_order,
+                    v.lighting_frac,
+                );
             }
         }
         self.last_captured = Some(name.to_owned());

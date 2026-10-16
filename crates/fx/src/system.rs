@@ -221,6 +221,9 @@ pub struct PendingTrailImpact {
 
 pub struct FxSystemHost {
     pub spawn_mark_entity: Option<u16>,
+    /// Where the camera was last frame: elements with a spawn range (an effect's near and
+    /// far versions of itself) spawn only while it is that far from the effect.
+    pub spawn_camera: Option<[f32; 3]>,
     pub last_decal_mark_entity: Option<u16>,
     effects: Vec<FxEffectSlot>,
 
@@ -503,6 +506,7 @@ impl FxSystemHost {
             };
         }
         Self {
+            spawn_camera: None,
             effects: (0..FX_EFFECT_POOL_CAPACITY)
                 .map(|_| FxEffectSlot::default())
                 .collect(),

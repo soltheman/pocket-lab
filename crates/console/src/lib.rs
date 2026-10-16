@@ -25,6 +25,7 @@ pub mod editor;
 mod feature_dispatch;
 mod frontend;
 mod game_folders;
+pub mod game_text;
 mod pocket_options;
 mod gamepad;
 pub mod input;

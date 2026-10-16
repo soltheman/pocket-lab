@@ -23,6 +23,7 @@ use bevy::window::PrimaryWindow;
 use frame::{AppScreen, GameSettings};
 use ui::UiLayer;
 
+use crate::game_text::{GameFont, GameText, GameTextMut};
 use crate::{ConsoleCommand, ConsoleRegistry};
 use crate::{ConsoleSettings, ConsoleState};
 
@@ -641,7 +642,7 @@ pub(crate) fn load_touch_icons(
     commands.insert_resource(TouchIcons(handles));
 }
 
-pub(crate) fn spawn_touch_overlay(commands: &mut Commands, font: Handle<Font>, enabled: bool) {
+pub(crate) fn spawn_touch_overlay(commands: &mut Commands, enabled: bool) {
     if !enabled {
         return;
     }
@@ -674,13 +675,7 @@ pub(crate) fn spawn_touch_overlay(commands: &mut Commands, font: Handle<Font>, e
                 .with_children(|button| {
                     button.spawn((
                         TouchButtonLabel(index),
-                        Text::new(spec.label),
-                        TextFont {
-                            font: font.clone().into(),
-                            font_size: FontSize::Px(11.0),
-                            ..default()
-                        },
-                        TextColor(LABEL),
+                        GameText::new(GameFont::Normal, 11.0, LABEL, spec.label),
                     ));
                     button.spawn((
                         TouchButtonIcon(index),
@@ -776,15 +771,11 @@ pub(crate) fn spawn_touch_overlay(commands: &mut Commands, font: Handle<Font>, e
                         justify_content: JustifyContent::Center,
                         ..default()
                     })
-                    .with_child((
-                        Text::new("DRAG A BUTTON TO MOVE IT"),
-                        TextFont {
-                            font: font.clone().into(),
-                            font_size: FontSize::Px(16.0),
-                            ..default()
-                        },
-                        TextColor(LABEL),
-                        TextShadow::default(),
+                    .with_child(GameText::new(
+                        GameFont::Normal,
+                        16.0,
+                        LABEL,
+                        "DRAG A BUTTON TO MOVE IT",
                     ));
                 for (index, label) in ["RESET", "DONE"].into_iter().enumerate() {
                     banner
@@ -808,15 +799,7 @@ pub(crate) fn spawn_touch_overlay(commands: &mut Commands, font: Handle<Font>, e
                             BorderColor::all(RIM),
                             FocusPolicy::Pass,
                         ))
-                        .with_child((
-                            Text::new(label),
-                            TextFont {
-                                font: font.clone().into(),
-                                font_size: FontSize::Px(15.0),
-                                ..default()
-                            },
-                            TextColor(LABEL),
-                        ));
+                        .with_child(GameText::new(GameFont::Normal, 15.0, LABEL, label));
                 }
             });
         });
@@ -849,7 +832,7 @@ pub(crate) fn update_touch_overlay(
         ),
     >,
     mut labels: Query<
-        (&TouchButtonLabel, &mut TextFont, &mut TextColor, &mut Node),
+        (&TouchButtonLabel, &mut GameText, &mut Node),
         Without<TouchButtonNode>,
     >,
     mut glyphs: Query<
@@ -972,16 +955,10 @@ pub(crate) fn update_touch_overlay(
         }
     }
     let icons_on = settings.touch_icons && icons.is_some();
-    for (label, mut font, mut color, mut node) in &mut labels {
+    for (label, mut text, mut node) in &mut labels {
         let radius = placed[label.0].map_or(30.0, |placed| placed.radius);
-        let want = FontSize::Px(label_px(radius));
-        if font.font_size != want {
-            font.font_size = want;
-        }
-        let want = faded(LABEL, opacity.max(0.6));
-        if color.0 != want {
-            color.0 = want;
-        }
+        text.set_size(label_px(radius));
+        text.set_color(faded(LABEL, opacity.max(0.6)));
         let display = if icons_on { Display::None } else { Display::Flex };
         if node.display != display {
             node.display = display;

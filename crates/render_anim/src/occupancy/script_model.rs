@@ -399,13 +399,106 @@ fn sample_script_mover_pose(
     )
 }
 
+/// Where a script model is drawn this frame, and the time that is for. One the server
+/// moves by setting its origin every tick (a stationary trajectory) is drawn between its
+/// last two snapshots at the bodies' time, one tick behind, as player bodies are, instead
+/// of jumping 20 times a second; one with a moving trajectory (BO1's walking zombies send
+/// a linear one from each snapshot, so they are drawn the same way) follows it at the
+/// frame's time.
+fn smoothed_mover_pose(
+    runtime: &net::CEntityRuntime,
+    at_time: i32,
+    body_time: i32,
+) -> ([f32; 3], [f32; 3], i32) {
+    use entity_iw4::{TR_LINEAR, TR_STATIONARY, Trajectory, evaluate_trajectory};
+    // Set afresh at each snapshot (stationary, or linear from that snapshot's time: the
+    // per-tick origins of a zombie), not a mover's own trajectory (a door's moveTo).
+    let per_tick = |pos: &Trajectory, at: i32| {
+        pos.tr_type == TR_STATIONARY || (pos.tr_type == TR_LINEAR && pos.tr_time == at)
+    };
+    if let Some((previous, previous_time)) = runtime.previous_pose
+        && runtime.in_next_snap()
+        && per_tick(&runtime.current.pos, runtime.pose_time_ms)
+        && per_tick(&previous.pos, previous_time)
+    {
+        let span = runtime.pose_time_ms - previous_time;
+        let old_origin = evaluate_trajectory(&previous.pos, previous_time);
+        let origin = evaluate_trajectory(&runtime.current.pos, runtime.pose_time_ms);
+        let jump = (0..3)
+            .map(|axis| (origin[axis] - old_origin[axis]).powi(2))
+            .sum::<f32>();
+        // A teleport (or a gap in the snapshots) is not smoothed over.
+        if span > 0 && span <= 250 && jump > 0.0 && jump < 200.0 * 200.0 {
+            let fraction = ((body_time - previous_time) as f32 / span as f32).clamp(0.0, 1.0);
+            let old_angles = evaluate_trajectory(&previous.apos, previous_time);
+            let angles = evaluate_trajectory(&runtime.current.apos, runtime.pose_time_ms);
+            return (
+                std::array::from_fn(|axis| {
+                    old_origin[axis] + fraction * (origin[axis] - old_origin[axis])
+                }),
+                std::array::from_fn(|axis| {
+                    old_angles[axis]
+                        + fraction * math_iw4::angle_subtract(angles[axis], old_angles[axis])
+                }),
+                body_time.clamp(previous_time, runtime.pose_time_ms),
+            );
+        }
+    }
+    let (origin, angles) = sample_script_mover_pose(runtime, at_time);
+    (origin, angles, at_time)
+}
+
+/// The snapshot's animation moved to the time the model is drawn at (`shift` seconds
+/// from the snapshot, either way): each clip's time at its own rate (looping clips go
+/// round, the others stop at their ends) and a crossfade's weights by as much, so the
+/// pose moves every frame with the body instead of 20 times a second.
+fn shift_dobj(
+    state: &mut xmodel_runtime::DObjSemanticState,
+    shift: f32,
+    clip: &mut impl FnMut(&str) -> Option<(f32, bool)>,
+) {
+    if shift == 0.0 {
+        return;
+    }
+    let Some(tree) = state.tree.as_mut() else {
+        return;
+    };
+    let leaves = tree.nodes.iter().filter(|node| node.clip.is_some()).count();
+    for node in &mut tree.nodes {
+        let Some((frequency, looping)) = node.clip.as_deref().and_then(&mut *clip) else {
+            continue;
+        };
+        let time = node.state.time + shift * frequency * node.state.rate;
+        node.state.time = if looping {
+            time.rem_euclid(1.0)
+        } else {
+            time.clamp(0.0, 1.0)
+        };
+    }
+    if leaves > 1 {
+        let fade = shift / sim::bullet_collision::ANIM_BLEND_SECONDS;
+        let count = tree.nodes.len();
+        if let Some(new) = tree.nodes.last_mut() {
+            new.state.weight = (new.state.weight + fade).clamp(0.0, 1.0);
+        }
+        if count >= 2 {
+            let old = &mut tree.nodes[count - 2];
+            old.state.weight = (old.state.weight - fade).clamp(0.0, 1.0);
+        }
+    }
+}
+
+#[allow(clippy::too_many_arguments)]
 fn apply_script_mover_centity_pose(
     slots: Option<Res<net::CEntitySlots>>,
     presented: Option<Res<net::PresentedSnapshot>>,
     runtimes: Query<&net::CEntityRuntime>,
-    mut owners: Query<(&WorldScriptModelInstance, &mut Transform)>,
+    mut owners: Query<(&mut WorldScriptModelInstance, &mut Transform)>,
     mut persist: ResMut<ScriptModelDobjs>,
     cg_clock: Option<Res<net::FrameClock>>,
+    xanims: Option<Res<assets::PreparedXAnims>>,
+    mut clip_rates: Local<std::collections::HashMap<String, Option<(f32, bool)>>>,
+    mut watched: Local<Option<u16>>,
 ) {
     persist.mover_pose.clear();
     let Some(slots) = slots else {
@@ -423,7 +516,7 @@ fn apply_script_mover_centity_pose(
         .map(|clock| clock.time())
         .unwrap_or_else(|| sim::level_time_ms(snapshot.tick));
     let at_time = presented.trajectory_time_ms(at_time);
-    for (owner, mut transform) in &mut owners {
+    for (mut owner, mut transform) in &mut owners {
         let mapent = owner.id.source_ordinal();
         let Some(number) = owner.gentity_number else {
             continue;
@@ -440,7 +533,54 @@ fn apply_script_mover_centity_pose(
                 .insert(mapent, ScriptMoverCentitySample::skip("no_runtime"));
             continue;
         };
-        let (origin, angles) = sample_script_mover_pose(runtime, at_time);
+        let body_time = at_time - sim::MATCH_TICK_MS as i32;
+        let (origin, angles, drawn_at) = smoothed_mover_pose(runtime, at_time, body_time);
+        let tick = sim::MATCH_TICK_MS as i32;
+        let back = (drawn_at - runtime.pose_time_ms).clamp(-2 * tick, 2 * tick);
+        let mut lookup = |name: &str| -> Option<(f32, bool)> {
+            *clip_rates.entry(name.to_owned()).or_insert_with(|| {
+                let xanims = &xanims.as_ref()?.0;
+                [
+                    asset_core::AssetNamespace::Iw4,
+                    asset_core::AssetNamespace::T5,
+                    asset_core::AssetNamespace::Iw5,
+                    asset_core::AssetNamespace::T6,
+                ]
+                .into_iter()
+                .find_map(|namespace| xanims.clip(namespace, name))
+                .filter(|clip| clip.duration() > 0.0)
+                .map(|clip| (1.0 / clip.duration(), clip.looping))
+            })
+        };
+        shift_dobj(&mut owner.dobj_state, back as f32 / 1000.0, &mut lookup);
+        // IW4L_SMOOTH_DEBUG=<gentity number>, or `moving` for the first one seen moving:
+        // that model's drawn origin each frame.
+        if let Ok(wanted) = std::env::var("IW4L_SMOOTH_DEBUG")
+            && match wanted.trim().parse::<u16>() {
+                Ok(wanted) => wanted == number,
+                Err(_) => {
+                    let moving = runtime.previous_pose.is_some_and(|(previous, _)| {
+                        previous.pos.tr_base != runtime.current.pos.tr_base
+                    });
+                    if watched.is_none() && moving {
+                        *watched = Some(number);
+                    }
+                    *watched == Some(number)
+                }
+            }
+        {
+            diag::info!(
+                World,
+                "smooth debug: t={at_time} snap={} back={back} origin=({:.1} {:.1} {:.1}) prev={:?} cur={:?} leaf={:?}",
+                runtime.pose_time_ms,
+                origin[0],
+                origin[1],
+                origin[2],
+                runtime.previous_pose.map(|(p, t)| (t, p.pos.tr_base[1], p.pos.tr_type)),
+                (runtime.current.pos.tr_base[1], runtime.current.pos.tr_type)
+                ,owner.dobj_state.tree.as_ref().and_then(|tree| tree.nodes.last()).map(|leaf| (leaf.clip.clone(), leaf.state.time, leaf.state.weight))
+            );
+        }
         let [pitch, yaw, roll] = angles;
         transform.rotation = Quat::from_euler(
             EulerRot::ZYX,

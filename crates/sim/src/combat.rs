@@ -1408,6 +1408,7 @@ pub(crate) fn phase_trace(
             // A zombie's body is flesh, as a player's is: the hit plays BO1's blood impact
             // (head and fatal variants), not the default dust and sparks.
             let (mut surf_type, mut surface_flags) = (segment.surf_type, segment.surface_flags);
+            let mut direction = segment.normal;
             if !exit
                 && let Some(ColliderId::EntityDObjBone { owner, bone, .. }) = segment.collider
                 && let Some(model) = owner.script_model()
@@ -1421,6 +1422,17 @@ pub(crate) fn phase_trace(
                 flesh_flags = fx_iw4::flesh_hit_flags(head, fatal) as u8;
                 surf_type = weapon_iw4::SURF_TYPE_FLESH as u8;
                 surface_flags = weapon_iw4::SURF_TYPE_FLESH << 20;
+                // Blood sprays back along the shot, toward the shooter, as Black Ops plays
+                // its flesh hits; a hit box's face normal sent it off sideways.
+                let back = [
+                    segment.start[0] - segment.end[0],
+                    segment.start[1] - segment.end[1],
+                    segment.start[2] - segment.end[2],
+                ];
+                let length = (back[0] * back[0] + back[1] * back[1] + back[2] * back[2]).sqrt();
+                if length > 1.0e-3 {
+                    direction = [back[0] / length, back[1] / length, back[2] / length];
+                }
             }
             let payload = crate::EntityEventPayload {
                 number: em.attacker.0 as i32,
@@ -1444,7 +1456,7 @@ pub(crate) fn phase_trace(
                 hand: em.hand,
                 origin: segment.end,
                 origin2: segment.start,
-                direction: segment.normal,
+                direction,
                 surf_type,
                 surface_flags,
                 simulation_flags: u8::from(segment.penetrated),
@@ -1491,7 +1503,7 @@ pub(crate) fn phase_trace(
                         hand: em.hand,
                         start: segment.start,
                         end: segment.end,
-                        normal: segment.normal,
+                        normal: direction,
                         surf_type,
                         surface_flags,
                         flesh_flags,

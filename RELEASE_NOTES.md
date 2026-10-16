@@ -1,6 +1,27 @@
-# Pocket Lab 0.3.29
+# Bo1ZPocket 0.3.30
 
 Smoother on the phone, every touch button does its job, and co-op over Wi-Fi.
+
+**New in 0.3.30**
+- **New name: Bo1ZPocket.** It's the same app: it installs over Pocket Lab and keeps your games folder and settings. In the Files app the folder now shows as Bo1ZPocket.
+- **Black Ops' own font for all the text.** That covers the points, ammo and weapon name, the buy and door hints ("Hold USE to Open Door [Cost: 750]"), game over, the main menu, the options and the touch-button labels.
+  - It's read from your Black Ops install (its font sheet and font tables), so nothing is bundled.
+  - If the font can't be read, the old one is used.
+- **Smoother zombies.** Their movement looked rough for two reasons:
+  - **Animation stepped.** It only moved forward with each update from the game, 20 times a second, so walks and swings stepped. Now it moves forward every frame.
+  - **Position overshot.** The game guessed where each zombie was heading, so it overshot whenever one turned and then snapped back. Now each zombie is drawn between its last two known positions, one update behind, so its path is smooth.
+
+  The swings already ran at Black Ops' speed. They looked too fast because they stepped at 20 frames a second.
+- **Blood when you shoot zombies:**
+  - It sprayed sideways off the hit box. Now it sprays back toward you, as in Black Ops.
+  - Black Ops' blood effect has a near version and a far version (a big burst meant to be seen from across the map). Both played at every distance, so up close a big red haze showed beside the zombie. Now each plays only at its own distance, as in Black Ops. The same goes for every other effect with near and far versions (smoke, dust, light glows).
+- **Checked on PC:**
+  - the font on the HUD, hints, menu and options at the iPhone's screen size and pixel density;
+  - zombies drawn smoothly between updates (position and animation every frame);
+  - the blood's direction and the near/far split, in screenshots.
+
+  Not tried on an iPhone yet.
+- **Not right yet:** up close the blood is now a quick, small puff, and its colour is still lighter than Black Ops' dark red. Tell me how it feels.
 
 **New in 0.3.29**
 - **Zombies walk like Black Ops zombies.** Black Ops moves a zombie by its walk animation itself, so its feet stay planted. Here every walker moved at one fixed speed, faster than any of its walks, so their feet slid along the floor. Now each zombie uses the walk Black Ops' script picks for it and moves at that walk's own pace, step by step. Kino's walkers go about half the old speed; some shamble even slower, as in Black Ops.

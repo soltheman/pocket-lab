@@ -119,6 +119,11 @@ impl Plugin for ConsolePlugin {
             .init_resource::<crate::zombies_menu::ZombiesOptionsOpen>()
             .init_resource::<crate::zombies_menu::OptionsTab>()
             .init_resource::<crate::zombies_menu::MenuCommand>()
+            .add_systems(Update, crate::game_text::load_game_fonts)
+            .add_systems(
+                PostUpdate,
+                crate::game_text::build_game_text.before(bevy::ui::UiSystems::Prepare),
+            )
             .add_systems(
                 PreUpdate,
                 (
@@ -244,7 +249,10 @@ impl Plugin for ConsolePlugin {
                         crate::debug_lod::route_lod_ramp_commands,
                         crate::debug_cg_gun::route_cg_gun_commands,
                         crate::debug_cl_yawspeed::route_cl_yawspeed_commands,
-                        crate::debug_fx::route_debug_fx_commands,
+                        (
+                            crate::debug_fx::route_debug_fx_commands,
+                            crate::debug_fx::route_fx_play_command,
+                        ),
                         crate::debug_fx_marks::route_fx_mark_commands,
                         (
                             crate::user_settings::native_menu_settings,
@@ -969,8 +977,8 @@ fn setup_console(
         });
     commands.insert_resource(ConsolePrompt(prompt_entity.expect("console prompt entity")));
     commands.insert_resource(ConsoleLog(log_entity.expect("console log entity")));
-    crate::touch_controls::spawn_touch_overlay(&mut commands, font.clone(), touch.enabled);
-    crate::zombies_hud::spawn_zombies_hud(&mut commands, font.clone());
+    crate::touch_controls::spawn_touch_overlay(&mut commands, touch.enabled);
+    crate::zombies_hud::spawn_zombies_hud(&mut commands);
     crate::debug_move::spawn_showpos_hud(&mut commands, font);
 }
 

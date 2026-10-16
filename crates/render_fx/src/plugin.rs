@@ -21,6 +21,7 @@ impl Plugin for RenderFxPlugin {
             .init_resource::<crate::HostFxPostLights>()
             .init_resource::<crate::FxWorldColorImages>()
             .init_resource::<crate::FxDumpRequest>()
+            .init_resource::<crate::FxPlayRequest>()
             .init_resource::<crate::PresentedVehicleFx>()
             .init_resource::<crate::PreparedTracers>()
             .init_resource::<crate::TracerDrawGate>()

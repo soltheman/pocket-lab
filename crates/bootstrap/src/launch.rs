@@ -51,17 +51,29 @@ fn phone_window() -> Window {
 }
 
 /// `IW4L_WINDOW_SIZE=844x390` opens the desktop window at a phone's logical size, to check
-/// layouts (the iPhone 16e in landscape is 844x390); 1280x720 otherwise.
+/// layouts (the iPhone 16e in landscape is 844x390); 1280x720 otherwise. `IW4L_UI_SCALE=3`
+/// draws it at the phone's pixel density too (a 2532x1170 window).
 fn window_resolution() -> bevy::window::WindowResolution {
-    std::env::var("IW4L_WINDOW_SIZE")
+    let (width, height) = std::env::var("IW4L_WINDOW_SIZE")
         .ok()
         .and_then(|size| {
             let (w, h) = size.trim().split_once('x')?;
             Some((w.parse::<u32>().ok()?, h.parse::<u32>().ok()?))
         })
         .filter(|&(w, h)| w >= 320 && h >= 240)
-        .unwrap_or((ACCEPTANCE_WIDTH, ACCEPTANCE_HEIGHT))
-        .into()
+        .unwrap_or((ACCEPTANCE_WIDTH, ACCEPTANCE_HEIGHT));
+    match std::env::var("IW4L_UI_SCALE")
+        .ok()
+        .and_then(|scale| scale.trim().parse::<f32>().ok())
+        .filter(|scale| (0.5..=4.0).contains(scale))
+    {
+        Some(scale) => bevy::window::WindowResolution::new(
+            (width as f32 * scale).round() as u32,
+            (height as f32 * scale).round() as u32,
+        )
+        .with_scale_factor_override(scale),
+        None => (width, height).into(),
+    }
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -282,7 +294,7 @@ fn mw2_not_found(
     let instructions = if cfg!(target_os = "ios") {
         "Black Ops was not found.\n\n\
         In the Files app, copy your \"Call of Duty Black Ops\" folder (with its zone and main \
-        folders) into On My iPhone > Pocket Lab > Games, then open Pocket Lab again.\n\nSearched:\n"
+        folders) into On My iPhone > Bo1ZPocket > Games, then open Bo1ZPocket again.\n\nSearched:\n"
     } else if cfg!(windows) {
         "MW2 Multiplayer was not found.\n\n\
         Put a shortcut to the game folder next to iw4l.exe:\n\

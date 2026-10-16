@@ -45,16 +45,16 @@ jobs:
           cp ios/Info.plist Payload/IW4L.app/Info.plist
           cp ios/icons/AppIcon60x60* ios/icons/AppIcon76x76* ios/icons/AppIcon83.5x83.5* Payload/IW4L.app/
           file Payload/IW4L.app/iw4l
-          zip -qr "Pocket Lab.ipa" Payload
-          ls -lh "Pocket Lab.ipa"
+          zip -qr "Bo1ZPocket.ipa" Payload
+          ls -lh "Bo1ZPocket.ipa"
       - name: Verify packaged IPA before publication
-        run: python3 tools/verify_ios_ipa.py "Pocket Lab.ipa" --report ipa-verification.json
+        run: python3 tools/verify_ios_ipa.py "Bo1ZPocket.ipa" --report ipa-verification.json
       - uses: actions/upload-artifact@v4
         if: always()
         with:
-          name: pocket-lab-ipa
+          name: bo1zpocket-ipa
           path: |
-            Pocket Lab.ipa
+            Bo1ZPocket.ipa
             build.log
             ipa-verification.json
       - name: Publish release
@@ -63,8 +63,8 @@ jobs:
           GH_TOKEN: ${{ github.token }}
           RELEASE_TAG: ${{ inputs.tag }}
         run: |
-          gh release create "$RELEASE_TAG" "Pocket Lab.ipa" ipa-verification.json \
+          gh release create "$RELEASE_TAG" "Bo1ZPocket.ipa" ipa-verification.json \
             --target "$GITHUB_SHA" \
-            --title "Pocket Lab $RELEASE_TAG" \
+            --title "Bo1ZPocket $RELEASE_TAG" \
             --prerelease \
             --notes-file RELEASE_NOTES.md

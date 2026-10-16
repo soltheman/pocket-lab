@@ -17,7 +17,7 @@ pub use entity_marks::{EntityMarkAttachment, EntityMarkRequest, EntityMarkStore,
 pub use fire_occurrence::{FireFxOccurrence, PresentedFireFx};
 pub use fire_weapon_fx::fire_weapon_fx_should_client_trace;
 pub use host::{
-    CombatFxDump, FxCameraOrigin, FxDumpRequest, FxJournalCursor, FxMarkDvars, FxWorldColorImages,
+    CombatFxDump, FxCameraOrigin, FxDumpRequest, FxJournalCursor, FxPlayRequest, FxMarkDvars, FxWorldColorImages,
     HostFxDlights, HostFxPostLights, HostFxSystem, LaserDvars, PreparedFxCatalog,
     PreparedFxElemInfos, PreparedFxModels, PreparedImpactFx, PresentedVehicleFx,
     PresentedVehicleFxRow,

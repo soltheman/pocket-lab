@@ -55,7 +55,7 @@ pub fn prepare(dir: &Path, port: u16, address: Option<IpAddr>) -> Result<Lan> {
     println!();
     println!("Copy this file into the game on every device that plays:");
     println!("  {}", descriptor.display());
-    println!("  iPhone: Files app > On My iPhone > Pocket Lab (next to the Games folder)");
+    println!("  iPhone: Files app > On My iPhone > Bo1ZPocket (next to the Games folder)");
     println!("  PC: next to iw4l.exe");
     println!();
     println!("Every device must be on this Wi-Fi network. If Windows asks, allow this");

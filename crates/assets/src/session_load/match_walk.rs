@@ -250,6 +250,14 @@ pub(super) async fn walk_prepared_match(
                 material.technique_table.as_ref().map(|t| format!("{:#x}", t.slots)),
                 material.technique_table.as_ref().map(|t| t.pass_count_by_slot),
             );
+            diag::info!(
+                World,
+                "material probe {}: state bits {:x?} t5 entry {:?} iw4 entry {:?}",
+                material.name.as_str(),
+                material.state_bits,
+                material.t5_state_bits_entry,
+                material.state_bits_entry,
+            );
             for binding in &material.textures {
                 let image = binding.image.and_then(|i| materials.images.get(i));
                 diag::info!(

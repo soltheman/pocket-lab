@@ -378,6 +378,32 @@ fn spawn_elem(
     let msec_begin = spawn_msec.wrapping_add(delay);
     let life_idx = elem_random_seed(random_seed, sequence, msec_begin);
 
+    // An element with a spawn range is one distance's version of the effect (Black Ops'
+    // blood has small drops up close and a big burst for far away); the engine spawns it
+    // only while the camera is in that range of the effect.
+    let on_viewmodel = host.effect_at(effect_slot).is_some_and(|e| {
+        (fx_iw4::FX_BOLT_VIEWMODEL_DOBJ_BASE..fx_iw4::FX_BOLT_VIEWMODEL_DOBJ_BASE + 2)
+            .contains(&fx_iw4::bolt_dobj(e.bolt_packed))
+    });
+    if elem_def.spawn_range_amp != 0.0
+        && !on_viewmodel
+        && let Some(camera) = host.spawn_camera
+    {
+        let distance = (0..3)
+            .map(|axis| (effect_origin[axis] - camera[axis]).powi(2))
+            .sum::<f32>()
+            .sqrt();
+        if !fx_iw4::cull_elem_for_spawn_allows(
+            elem_def.spawn_range_base,
+            elem_def.spawn_range_amp,
+            distance,
+            elem_def.flags,
+            false,
+        ) {
+            return;
+        }
+    }
+
     match FxElemType::from_u8(elem_def.elem_type) {
         Some(FxElemType::Sound) => {
             let parent_name = parent_name.to_owned();

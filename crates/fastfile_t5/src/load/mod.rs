@@ -147,6 +147,19 @@ pub trait AssetLinkSink {
         Ok(())
     }
 
+    /// A font (`Font_s`, `size::FONT`): its header (name at 0, pixel height at 4) and its
+    /// glyph rows (`size::FONT_GLYPH` bytes each, as IW4's).
+    fn capture_font(
+        &mut self,
+        s: &ZoneStream<'_>,
+        header: Ptr,
+        glyphs: Option<Ptr>,
+        glyph_count: usize,
+    ) -> Result<()> {
+        let _ = (s, header, glyphs, glyph_count);
+        Ok(())
+    }
+
     fn nested_shader(
         &mut self,
         s: &ZoneStream<'_>,

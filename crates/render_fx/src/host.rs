@@ -45,6 +45,13 @@ impl Default for FxDumpRequest {
     }
 }
 
+/// `fx_play <effect> [distance]` (tests): the effect played this far in front of the
+/// camera, facing it, as an impact would be.
+#[derive(Resource, Debug, Default)]
+pub struct FxPlayRequest {
+    pub pending: Option<(String, f32)>,
+}
+
 #[derive(Resource, Clone, Copy, Debug)]
 pub struct FxMarkDvars {
     pub fx_marks: bool,

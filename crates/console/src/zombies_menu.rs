@@ -16,6 +16,8 @@ use bevy::window::PrimaryWindow;
 use frame::{AppScreen, GameSettings};
 use ui::{GameUiFont, UiLayer};
 
+use crate::game_text::{GameFont, GameText, GameTextMut};
+
 /// The match a BO1-only install starts once SOLO is pressed: what the launch would have
 /// inserted at once.
 pub struct ZombiesMenuLoad {
@@ -239,21 +241,11 @@ fn screen_scale(window: &Window) -> f32 {
     (window.height().max(1.0) / REFERENCE_HEIGHT).clamp(0.8, 2.5)
 }
 
-fn text(font: &Handle<Font>, size: f32, color: Color, line: impl Into<String>) -> impl Bundle {
-    (
-        Text::new(line),
-        TextFont {
-            font: font.clone().into(),
-            font_size: FontSize::Px(size.round()),
-            ..default()
-        },
-        TextColor(color),
-        TextShadow {
-            offset: Vec2::splat(1.5),
-            color: Color::srgba(0.0, 0.0, 0.0, 0.85),
-            ..default()
-        },
-    )
+/// A line in BO1's fonts: bigFont for titles and entries, normalFont for the rest; the UI
+/// font (the menu's `font`) until those are read.
+fn text(_font: &Handle<Font>, size: f32, color: Color, line: impl Into<String>) -> GameText {
+    let font = if size >= 20.0 { GameFont::Big } else { GameFont::Normal };
+    GameText::new(font, size.round(), color, line)
 }
 
 /// Builds the menu once the window and font are there, and starts decoding the map's
@@ -341,6 +333,7 @@ pub(crate) fn spawn_zombies_menu(
                     height: percent(100),
                     flex_direction: FlexDirection::Column,
                     justify_content: JustifyContent::Center,
+                    row_gap: px(5.0 * s),
                     ..default()
                 },
             ))
@@ -388,7 +381,7 @@ pub(crate) fn animate_zombies_menu(
     task: Option<ResMut<MenuPreviewTask>>,
     mut images: ResMut<Assets<Image>>,
     mut background: Query<(Entity, &mut Node), With<MenuBackground>>,
-    mut title: Query<&mut TextColor, With<MenuTitle>>,
+    mut title: Query<&mut GameText, With<MenuTitle>>,
     mut column: Query<&mut Visibility, With<MenuColumn>>,
     options: Res<ZombiesOptionsOpen>,
 ) {
@@ -429,10 +422,10 @@ pub(crate) fn animate_zombies_menu(
             node.width = want;
         }
     }
-    if let Ok(mut color) = title.single_mut() {
+    if let Ok(mut title) = title.single_mut() {
         // Mostly steady, with the odd quick dip, like old film.
         let dip = ((t * 7.3).sin() * (t * 2.9).sin()).max(0.0).powi(8);
-        color.0 = RED.with_alpha(1.0 - 0.45 * dip);
+        title.set_color(RED.with_alpha(1.0 - 0.45 * dip));
     }
 }
 
@@ -454,7 +447,7 @@ pub(crate) fn zombies_menu_buttons(
         ),
         Changed<Interaction>,
     >,
-    mut labels: Query<&mut TextColor>,
+    mut labels: Query<&mut GameText>,
     roots: Query<Entity, With<MenuRoot>>,
     mut scripted: ResMut<MenuCommand>,
     mut tests: ScriptedOptions,
@@ -505,8 +498,8 @@ pub(crate) fn zombies_menu_buttons(
             Color::NONE
         };
         for child in children.iter() {
-            if let Ok(mut color) = labels.get_mut(child) {
-                color.0 = if hot { HOT } else { WHITE };
+            if let Ok(mut label) = labels.get_mut(child) {
+                label.set_color(if hot { HOT } else { WHITE });
             }
         }
         if *interaction == Interaction::Pressed && !options.0 {
@@ -778,7 +771,7 @@ pub(crate) fn zombies_options_input(
     bars: Query<(&OptionBar, &Interaction, &RelativeCursorPosition)>,
     done: Query<&Interaction, (With<OptionsDone>, Changed<Interaction>)>,
     mut fills: Query<(&OptionFill, &mut Node)>,
-    mut values: Query<(&OptionValue, &mut Text)>,
+    mut values: Query<(&OptionValue, &mut GameText)>,
 ) {
     if !open.0 {
         return;
@@ -834,10 +827,7 @@ pub(crate) fn zombies_options_input(
         }
     }
     for (value, mut text) in &mut values {
-        let shown = value.0.shown(value.0.get(&settings));
-        if text.0 != shown {
-            text.0 = shown;
-        }
+        text.set_text(&value.0.shown(value.0.get(&settings)));
     }
 }
 
@@ -877,7 +867,7 @@ pub(crate) fn zombies_options_pages(
     tabs: Query<(&OptionTabButton, &Interaction), Changed<Interaction>>,
     mut tab_looks: Query<(&OptionTabButton, &mut BorderColor)>,
     edit: Query<&Interaction, (With<OptionsEdit>, Changed<Interaction>)>,
-    mut edit_label: Query<&mut Text, With<OptionsEditLabel>>,
+    mut edit_label: Query<&mut GameText, With<OptionsEditLabel>>,
     mut rows: Query<(&OptionRow, &mut Node)>,
 ) {
     if !open.0 {
@@ -907,10 +897,7 @@ pub(crate) fn zombies_options_pages(
     let can_edit =
         *screen == AppScreen::InGame && touch.as_deref().is_some_and(|touch| touch.enabled);
     if let Ok(mut label) = edit_label.single_mut() {
-        let want = if can_edit { "EDIT" } else { "IN A MATCH" };
-        if label.0 != want {
-            label.0 = want.to_owned();
-        }
+        label.set_text(if can_edit { "EDIT" } else { "IN A MATCH" });
     }
     if can_edit
         && edit

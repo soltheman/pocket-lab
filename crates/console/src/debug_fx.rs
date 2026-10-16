@@ -10,6 +10,37 @@ pub(crate) fn register_debug_fx_commands(registry: &mut ConsoleRegistry) {
                 .usage("fx_dump [radius] — log nearby CodeMesh sprites (needs a live world)"),
         );
     }
+    if registry.resolve("fx_play").is_none() {
+        registry.register(
+            crate::CommandSpec::new("fx_play")
+                .usage("fx_play <effect> [distance] — play an effect in front of the camera"),
+        );
+    }
+}
+
+/// `fx_play <effect> [distance]`: queues the effect for the FX presenter.
+pub(crate) fn route_fx_play_command(
+    mut events: MessageReader<ConsoleCommand>,
+    request: Option<ResMut<render_fx::FxPlayRequest>>,
+) {
+    let Some(mut request) = request else {
+        return;
+    };
+    for cmd in events.read() {
+        if cmd.name != "fx_play" {
+            continue;
+        }
+        let Some(name) = cmd.args.first() else {
+            continue;
+        };
+        let distance = cmd
+            .args
+            .get(1)
+            .and_then(|d| d.parse::<f32>().ok())
+            .filter(|d| d.is_finite() && *d > 0.0)
+            .unwrap_or(40.0);
+        request.pending = Some((name.clone(), distance));
+    }
 }
 
 pub(crate) fn route_debug_fx_commands(

@@ -8,6 +8,8 @@ use bevy::prelude::*;
 use net::{LocalPresentClient, PresentedSnapshot};
 use ui::UiLayer;
 
+use crate::game_text::{GameFont, GameText, GameTextMut};
+
 const POINTS_DVAR: &str = "ui_zm_points";
 /// The rounds survived, once the game is over (empty while it is not).
 const GAME_OVER_DVAR: &str = "ui_zm_gameover";
@@ -69,6 +71,7 @@ pub(crate) struct ZombiesHintRow;
 
 const HINT_TOP: f32 = 58.0;
 const HINT_TOP_TOUCH: f32 = 24.0;
+const HINT_PX: f32 = 22.0;
 
 /// A hint as the zombies HUD shows it: no `^N` colour codes, and the touch USE button
 /// named in place of a keyboard key.
@@ -88,7 +91,7 @@ fn hint_line(text: &str, bind: &str, touch: bool) -> String {
     line
 }
 
-pub(crate) fn spawn_zombies_hud(commands: &mut Commands, font: Handle<Font>) {
+pub(crate) fn spawn_zombies_hud(commands: &mut Commands) {
     commands
         .spawn((
             ZombiesHudRoot,
@@ -123,14 +126,7 @@ pub(crate) fn spawn_zombies_hud(commands: &mut Commands, font: Handle<Font>) {
             .with_children(|block| {
                 block.spawn((
                     ZombiesPoints,
-                    Text::new(""),
-                    TextFont {
-                        font: font.clone().into(),
-                        font_size: FontSize::Px(POINTS_PX),
-                        ..default()
-                    },
-                    TextColor(SCORE_WHITE),
-                    TextShadow::default(),
+                    GameText::new(GameFont::Big, POINTS_PX, SCORE_WHITE, ""),
                 ));
             });
             root.spawn((
@@ -148,44 +144,23 @@ pub(crate) fn spawn_zombies_hud(commands: &mut Commands, font: Handle<Font>) {
             .with_children(|block| {
                 block.spawn((
                     ZombiesWeaponName,
-                    Text::new(""),
-                    TextFont {
-                        font: font.clone().into(),
-                        font_size: FontSize::Px(WEAPON_PX),
-                        ..default()
-                    },
-                    TextColor(AMMO_GREY),
-                    TextShadow::default(),
+                    GameText::new(GameFont::Small, WEAPON_PX, AMMO_GREY, ""),
                 ));
                 block
                     .spawn(Node {
                         flex_direction: FlexDirection::Row,
-                        align_items: AlignItems::Baseline,
+                        align_items: AlignItems::FlexEnd,
                         column_gap: px(6),
                         ..default()
                     })
                     .with_children(|row| {
                         row.spawn((
                             ZombiesClip,
-                            Text::new(""),
-                            TextFont {
-                                font: font.clone().into(),
-                                font_size: FontSize::Px(CLIP_PX),
-                                ..default()
-                            },
-                            TextColor(AMMO_WHITE),
-                            TextShadow::default(),
+                            GameText::new(GameFont::Big, CLIP_PX, AMMO_WHITE, ""),
                         ));
                         row.spawn((
                             ZombiesStock,
-                            Text::new(""),
-                            TextFont {
-                                font: font.clone().into(),
-                                font_size: FontSize::Px(STOCK_PX),
-                                ..default()
-                            },
-                            TextColor(AMMO_GREY),
-                            TextShadow::default(),
+                            GameText::new(GameFont::Big, STOCK_PX, AMMO_GREY, ""),
                         ));
                     });
             });
@@ -204,14 +179,7 @@ pub(crate) fn spawn_zombies_hud(commands: &mut Commands, font: Handle<Font>) {
             .with_children(|row| {
                 row.spawn((
                     ZombiesHint,
-                    Text::new(""),
-                    TextFont {
-                        font: font.clone().into(),
-                        font_size: FontSize::Px(22.0),
-                        ..default()
-                    },
-                    TextColor(Color::srgb(0.95, 0.95, 0.95)),
-                    TextShadow::default(),
+                    GameText::new(GameFont::Normal, HINT_PX, Color::srgb(0.95, 0.95, 0.95), ""),
                 ));
             });
             // Game over, centred: BO1's red title and the rounds survived under it.
@@ -230,26 +198,15 @@ pub(crate) fn spawn_zombies_hud(commands: &mut Commands, font: Handle<Font>) {
                 Visibility::Hidden,
             ))
             .with_children(|over| {
-                over.spawn((
-                    Text::new("GAME OVER"),
-                    TextFont {
-                        font: font.clone().into(),
-                        font_size: FontSize::Px(54.0),
-                        ..default()
-                    },
-                    TextColor(Color::srgb(0.75, 0.06, 0.04)),
-                    TextShadow::default(),
+                over.spawn(GameText::new(
+                    GameFont::Big,
+                    54.0,
+                    Color::srgb(0.75, 0.06, 0.04),
+                    "GAME OVER",
                 ));
                 over.spawn((
                     ZombiesSurvived,
-                    Text::new(""),
-                    TextFont {
-                        font: font.into(),
-                        font_size: FontSize::Px(26.0),
-                        ..default()
-                    },
-                    TextColor(Color::srgb(0.92, 0.92, 0.92)),
-                    TextShadow::default(),
+                    GameText::new(GameFont::Normal, 26.0, Color::srgb(0.92, 0.92, 0.92), ""),
                 ));
             });
         });
@@ -261,8 +218,8 @@ pub(crate) fn update_zombies_hud(
     screen: Option<Res<frame::AppScreen>>,
     mut root: Query<&mut Visibility, (With<ZombiesHudRoot>, Without<ZombiesGameOver>)>,
     mut over: Query<&mut Visibility, (With<ZombiesGameOver>, Without<ZombiesHudRoot>)>,
-    mut points: Query<&mut Text, (With<ZombiesPoints>, Without<ZombiesSurvived>)>,
-    mut survived: Query<&mut Text, (With<ZombiesSurvived>, Without<ZombiesPoints>)>,
+    mut points: Query<&mut GameText, (With<ZombiesPoints>, Without<ZombiesSurvived>)>,
+    mut survived: Query<&mut GameText, (With<ZombiesSurvived>, Without<ZombiesPoints>)>,
 ) {
     let Ok(mut visibility) = root.single_mut() else {
         return;
@@ -301,16 +258,12 @@ pub(crate) fn update_zombies_hud(
         } else {
             format!("You Survived {rounds} Rounds")
         };
-        if let Ok(mut text) = survived.single_mut()
-            && text.0 != line
-        {
-            text.0 = line;
+        if let Ok(mut text) = survived.single_mut() {
+            text.set_text(&line);
         }
     }
-    if let Ok(mut text) = points.single_mut()
-        && text.0 != score
-    {
-        text.0 = score;
+    if let Ok(mut text) = points.single_mut() {
+        text.set_text(&score);
     }
 }
 
@@ -328,10 +281,10 @@ pub(crate) fn place_zombies_hud(
         (With<ZombiesAmmoBlock>, Without<ZombiesScoreBlock>),
     >,
     mut texts: ParamSet<(
-        Query<(&mut Text, &mut TextFont), With<ZombiesPoints>>,
-        Query<(&mut Text, &mut TextFont), With<ZombiesWeaponName>>,
-        Query<(&mut Text, &mut TextFont, &mut TextColor), With<ZombiesClip>>,
-        Query<(&mut Text, &mut TextFont), With<ZombiesStock>>,
+        Query<&mut GameText, With<ZombiesPoints>>,
+        Query<&mut GameText, With<ZombiesWeaponName>>,
+        Query<&mut GameText, With<ZombiesClip>>,
+        Query<&mut GameText, With<ZombiesStock>>,
     )>,
 ) {
     let Ok(window) = window.single() else {
@@ -340,13 +293,7 @@ pub(crate) fn place_zombies_hud(
     let height = window.height().max(1.0);
     let scale = (height / REFERENCE_HEIGHT).clamp(0.8, 2.5);
     let buttons = touch.as_deref().is_some_and(|touch| touch.enabled);
-    let size = |px: f32| FontSize::Px((px * scale).round());
-    let set_size = |font: &mut TextFont, px: f32| {
-        let want = size(px);
-        if font.font_size != want {
-            font.font_size = want;
-        }
-    };
+    let size = |px: f32| (px * scale).round();
     let (score_at, ammo_at) = if buttons {
         // Top right, clear of the Dynamic Island: points in the corner and the ammo left
         // of them, both above the touch buttons (SWAP rises to 74 points from the top).
@@ -374,8 +321,8 @@ pub(crate) fn place_zombies_hud(
     if let Ok(mut node) = score.single_mut() {
         apply(&mut node, score_at);
     }
-    if let Ok((mut font, _)) = texts.p0().single_mut().map(|(text, font)| (font, text)) {
-        set_size(&mut font, POINTS_PX);
+    if let Ok(mut text) = texts.p0().single_mut() {
+        text.set_size(size(POINTS_PX));
     }
     let Ok((mut node, mut visibility)) = ammo.single_mut() else {
         return;
@@ -387,35 +334,24 @@ pub(crate) fn place_zombies_hud(
         return;
     };
     visibility.set_if_neq(Visibility::Inherited);
-    if let Ok((mut text, mut font)) = texts.p1().single_mut() {
-        set_size(&mut font, WEAPON_PX);
-        let name = readout.weapon.to_uppercase();
-        if text.0 != name {
-            text.0 = name;
-        }
+    if let Ok(mut text) = texts.p1().single_mut() {
+        text.set_size(size(WEAPON_PX));
+        text.set_text(&readout.weapon.to_uppercase());
     }
     let clip = readout.clip.unwrap_or(0);
-    if let Ok((mut text, mut font, mut color)) = texts.p2().single_mut() {
-        set_size(&mut font, CLIP_PX);
-        let shown = clip.to_string();
-        if text.0 != shown {
-            text.0 = shown;
-        }
+    if let Ok(mut text) = texts.p2().single_mut() {
+        text.set_size(size(CLIP_PX));
+        text.set_text(&clip.to_string());
         let low = readout.clip_size > 0 && clip * 3 <= readout.clip_size;
-        let want = if low { AMMO_LOW } else { AMMO_WHITE };
-        if color.0 != want {
-            color.0 = want;
-        }
+        text.set_color(if low { AMMO_LOW } else { AMMO_WHITE });
     }
-    if let Ok((mut text, mut font)) = texts.p3().single_mut() {
-        set_size(&mut font, STOCK_PX);
+    if let Ok(mut text) = texts.p3().single_mut() {
+        text.set_size(size(STOCK_PX));
         let shown = readout
             .stock
             .map(|stock| format!("/ {stock}"))
             .unwrap_or_default();
-        if text.0 != shown {
-            text.0 = shown;
-        }
+        text.set_text(&shown);
     }
 }
 
@@ -467,10 +403,10 @@ const STAIN_HEIGHT: f32 = 66.0;
 pub(crate) fn update_zombies_hint(
     hint: Option<Res<hud::UseHintText>>,
     touch: Option<Res<crate::touch_controls::TouchGameplay>>,
-    mut text: Query<(&mut Text, &mut TextColor), With<ZombiesHint>>,
+    mut text: Query<&mut GameText, With<ZombiesHint>>,
     mut row: Query<&mut Node, With<ZombiesHintRow>>,
 ) {
-    let Ok((mut text, mut color)) = text.single_mut() else {
+    let Ok(mut text) = text.single_mut() else {
         return;
     };
     if let Ok(mut row) = row.single_mut() {
@@ -488,8 +424,7 @@ pub(crate) fn update_zombies_hint(
         ))
     });
     let (line, alpha) = line.unwrap_or_default();
-    if text.0 != line {
-        text.0 = line;
-    }
-    color.0.set_alpha(alpha);
+    text.set_text(&line);
+    let color = text.color.with_alpha(alpha);
+    text.set_color(color);
 }

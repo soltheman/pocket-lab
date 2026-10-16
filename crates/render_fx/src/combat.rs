@@ -348,6 +348,12 @@ pub fn play_impact_table_cell(
     };
     combat.last_impact_def = Some(def_name.name.to_owned());
     combat.last_impact_miss_why = None;
+    if surf == FX_SURF_TYPE_FLESH && std::env::var_os("IW4L_IMPACT_DEBUG").is_some() {
+        diag::info!(
+            World,
+            "fx: flesh impact `{def_name}` row {row} slot {flesh_slot:?} at {origin:?} normal {normal:?}"
+        );
+    }
     let Some(catalog) = catalog else {
         return;
     };

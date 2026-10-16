@@ -141,6 +141,7 @@ pub(crate) fn register_combat_fx_systems(app: &mut App) {
                 drain_pellet_fx,
                 present_tracker_light,
                 drain_tag_fx,
+                play_requested_fx,
             )
                 .chain()
                 .after(render_anim::occupancy::fpv_present::publish_fpv_dobj_pose)
@@ -2902,6 +2903,38 @@ struct TagFxRequest {
 const TAG_FX_POSE_WAIT: u8 = 8;
 
 #[allow(clippy::too_many_arguments)]
+/// `fx_play <effect> [distance]` (tests): plays an effect in front of the camera, facing
+/// it as a hit's effect faces the shooter.
+fn play_requested_fx(
+    mut request: ResMut<render_fx::FxPlayRequest>,
+    catalog: Option<Res<PreparedFxCatalog>>,
+    mut elem_infos: ResMut<PreparedFxElemInfos>,
+    mut host: ResMut<HostFxSystem>,
+    cameras: Query<&Transform, With<FlyCamera>>,
+    fx_world: FxSceneAccess,
+) {
+    let (Some(catalog), Ok(camera)) = (catalog, cameras.single()) else {
+        return;
+    };
+    let Some((name, distance)) = request.pending.take() else {
+        return;
+    };
+    let forward = camera.forward().as_vec3();
+    let origin = (camera.translation + forward * distance).to_array();
+    elem_infos.0.sync(&catalog.0);
+    let scene = fx_world.view();
+    let result = play_named_oriented_in_world(
+        &mut host.0,
+        &catalog.0,
+        &elem_infos.0,
+        catalog.0.map_fx_name(&name),
+        origin,
+        axis_from_hit_normal((-forward).to_array()),
+        scene.as_ref().map(|s| s as &dyn FxScene),
+    );
+    diag::info!(World, "fx_play {name} at {origin:?}: {result:?}");
+}
+
 fn drain_tag_fx(
     mut pending: ResMut<PendingTagFx>,
     catalog: Option<Res<PreparedFxCatalog>>,

@@ -131,9 +131,12 @@ pub(super) fn load_font(s: &mut ZoneStream<'_>, links: &mut dyn AssetLinkSink) -
         AssetType::Material,
         p.at(sz::FONT_GLOW_MATERIAL_OFF),
     )?;
-    if s.begin_body(p.at(sz::FONT_GLYPHS_OFF))? {
-        s.alloc_load(4, sz::FONT_GLYPH * glyph_count)?;
-    }
+    let glyphs = if s.begin_body(p.at(sz::FONT_GLYPHS_OFF))? {
+        Some(s.alloc_load(4, sz::FONT_GLYPH * glyph_count)?)
+    } else {
+        None
+    };
+    links.capture_font(s, p, glyphs, glyph_count)?;
     s.pop()
 }
 

@@ -51,12 +51,16 @@ pub fn register_fx_orchestration(app: &mut App) {
 pub fn stamp_fx_camera_origin(
     cameras: Query<&Transform, With<FlyCamera>>,
     mut origin: ResMut<FxCameraOrigin>,
+    mut host: ResMut<HostFxSystem>,
 ) {
-    origin.0 = cameras
+    let camera = cameras
         .iter()
         .next()
-        .map(|transform| transform.translation.to_array())
-        .unwrap_or([0.0; 3]);
+        .map(|transform| transform.translation.to_array());
+    origin.0 = camera.unwrap_or([0.0; 3]);
+    if host.0.spawn_camera != camera {
+        host.0.spawn_camera = camera;
+    }
 }
 
 fn kill_fx_on_match_torn_down(
