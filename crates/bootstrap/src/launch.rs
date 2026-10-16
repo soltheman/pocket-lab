@@ -202,7 +202,7 @@ pub fn launch(
                     Launch,
                     "menu: MW2 not installed; starting {BO1_ONLY_START_ZONE} (BO1 only)"
                 );
-                run_map(
+                run_map_with(
                     games,
                     artifacts,
                     BO1_ONLY_START_ZONE.to_owned(),
@@ -210,6 +210,7 @@ pub fn launch(
                     Role::Listen,
                     None,
                     cheats,
+                    true,
                 );
                 return;
             }
@@ -527,6 +528,24 @@ fn run_map(
     playback: Option<ReplayPlayback>,
     cheats: sim::HostCheats,
 ) {
+    run_map_with(
+        games, artifacts, zone_arg, acceptance, role, playback, cheats, false,
+    );
+}
+
+/// `menu_first`: a BO1-only install opens on its zombies menu and loads the map once
+/// SOLO is pressed (not when it joins someone's co-op room: that connects at once).
+#[allow(clippy::too_many_arguments)]
+fn run_map_with(
+    games: asset_transport::GamesRoot,
+    artifacts: PathBuf,
+    zone_arg: String,
+    acceptance: Option<AcceptanceLaunch>,
+    role: Role,
+    playback: Option<ReplayPlayback>,
+    cheats: sim::HostCheats,
+    menu_first: bool,
+) {
     let found = find_zone_file(&games, &zone_arg);
     let zone_alias = found.as_ref().ok().and_then(|z| z.alias_note.clone());
     let zone_arg_lc = zone_arg.trim().to_ascii_lowercase();
@@ -585,6 +604,8 @@ fn run_map(
         games_root: games.0.clone(),
         artifacts,
     };
+    let master_intent_joins = master_intent.is_join();
+    let master_intent_configured = master_intent.configured();
     start_perf(Some(zone.clone()), role_name(config.role));
     let (mut menus, menu_report) = load_ui_menu_catalog(&games);
     if let Err(error) = ui::install_frontend_menus(&mut menus) {
@@ -639,47 +660,72 @@ fn run_map(
             ..default()
         },
     ));
-    if let Ok(path) = &zone_ff {
-        app.insert_resource(LoadingPreviewSource {
-            path: path.clone(),
-            map_name: zone.clone(),
-            request_id: 0,
-        });
+    let preview = zone_ff.as_ref().ok().map(|path| LoadingPreviewSource {
+        path: path.clone(),
+        map_name: zone.clone(),
+        request_id: 0,
+    });
+    let request = MatchLoadRequest {
+        request_id: 0,
+        load_key: Default::default(),
+        zone: zone.clone(),
+        zone_ff,
+        common_mp,
+        progress: progress.clone(),
+    };
+    let loading_screen = LoadingScreen::new(
+        progress.clone(),
+        loading_title.clone(),
+        if asset_transport::t5_zombies_map_name(&zone_arg_lc).is_some() {
+            "ZOMBIES".to_owned()
+        } else {
+            sim::host_game_mode_kind().display_name().to_owned()
+        },
+    );
+    let menu_first = menu_first && !master_intent_joins;
+    if menu_first {
+        // The menu holds the load; SOLO hands it over as the launch would have.
+        app.insert_resource(console::ZombiesMenuStart {
+            preview: preview
+                .as_ref()
+                .map(|source| (source.path.clone(), source.map_name.clone())),
+            load: Some(console::ZombiesMenuLoad {
+                request,
+                loading: loading_screen,
+                preview,
+            }),
+            play_label: if master_intent_configured {
+                "CO-OP".to_owned()
+            } else {
+                "SOLO".to_owned()
+            },
+            map_title: loading_title,
+        })
+        .insert_resource(AppScreen::MainMenu);
+    } else {
+        if let Some(preview) = preview {
+            app.insert_resource(preview);
+        }
+        app.insert_resource(request)
+            .insert_resource(loading_screen)
+            .insert_resource(AppScreen::Loading)
+            .insert_resource({
+                let mut layers = UiLayers::default();
+                layers.show_only([UiLayer::Loading, UiLayer::Overlay]);
+                layers
+            });
     }
     let ui_games_root = asset_game::ui_games_root(&games).ok().map(|root| root.0);
     app.insert_resource(launch_identity(&config))
         .insert_resource(cheats)
         .insert_resource(probe)
         .insert_resource(menus)
-        .insert_resource(MatchLoadRequest {
-            request_id: 0,
-            load_key: Default::default(),
-            zone: zone.clone(),
-            zone_ff,
-            common_mp,
-            progress: progress.clone(),
-        })
-        .insert_resource(LoadingScreen::new(
-            progress.clone(),
-            loading_title,
-            if asset_transport::t5_zombies_map_name(&zone_arg_lc).is_some() {
-                "ZOMBIES".to_owned()
-            } else {
-                sim::host_game_mode_kind().display_name().to_owned()
-            },
-        ))
         .insert_resource(UiAssetRoot(ui_games_root))
         .insert_resource(StartupCommands {
             lines: console::startup_commands(),
         })
         .insert_resource(WorldScene::default())
-        .insert_resource(ClearColor(Color::BLACK))
-        .insert_resource(AppScreen::Loading)
-        .insert_resource({
-            let mut layers = UiLayers::default();
-            layers.show_only([UiLayer::Loading, UiLayer::Overlay]);
-            layers
-        });
+        .insert_resource(ClearColor(Color::BLACK));
     if let Some(run) = acceptance_run {
         diag::info!(
             Launch,

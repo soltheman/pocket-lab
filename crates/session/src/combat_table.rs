@@ -39,7 +39,9 @@ pub(crate) fn validated_facts(
         reload_time_ms: f.reload_time_ms,
         reload_empty_time_ms: f.reload_empty_time_ms,
         clip_size: f.clip_size,
-        start_ammo: f.start_ammo_rounds(),
+        // Rounds a weapon is given with, its first clip counted in (BO1 keeps that clip
+        // out of `startAmmo`: its pistol starts 8 in the clip and 32 more).
+        start_ammo: f.start_ammo_rounds() + if f.start_ammo_is_reserve { f.clip_size } else { 0 },
         max_ammo: f.max_ammo_rounds(),
         ammo_index: f.ammo_index,
         clip_index: f.clip_index,

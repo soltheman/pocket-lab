@@ -344,6 +344,8 @@ fn serialize_settings(settings: &frame::GameSettings, binds: &KeyBinds) -> Strin
         format!("pad_vibration={}", settings.pad_vibration),
         format!("pad_deadzone_left={:.2}", settings.pad_deadzone_left),
         format!("pad_deadzone_right={:.2}", settings.pad_deadzone_right),
+        format!("touch_button_scale={:.2}", settings.touch_button_scale),
+        format!("touch_opacity={:.2}", settings.touch_opacity),
     ];
     lines.extend(crate::game_folders::serialize_game_folders(settings));
     lines.push("unbindall".to_owned());
@@ -447,6 +449,8 @@ fn parse_settings(source: &str, settings: &mut frame::GameSettings, binds: &mut 
             "pad_vibration" => parse_into(value, &mut settings.pad_vibration),
             "pad_deadzone_left" => parse_into(value, &mut settings.pad_deadzone_left),
             "pad_deadzone_right" => parse_into(value, &mut settings.pad_deadzone_right),
+            "touch_button_scale" => parse_into(value, &mut settings.touch_button_scale),
+            "touch_opacity" => parse_into(value, &mut settings.touch_opacity),
             _ if crate::game_folders::parse_game_folder(key, value, settings) => {}
             _ => warn!("ignored unknown setting `{key}`"),
         }

@@ -270,6 +270,8 @@ pub struct WeaponBodyFacts {
     pub start_ammo: i32,
 
     pub ammo_count_clip_relative: bool,
+    /// BO1 counts `startAmmo` in reserve, past a full clip (MW2 counts the clip in it).
+    pub start_ammo_is_reserve: bool,
     pub min_damage: i32,
     pub min_player_damage: i32,
     pub max_damage_range: f32,
@@ -1764,6 +1766,7 @@ impl WeaponCatalog {
                 location_damage_mult: geometry.location_damage_mult,
                 start_ammo: geometry.start_ammo,
                 ammo_count_clip_relative: false,
+                start_ammo_is_reserve: false,
                 min_damage: geometry.min_damage,
                 min_player_damage: geometry.min_player_damage,
                 max_damage_range: geometry.max_damage_range,
@@ -3400,6 +3403,7 @@ fn capture_t5_body_facts(
     facts.max_ammo = i32_at_t5(stream, body, sz::WEAPON_DEF_MAX_AMMO_OFF);
     facts.ammo_count_clip_relative =
         u8_at_t5(stream, body, sz::WEAPON_DEF_AMMO_COUNT_CLIP_RELATIVE_OFF) != 0;
+    facts.start_ammo_is_reserve = true;
     facts.shots_per_fire = i32_at_t5(stream, body, sz::WEAPON_DEF_SHOT_COUNT_OFF);
     apply_leftover_hip_spread(
         &mut facts,

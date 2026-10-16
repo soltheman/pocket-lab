@@ -348,15 +348,12 @@ pub(crate) fn place_zombies_hud(
         }
     };
     let (score_at, ammo_at) = if buttons {
-        // Top right, clear of the Dynamic Island: points, the ammo under them.
+        // Top right, clear of the Dynamic Island: points in the corner and the ammo left
+        // of them, both above the touch buttons (SWAP rises to 74 points from the top).
         let top = 8.0 * scale;
         (
             (px(EDGE), None, Some(px(top))),
-            (
-                px(EDGE + 4.0),
-                None,
-                Some(px(top + (POINTS_PX + 14.0) * scale)),
-            ),
+            (px(EDGE + 120.0 * scale), None, Some(px(top))),
         )
     } else {
         let right = px(height * 0.05);
@@ -365,7 +362,7 @@ pub(crate) fn place_zombies_hud(
             (right, Some(px(height * 0.03)), None),
         )
     };
-    let mut apply = |node: &mut Node, (right, bottom, top): (Val, Option<Val>, Option<Val>)| {
+    let apply = |node: &mut Node, (right, bottom, top): (Val, Option<Val>, Option<Val>)| {
         let bottom = bottom.unwrap_or(Val::Auto);
         let top = top.unwrap_or(Val::Auto);
         if node.right != right || node.bottom != bottom || node.top != top {

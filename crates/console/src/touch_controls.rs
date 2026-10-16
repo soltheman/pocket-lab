@@ -18,8 +18,8 @@ use bevy::window::PrimaryWindow;
 use frame::AppScreen;
 use ui::UiLayer;
 
-use crate::{ConsoleSettings, ConsoleState};
 use crate::{ConsoleCommand, ConsoleRegistry};
+use crate::{ConsoleSettings, ConsoleState};
 
 pub const TOUCH_ENV: &str = "IW4L_TOUCH";
 
@@ -53,6 +53,7 @@ struct ButtonSpec {
     looks: bool,
 }
 
+#[rustfmt::skip]
 const BUTTONS: [ButtonSpec; 9] = [
     ButtonSpec { label: "FIRE", command: "+attack", right: 130.0, bottom: 125.0, radius: 48.0, looks: true },
     ButtonSpec { label: "AIM", command: "+speed_throw", right: 240.0, bottom: 70.0, radius: 34.0, looks: true },
@@ -119,15 +120,36 @@ fn enabled_from_env() -> bool {
     }
 }
 
-fn button_centre(spec: &ButtonSpec, size: Vec2) -> Vec2 {
-    Vec2::new(size.x - SAFE_EDGE - spec.right, size.y - spec.bottom)
+/// The buttons' size as set (BUTTON SIZE), held down so the highest button still fits
+/// under the top of the screen.
+fn button_scale(wanted: f32, size: Vec2) -> f32 {
+    let tallest = BUTTONS
+        .iter()
+        .map(|spec| spec.bottom + spec.radius)
+        .fold(1.0, f32::max);
+    wanted.min((size.y - 8.0) / tallest).max(0.5)
 }
 
-fn button_at(pos: Vec2, size: Vec2) -> Option<usize> {
+fn button_centre(spec: &ButtonSpec, size: Vec2, scale: f32) -> Vec2 {
+    Vec2::new(
+        size.x - SAFE_EDGE - spec.right * scale,
+        size.y - spec.bottom * scale,
+    )
+}
+
+fn button_at(pos: Vec2, size: Vec2, scale: f32) -> Option<usize> {
     BUTTONS.iter().position(|spec| {
         // A little grace around each button: fingers are bigger than the drawing.
-        pos.distance(button_centre(spec, size)) <= spec.radius + 8.0
+        pos.distance(button_centre(spec, size, scale)) <= spec.radius * scale + 8.0
     })
+}
+
+/// The pause button (top left) that opens the options: centre and radius.
+const MENU_BUTTON: (f32, f32, f32) = (SAFE_EDGE + 26.0, 30.0, 20.0);
+
+fn on_menu_button(pos: Vec2) -> bool {
+    let (x, y, radius) = MENU_BUTTON;
+    pos.distance(Vec2::new(x, y)) <= radius + 10.0
 }
 
 fn in_stick_zone(pos: Vec2, size: Vec2) -> bool {
@@ -153,10 +175,12 @@ pub(crate) fn update_touch_ownership(
     screen: Option<Res<AppScreen>>,
     console: Res<ConsoleState>,
     menus: Option<Res<hud::ScriptMenus>>,
+    options: Option<Res<crate::zombies_menu::ZombiesOptionsOpen>>,
     mut gameplay: ResMut<TouchGameplay>,
 ) {
     let in_game = screen.as_ref().is_some_and(|s| **s == AppScreen::InGame);
-    let menu = menus.is_some_and(|m| m.captures_input());
+    let menu =
+        menus.is_some_and(|m| m.captures_input()) || options.is_some_and(|options| options.0);
     let owns = gameplay.enabled && in_game && !console.open && !menu;
     if owns != gameplay.owns_touches && gameplay.enabled {
         diag::info!(
@@ -174,6 +198,8 @@ pub(crate) fn read_touch_controls(
     mut touches: MessageReader<TouchInput>,
     windows: Query<&Window, With<PrimaryWindow>>,
     gameplay: Res<TouchGameplay>,
+    settings: Res<frame::GameSettings>,
+    mut options: ResMut<crate::zombies_menu::ZombiesOptionsOpen>,
     mut state: ResMut<TouchState>,
     mut frame: ResMut<TouchFrame>,
 ) {
@@ -190,12 +216,21 @@ pub(crate) fn read_touch_controls(
         return;
     };
     let size = Vec2::new(window.width(), window.height());
+    let scale = button_scale(settings.touch_button_scale, size);
     let mut look = Vec2::ZERO;
     for touch in touches.read() {
         let id = touch.id;
         match touch.phase {
             TouchPhase::Started => {
-                if let Some(index) = button_at(touch.position, size) {
+                if on_menu_button(touch.position) {
+                    // The options take the screen; this layer lets go of every finger.
+                    options.0 = true;
+                    state.clear();
+                    frame.move_axes = [0.0; 2];
+                    frame.held.clear();
+                    return;
+                }
+                if let Some(index) = button_at(touch.position, size, scale) {
                     if std::env::var_os("IW4L_TOUCH_DEBUG").is_some() {
                         diag::info!(Console, "touch: finger {id} on {}", BUTTONS[index].label);
                     }
@@ -252,15 +287,37 @@ pub(crate) struct TouchOverlayRoot;
 pub(crate) struct TouchButtonNode(usize);
 
 #[derive(Component)]
+pub(crate) struct TouchButtonLabel(usize);
+
+#[derive(Component)]
 pub(crate) struct TouchStickBase;
 
 #[derive(Component)]
 pub(crate) struct TouchStickKnob;
 
-const IDLE_FILL: Color = Color::srgba(1.0, 1.0, 1.0, 0.14);
-const HELD_FILL: Color = Color::srgba(1.0, 0.86, 0.45, 0.42);
-const RIM: Color = Color::srgba(1.0, 1.0, 1.0, 0.42);
-const LABEL: Color = Color::srgba(1.0, 1.0, 1.0, 0.85);
+/// Where the stick rests when no thumb is on it: a faint ring showing where to put one.
+#[derive(Component)]
+pub(crate) struct TouchStickHint;
+
+#[derive(Component)]
+pub(crate) struct TouchMenuButton;
+
+/// Dark glass with a light rim, as BO1's console prompts; the fire button tinted red;
+/// a held button lit in BO1's menu orange. Alphas are scaled by BUTTON OPACITY.
+const IDLE_FILL: Color = Color::srgba(0.0, 0.0, 0.0, 0.32);
+const FIRE_FILL: Color = Color::srgba(0.45, 0.04, 0.02, 0.38);
+const HELD_FILL: Color = Color::srgba(1.0, 0.62, 0.15, 0.5);
+const RIM: Color = Color::srgba(1.0, 1.0, 1.0, 0.45);
+const HELD_RIM: Color = Color::srgba(1.0, 0.75, 0.35, 0.9);
+const LABEL: Color = Color::srgba(1.0, 1.0, 1.0, 0.9);
+const SPRINT_KNOB: Color = Color::srgba(1.0, 0.62, 0.15, 0.7);
+const KNOB: Color = Color::srgba(1.0, 1.0, 1.0, 0.38);
+/// The resting stick's centre: from the left edge (after `SAFE_EDGE`) and the bottom.
+const STICK_HINT: Vec2 = Vec2::new(110.0, 105.0);
+
+fn faded(color: Color, opacity: f32) -> Color {
+    color.with_alpha(color.alpha() * opacity)
+}
 
 fn circle(radius: f32) -> Node {
     Node {
@@ -273,6 +330,10 @@ fn circle(radius: f32) -> Node {
         align_items: AlignItems::Center,
         ..default()
     }
+}
+
+fn label_px(spec: &ButtonSpec, scale: f32) -> f32 {
+    (if spec.radius >= 40.0 { 15.0 } else { 11.0 } * scale).round()
 }
 
 pub(crate) fn spawn_touch_overlay(commands: &mut Commands, font: Handle<Font>, enabled: bool) {
@@ -304,20 +365,71 @@ pub(crate) fn spawn_touch_overlay(commands: &mut Commands, font: Handle<Font>, e
                         bottom: px(spec.bottom - spec.radius),
                         ..circle(spec.radius)
                     },
-                    BackgroundColor(IDLE_FILL),
+                    BackgroundColor(if spec.command == "+attack" {
+                        FIRE_FILL
+                    } else {
+                        IDLE_FILL
+                    }),
                     BorderColor::all(RIM),
                     FocusPolicy::Pass,
                 ))
                 .with_child((
+                    TouchButtonLabel(index),
                     Text::new(spec.label),
                     TextFont {
                         font: font.clone().into(),
-                        font_size: FontSize::Px(if spec.radius >= 40.0 { 15.0 } else { 11.0 }),
+                        font_size: FontSize::Px(label_px(spec, 1.0)),
                         ..default()
                     },
                     TextColor(LABEL),
                 ));
             }
+            let (x, y, radius) = MENU_BUTTON;
+            root.spawn((
+                TouchMenuButton,
+                Node {
+                    left: px(x - radius),
+                    top: px(y - radius),
+                    column_gap: px(4),
+                    ..circle(radius)
+                },
+                BackgroundColor(IDLE_FILL),
+                BorderColor::all(RIM),
+                FocusPolicy::Pass,
+            ))
+            .with_children(|pause| {
+                // A pause sign: two bars.
+                for _ in 0..2 {
+                    pause.spawn((
+                        Node {
+                            width: px(4),
+                            height: px(14),
+                            ..default()
+                        },
+                        BackgroundColor(LABEL),
+                    ));
+                }
+            });
+            root.spawn((
+                TouchStickHint,
+                Node {
+                    left: px(SAFE_EDGE + STICK_HINT.x - STICK_RADIUS),
+                    bottom: px(STICK_HINT.y - STICK_RADIUS),
+                    ..circle(STICK_RADIUS)
+                },
+                BackgroundColor(Color::NONE),
+                BorderColor::all(Color::srgba(1.0, 1.0, 1.0, 0.16)),
+                FocusPolicy::Pass,
+            ))
+            .with_child((
+                Node {
+                    width: px(STICK_KNOB_RADIUS * 2.0),
+                    height: px(STICK_KNOB_RADIUS * 2.0),
+                    border_radius: BorderRadius::MAX,
+                    ..default()
+                },
+                BackgroundColor(Color::srgba(1.0, 1.0, 1.0, 0.1)),
+            ));
             root.spawn((
                 TouchStickBase,
                 circle(STICK_RADIUS),
@@ -329,7 +441,7 @@ pub(crate) fn spawn_touch_overlay(commands: &mut Commands, font: Handle<Font>, e
             root.spawn((
                 TouchStickKnob,
                 circle(STICK_KNOB_RADIUS),
-                BackgroundColor(Color::srgba(1.0, 1.0, 1.0, 0.38)),
+                BackgroundColor(KNOB),
                 BorderColor::all(RIM),
                 FocusPolicy::Pass,
                 Visibility::Hidden,
@@ -337,18 +449,58 @@ pub(crate) fn spawn_touch_overlay(commands: &mut Commands, font: Handle<Font>, e
         });
 }
 
+#[allow(clippy::type_complexity, clippy::too_many_arguments)]
 pub(crate) fn update_touch_overlay(
     gameplay: Res<TouchGameplay>,
     state: Res<TouchState>,
+    settings: Res<frame::GameSettings>,
+    windows: Query<&Window, With<PrimaryWindow>>,
     mut root: Query<&mut Visibility, With<TouchOverlayRoot>>,
-    mut buttons: Query<(&TouchButtonNode, &mut BackgroundColor)>,
+    mut buttons: Query<
+        (
+            &TouchButtonNode,
+            &mut Node,
+            &mut BackgroundColor,
+            &mut BorderColor,
+        ),
+        (
+            Without<TouchStickBase>,
+            Without<TouchStickKnob>,
+            Without<TouchStickHint>,
+        ),
+    >,
+    mut labels: Query<(&TouchButtonLabel, &mut TextFont, &mut TextColor)>,
     mut base: Query<
-        (&mut Node, &mut Visibility),
-        (With<TouchStickBase>, Without<TouchStickKnob>, Without<TouchOverlayRoot>),
+        (
+            &mut Node,
+            &mut Visibility,
+            &mut BackgroundColor,
+            &mut BorderColor,
+        ),
+        (
+            With<TouchStickBase>,
+            Without<TouchStickKnob>,
+            Without<TouchOverlayRoot>,
+            Without<TouchButtonNode>,
+        ),
     >,
     mut knob: Query<
-        (&mut Node, &mut Visibility),
-        (With<TouchStickKnob>, Without<TouchStickBase>, Without<TouchOverlayRoot>),
+        (&mut Node, &mut Visibility, &mut BackgroundColor),
+        (
+            With<TouchStickKnob>,
+            Without<TouchStickBase>,
+            Without<TouchOverlayRoot>,
+            Without<TouchButtonNode>,
+        ),
+    >,
+    mut hint: Query<
+        &mut Visibility,
+        (
+            With<TouchStickHint>,
+            Without<TouchStickBase>,
+            Without<TouchStickKnob>,
+            Without<TouchOverlayRoot>,
+        ),
     >,
 ) {
     let Ok(mut root) = root.single_mut() else {
@@ -360,26 +512,82 @@ pub(crate) fn update_touch_overlay(
         Visibility::Hidden
     };
     root.set_if_neq(show);
-    for (node, mut fill) in &mut buttons {
-        let want = if state.button_held(node.0) { HELD_FILL } else { IDLE_FILL };
-        if fill.0 != want {
-            fill.0 = want;
+    let size = windows.single().map_or(Vec2::new(844.0, 390.0), |w| {
+        Vec2::new(w.width(), w.height())
+    });
+    let scale = button_scale(settings.touch_button_scale, size);
+    let opacity = settings.touch_opacity;
+    for (button, mut node, mut fill, mut rim) in &mut buttons {
+        let spec = &BUTTONS[button.0];
+        let radius = spec.radius * scale;
+        let want = (
+            px(SAFE_EDGE + spec.right * scale - radius),
+            px(spec.bottom * scale - radius),
+            px(radius * 2.0),
+        );
+        if node.right != want.0 || node.bottom != want.1 || node.width != want.2 {
+            node.right = want.0;
+            node.bottom = want.1;
+            node.width = want.2;
+            node.height = want.2;
+        }
+        let held = state.button_held(button.0);
+        let idle = if spec.command == "+attack" {
+            FIRE_FILL
+        } else {
+            IDLE_FILL
+        };
+        let want_fill = if held {
+            HELD_FILL
+        } else {
+            faded(idle, opacity)
+        };
+        if fill.0 != want_fill {
+            fill.0 = want_fill;
+        }
+        let want_rim = BorderColor::all(if held { HELD_RIM } else { faded(RIM, opacity) });
+        if *rim != want_rim {
+            *rim = want_rim;
+        }
+    }
+    for (label, mut font, mut color) in &mut labels {
+        let want = FontSize::Px(label_px(&BUTTONS[label.0], scale));
+        if font.font_size != want {
+            font.font_size = want;
+        }
+        let want = faded(LABEL, opacity.max(0.6));
+        if color.0 != want {
+            color.0 = want;
         }
     }
     let stick = state.stick;
-    if let Ok((mut node, mut vis)) = base.single_mut() {
+    if let Ok(mut vis) = hint.single_mut() {
+        vis.set_if_neq(if stick.is_some() {
+            Visibility::Hidden
+        } else {
+            Visibility::Inherited
+        });
+    }
+    let sprinting = stick.as_ref().is_some_and(|stick| stick_axes(stick).1);
+    if let Ok((mut node, mut vis, mut fill, mut rim)) = base.single_mut() {
         match stick {
             Some(stick) => {
                 node.left = px(stick.origin.x - STICK_RADIUS);
                 node.top = px(stick.origin.y - STICK_RADIUS);
                 vis.set_if_neq(Visibility::Inherited);
+                fill.0 = faded(IDLE_FILL, opacity);
+                *rim = BorderColor::all(if sprinting {
+                    HELD_RIM
+                } else {
+                    faded(RIM, opacity)
+                });
             }
             None => {
                 vis.set_if_neq(Visibility::Hidden);
             }
         }
     }
-    if let Ok((mut node, mut vis)) = knob.single_mut() {
+    if let Ok((mut node, mut vis, mut fill)) = knob.single_mut() {
         match stick {
             Some(stick) => {
                 let delta = stick.at - stick.origin;
@@ -388,6 +596,7 @@ pub(crate) fn update_touch_overlay(
                 node.left = px(at.x - STICK_KNOB_RADIUS);
                 node.top = px(at.y - STICK_KNOB_RADIUS);
                 vis.set_if_neq(Visibility::Inherited);
+                fill.0 = if sprinting { SPRINT_KNOB } else { KNOB };
             }
             None => {
                 vis.set_if_neq(Visibility::Hidden);
@@ -462,12 +671,24 @@ mod tests {
     #[test]
     fn buttons_do_not_overlap_and_fit_the_screen() {
         for (i, a) in BUTTONS.iter().enumerate() {
-            let ca = button_centre(a, PHONE);
-            assert!(ca.x + a.radius <= PHONE.x - SAFE_EDGE + 1.0, "{} past the edge", a.label);
-            assert!(ca.y - a.radius >= 0.0 && ca.y + a.radius <= PHONE.y, "{} off screen", a.label);
-            assert!(!in_stick_zone(ca, PHONE), "{} sits in the stick zone", a.label);
+            let ca = button_centre(a, PHONE, 1.0);
+            assert!(
+                ca.x + a.radius <= PHONE.x - SAFE_EDGE + 1.0,
+                "{} past the edge",
+                a.label
+            );
+            assert!(
+                ca.y - a.radius >= 0.0 && ca.y + a.radius <= PHONE.y,
+                "{} off screen",
+                a.label
+            );
+            assert!(
+                !in_stick_zone(ca, PHONE),
+                "{} sits in the stick zone",
+                a.label
+            );
             for b in &BUTTONS[i + 1..] {
-                let cb = button_centre(b, PHONE);
+                let cb = button_centre(b, PHONE, 1.0);
                 assert!(
                     ca.distance(cb) >= a.radius + b.radius,
                     "{} overlaps {}",
@@ -479,9 +700,31 @@ mod tests {
     }
 
     #[test]
+    fn the_largest_button_size_still_fits_the_screen() {
+        let scale = button_scale(1.35, PHONE);
+        assert!(scale < 1.35, "held down to fit");
+        for spec in BUTTONS {
+            let centre = button_centre(&spec, PHONE, scale);
+            assert!(
+                centre.y - spec.radius * scale >= 0.0,
+                "{} off the top",
+                spec.label
+            );
+        }
+        assert!(!in_stick_zone(
+            Vec2::new(MENU_BUTTON.0, MENU_BUTTON.1),
+            PHONE
+        ));
+    }
+
+    #[test]
     fn button_commands_are_known_inputs() {
         for spec in BUTTONS {
-            assert!(input_iw4::command_id_from_name(spec.command).is_some(), "{}", spec.command);
+            assert!(
+                input_iw4::command_id_from_name(spec.command).is_some(),
+                "{}",
+                spec.command
+            );
         }
         assert!(input_iw4::command_id_from_name(SPRINT_COMMAND).is_some());
         assert!(SPRINT_KEYNUM < input_iw4::KEY_COUNT as i32);
@@ -490,15 +733,31 @@ mod tests {
     #[test]
     fn stick_pushed_up_walks_forward_and_far_up_sprints() {
         let origin = Vec2::new(150.0, 250.0);
-        let walk = Stick { id: 1, origin, at: origin + Vec2::new(0.0, -STICK_RADIUS) };
+        let walk = Stick {
+            id: 1,
+            origin,
+            at: origin + Vec2::new(0.0, -STICK_RADIUS),
+        };
         let (axes, sprint) = stick_axes(&walk);
         assert!((axes[0] - 1.0).abs() < 1e-4 && axes[1].abs() < 1e-4 && !sprint);
-        let run = Stick { id: 1, origin, at: origin + Vec2::new(0.0, -STICK_RADIUS * 1.5) };
+        let run = Stick {
+            id: 1,
+            origin,
+            at: origin + Vec2::new(0.0, -STICK_RADIUS * 1.5),
+        };
         assert!(stick_axes(&run).1);
-        let strafe = Stick { id: 1, origin, at: origin + Vec2::new(STICK_RADIUS * 1.5, 0.0) };
+        let strafe = Stick {
+            id: 1,
+            origin,
+            at: origin + Vec2::new(STICK_RADIUS * 1.5, 0.0),
+        };
         let (axes, sprint) = stick_axes(&strafe);
         assert!(axes[1] > 0.99 && !sprint);
-        let rest = Stick { id: 1, origin, at: origin + Vec2::new(3.0, 3.0) };
+        let rest = Stick {
+            id: 1,
+            origin,
+            at: origin + Vec2::new(3.0, 3.0),
+        };
         assert_eq!(stick_axes(&rest).0, [0.0, 0.0]);
     }
 }

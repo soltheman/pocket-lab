@@ -115,6 +115,8 @@ impl Plugin for ConsolePlugin {
             .insert_resource(crate::touch_controls::touch_gameplay_resource())
             .init_resource::<crate::touch_controls::TouchFrame>()
             .init_resource::<crate::touch_controls::TouchState>()
+            .init_resource::<crate::zombies_menu::ZombiesOptionsOpen>()
+            .init_resource::<crate::zombies_menu::MenuCommand>()
             .add_systems(
                 PreUpdate,
                 (
@@ -132,6 +134,14 @@ impl Plugin for ConsolePlugin {
                     crate::zombies_hud::update_zombies_hud,
                     crate::zombies_hud::update_zombies_hint,
                     crate::zombies_hud::place_zombies_hud,
+                    crate::zombies_menu::spawn_zombies_menu,
+                    crate::zombies_menu::animate_zombies_menu,
+                    crate::zombies_menu::zombies_menu_buttons,
+                    crate::zombies_menu::show_zombies_options,
+                    crate::zombies_menu::zombies_options_input,
+                    crate::zombies_menu::handle_zombies_menu_commands
+                        .after(ConsoleDispatchSet)
+                        .before(crate::zombies_menu::zombies_menu_buttons),
                     crate::touch_controls::handle_touch_commands.after(ConsoleDispatchSet),
                 ),
             )
@@ -794,6 +804,7 @@ fn setup_console(
     crate::weapon_dispatch::register_weapon_commands(&mut registry, &weapon_completions);
     crate::debug_move::register_debug_move_commands(&mut registry);
     crate::touch_controls::register_touch_commands(&mut registry);
+    crate::zombies_menu::register_zombies_menu_commands(&mut registry);
     crate::saved_position::register_saved_position_commands(&mut registry);
     crate::debug_script_mover::register_debug_script_mover_commands(&mut registry);
     crate::debug_draw_method::register_debug_draw_method_commands(&mut registry);

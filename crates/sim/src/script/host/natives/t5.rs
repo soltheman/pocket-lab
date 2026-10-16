@@ -762,10 +762,10 @@ fn register_script(registry: &mut NativeRegistry) {
         let facts = weapon_facts(world, &string(args, 0)?)?;
         Ok(Value::Float(facts.reload_time_ms as f32 / 1000.0))
     });
+    // BO1's own figure: rounds past the first clip (the combat facts count it in).
     registry.register(Function, "weaponstartammo", |world, _, args| {
-        Ok(Value::Int(
-            weapon_facts(world, &string(args, 0)?)?.start_ammo,
-        ))
+        let facts = weapon_facts(world, &string(args, 0)?)?;
+        Ok(Value::Int((facts.start_ammo - facts.clip_size).max(0)))
     });
     registry.register(Function, "getweaponfusetime", |world, _, args| {
         let name = string(args, 0)?;
@@ -1114,7 +1114,8 @@ fn register_player(registry: &mut NativeRegistry) {
         let weapon = script_player::weapon_named(&frame, &name)?;
         let held = script_player::ammo_clip(&frame, id, weapon)
             + script_player::ammo_stock(&frame, id, weapon);
-        let start = (facts.start_ammo + facts.clip_size).max(1);
+        // The combat facts count the first clip in (see the session's combat table).
+        let start = facts.start_ammo.max(1);
         Ok(Value::Float(held as f32 / start as f32))
     });
     // BO1 zombies tops grenades up at each round's end by this fraction (under a quarter:

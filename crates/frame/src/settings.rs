@@ -89,6 +89,10 @@ pub struct GameSettings {
     pub pad_deadzone_left: f32,
     pub pad_deadzone_right: f32,
 
+    /// The touch buttons' size (1 = as designed) and how solid they are drawn.
+    pub touch_button_scale: f32,
+    pub touch_opacity: f32,
+
     pub revision: u64,
 }
 
@@ -122,6 +126,8 @@ impl Default for GameSettings {
             pad_vibration: true,
             pad_deadzone_left: 0.12,
             pad_deadzone_right: 0.12,
+            touch_button_scale: 1.0,
+            touch_opacity: 1.0,
             revision: 0,
         }
     }
@@ -190,6 +196,8 @@ impl GameSettings {
         self.pad_ads_sensitivity = finite(self.pad_ads_sensitivity, 0.5, 1.5, 1.0);
         self.pad_deadzone_left = finite(self.pad_deadzone_left, 0.0, 0.4, 0.12);
         self.pad_deadzone_right = finite(self.pad_deadzone_right, 0.0, 0.4, 0.12);
+        self.touch_button_scale = finite(self.touch_button_scale, 0.75, 1.35, 1.0);
+        self.touch_opacity = finite(self.touch_opacity, 0.3, 1.0, 1.0);
         self.player_name = self.player_name.trim().chars().take(16).collect();
         if self.player_name.is_empty() {
             self.player_name = "Player".to_owned();

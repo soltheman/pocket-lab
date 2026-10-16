@@ -38,6 +38,8 @@ pub mod suggest;
 mod synthetic_input;
 pub mod touch_controls;
 mod zombies_hud;
+pub mod zombies_menu;
+pub use zombies_menu::{ZombiesMenuLoad, ZombiesMenuStart, ZombiesOptionsOpen};
 mod user_settings;
 mod weapon_dispatch;
 
