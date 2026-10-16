@@ -348,6 +348,8 @@ face_juggernog()
         away = vectornormalize((p.origin[0] - target[0], p.origin[1] - target[1], 0));
         p setorigin((target[0], target[1], target[2] - 40) + (away[0] * 48, away[1] * 48, 0));
         p setplayerangles(vectortoangles(target - (p.origin + (0, 0, 60))));
+        wait 1;
+        logprint("perk debug: player at Juggernog " + p.origin);
         return;
     }
 }

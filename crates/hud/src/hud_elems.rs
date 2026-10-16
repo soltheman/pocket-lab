@@ -291,9 +291,14 @@ pub(crate) fn update_hud_elems(
                 });
                 continue;
             };
+            // A plain name is the map's game's: BO1's scripts name BO1 materials.
+            let plain_namespace = match hud_images.map_namespace() {
+                asset_core::AssetNamespace::T5 => asset_core::AssetNamespace::T5,
+                _ => crate::images::HUD_CHROME_NAMESPACE,
+            };
             let (material_namespace, material) = match asset_core::AssetKey::parse(material) {
                 Ok(key) if key.kind == asset_core::AssetKind::Material => (key.namespace, key.name),
-                _ => (crate::images::HUD_CHROME_NAMESPACE, material.to_owned()),
+                _ => (plain_namespace, material.to_owned()),
             };
             if hud_images
                 .get(material_namespace, &material, &mut images)

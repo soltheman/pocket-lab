@@ -140,6 +140,8 @@ pub struct HudImages {
     zone_handles: HashMap<ZoneKey, Handle<Image>>,
     zone_image_name: HashMap<String, String>,
     material_images: HashMap<String, String>,
+    /// BO1 (T5) HUD materials to their images (`PreparedHudMaterialImages`).
+    material_images_t5: HashMap<String, String>,
     zone_states: HashMap<String, Option<[u32; 2]>>,
     zone_srgb_reads: HashMap<String, bool>,
     zone_samplers: HashMap<String, u8>,
@@ -182,6 +184,24 @@ impl HudImages {
         self.rgba_by_name.clear();
         self.iwd_warmed = false;
         self.log_trees();
+    }
+
+    /// BO1's HUD materials and their images, from the loaded map; cached decodes of a
+    /// material that now maps elsewhere are dropped.
+    pub fn set_t5_material_images(&mut self, map: &std::collections::BTreeMap<String, String>) {
+        let changed = map.len() != self.material_images_t5.len()
+            || map
+                .iter()
+                .any(|(material, image)| self.material_images_t5.get(material) != Some(image));
+        if !changed {
+            return;
+        }
+        self.material_images_t5 = map
+            .iter()
+            .map(|(material, image)| (cache_key(material), image.clone()))
+            .collect();
+        self.by_name.retain(|(ns, _, _, _), _| *ns != AssetNamespace::T5);
+        self.rgba_by_name.retain(|(ns, _), _| *ns != AssetNamespace::T5);
     }
 
     pub fn map_namespace(&self) -> AssetNamespace {
@@ -488,13 +508,17 @@ impl HudImages {
             return Some((width, height, rgba.as_ref().clone()));
         }
         let main = self.trees.main_for(ns)?;
-        let mapped = (ns == HUD_CHROME_NAMESPACE)
-            .then(|| {
-                self.material_images
-                    .get(&cache_key(name))
-                    .map(String::as_str)
-            })
-            .flatten();
+        let mapped = if ns == HUD_CHROME_NAMESPACE {
+            self.material_images
+                .get(&cache_key(name))
+                .map(String::as_str)
+        } else if ns == AssetNamespace::T5 {
+            self.material_images_t5
+                .get(&cache_key(name))
+                .map(String::as_str)
+        } else {
+            None
+        };
         for image_name in mapped
             .filter(|image| *image != name)
             .into_iter()

@@ -396,7 +396,9 @@ pub fn hud_elem_material_size(
             (from_w + (w - from_w) * lerp, from_h + (h - from_h) * lerp)
         }
     };
-    (w, h.max(font_height))
+    // The material's own size (font height only when it has none): BO1's round chalk
+    // carries a 32x font scale for the numbers it shows after round 5.
+    (w, h)
 }
 
 #[must_use]

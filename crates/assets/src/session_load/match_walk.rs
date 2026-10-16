@@ -250,6 +250,18 @@ pub(super) async fn walk_prepared_match(
                 material.technique_table.as_ref().map(|t| format!("{:#x}", t.slots)),
                 material.technique_table.as_ref().map(|t| t.pass_count_by_slot),
             );
+            for binding in &material.textures {
+                let image = binding.image.and_then(|i| materials.images.get(i));
+                diag::info!(
+                    World,
+                    "material probe {}: semantic {} image {:?} payload {} decoded {:?}",
+                    material.name.as_str(),
+                    binding.semantic,
+                    image.map(|i| i.name.as_str()),
+                    image.map_or(0, |i| i.payload.len()),
+                    image.and_then(|i| i.decoded.as_ref().map(|d| d.texture_descriptor.format)),
+                );
+            }
         }
     }
 

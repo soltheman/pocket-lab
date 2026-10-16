@@ -147,3 +147,10 @@ pub struct SessionCompass {
 
 #[derive(Clone, Copy, Debug, Default, Resource, PartialEq, Eq)]
 pub struct PreparedBodyClips(pub bool);
+
+/// BO1's 2D materials by the image each draws (its `2d` texture, else its colour map):
+/// a BO1 HUD element names a material (`hud_chalk_1`), and the HUD finds that material's
+/// image (`chalkmarks_1`) in BO1's IWDs by this, as MW2's come from its menu zones.
+/// Empty for other games' maps.
+#[derive(Clone, Debug, Default, Resource)]
+pub struct PreparedHudMaterialImages(pub std::collections::BTreeMap<String, String>);

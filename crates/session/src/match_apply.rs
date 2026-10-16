@@ -266,6 +266,7 @@ pub fn apply_prepared_match(
             type10,
             fx_models,
             impact_fx,
+            hud_material_images,
             mut authority_models,
             model_spawns,
         } = plan;
@@ -295,6 +296,7 @@ pub fn apply_prepared_match(
         stage_resource(&mut install, type10);
         stage_resource(&mut install, fx_models);
         stage_resource(&mut install, impact_fx);
+        stage_resource(&mut install, hud_material_images);
         stage_resource(&mut install, tracers);
 
         let mut scene = loaded_scene;
@@ -857,6 +859,7 @@ struct MatchInstallPlan {
     type10: MatchType10SoundHints,
     fx_models: PreparedFxModels,
     impact_fx: PreparedImpactFx,
+    hud_material_images: assets::PreparedHudMaterialImages,
     authority_models: AuthorityEntityModelInstall,
     model_spawns: Vec<(sim::ScriptModelId, [f32; 3], [f32; 3])>,
 }
@@ -1289,6 +1292,36 @@ fn preflight_match_install(
     let fx_models = PreparedFxModels(std::mem::take(&mut prepared.world.fx_models));
     let impact_fx = PreparedImpactFx(std::mem::take(&mut prepared.world.impact_fx));
     let tracers = PreparedTracers(std::mem::take(&mut prepared.tracers));
+    let hud_material_images = assets::PreparedHudMaterialImages(
+        if prepared_map.namespace == Some(asset_core::AssetNamespace::T5) {
+            let defs = &prepared.materials.population;
+            defs.materials
+                .iter()
+                .filter(|m| m.technique_set.as_str().contains("2d"))
+                .filter_map(|m| {
+                    // asset_material::TS_2D and TS_COLOR_MAP.
+                    let image = [0u8, 2u8]
+                        .into_iter()
+                        .find_map(|semantic| {
+                            m.textures
+                                .iter()
+                                .filter(|b| b.semantic == semantic)
+                                .filter_map(|b| defs.images.get(b.image?))
+                                .map(|image| image.name.as_str())
+                                .find(|name| !name.starts_with('$'))
+                        })?;
+                    Some((m.name.as_str().to_ascii_lowercase(), image.to_owned()))
+                })
+                .collect()
+        } else {
+            Default::default()
+        },
+    );
+    diag::info!(
+        World,
+        "hud: {} BO1 2D materials mapped to their images",
+        hud_material_images.0.len()
+    );
     let scene = match world_scene_from_draw(
         prepared.world,
         prepared.materials,
@@ -1342,6 +1375,7 @@ fn preflight_match_install(
         type10,
         fx_models,
         impact_fx,
+        hud_material_images,
         authority_models,
         model_spawns,
     })

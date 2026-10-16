@@ -1,6 +1,13 @@
-# Pocket Lab 0.3.25
+# Pocket Lab 0.3.26
 
 Smoother on the phone, every touch button does its job, and co-op over Wi-Fi.
+
+**New in 0.3.26**
+- First part of Black Ops' own HUD. The round counter is now Black Ops' dark red chalk tally, bottom left: one mark per round up to five, then a crossed five plus more marks up to round 10. The old red number at the top left is gone. Perks you buy show their Black Ops icon above the chalk.
+  - Why they were missing: Black Ops draws these from its scripts with images that live in its own archives. The HUD only knew how to find Multiplayer's (MW2's) images, and it stretched images to the height of text (the chalk carries a giant text size for later rounds).
+  - On iPhone the chalk and perk icons stay clear of the rounded corner and the Dynamic Island.
+  - Checked on PC: rounds 1, 4 and 6 show the right chalk; buying Jugger-Nog shows its icon and takes 2,500 points.
+- Not yet Black Ops' own: the points (still the yellow number top right), the ammo counter, weapon name and the round number after round 10. Those come from Black Ops' menu files and fonts, which are next.
 
 **New in 0.3.25**
 - Each character's own arms in first person. Black Ops gives each Kino character their own: Dempsey (player 1) the POW arms, Nikolai (player 2) the prisoner arms, Takeo (player 3) the NVA arms, Richtofen (player 4) the hazmat arms. Black Ops' weapons only carry stand-in hands (the grey ones you've had). The script's choice now reaches your phone, and every weapon is held in those arms. Checked on PC: Dempsey's arms on the pistol and the MP5K, including the MP5K's first-raise animation.

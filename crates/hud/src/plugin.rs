@@ -76,6 +76,7 @@ impl Plugin for HudPlugin {
                     sync_games_root,
                     sync_map_zone_tree,
                     sync_zone_atlases,
+                    sync_t5_material_images,
                     warm_hud_images,
                     ensure_hud_root,
                     sync_frontend_camera,
@@ -900,5 +901,14 @@ fn flush_breath_hint_tess(
             surface.width(),
             surface.height(),
         );
+    }
+}
+
+fn sync_t5_material_images(
+    map: Option<Res<assets::PreparedHudMaterialImages>>,
+    mut hud_images: ResMut<HudImages>,
+) {
+    if let Some(map) = map.filter(|map| map.is_changed()) {
+        hud_images.set_t5_material_images(&map.0);
     }
 }

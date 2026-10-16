@@ -2,6 +2,8 @@ use bevy::prelude::*;
 use hud_iw4::{AppliedRect, ScreenPlacement};
 
 const SQUARE_PIXELS: f32 = 1.0;
+/// Clear of the notch / Dynamic Island in landscape, as the touch controls (logical px).
+const PHONE_EDGE: f32 = 56.0;
 
 #[derive(Resource, Clone, Copy, Debug)]
 pub struct Hud2dSurface {
@@ -18,8 +20,28 @@ impl Default for Hud2dSurface {
 
 impl Hud2dSurface {
     pub fn new(width: f32, height: f32) -> Self {
-        let place =
-            ScreenPlacement::setup_fullscreen(width.max(1.0), height.max(1.0), SQUARE_PIXELS);
+        let (width_px, height_px) = (width.max(1.0), height.max(1.0));
+        // The player-adjustable area (BO1's `user_left`/`user_right` HUD, its round chalk)
+        // is the whole screen on PC; on iPhone it keeps clear of the rounded corners and
+        // the Dynamic Island in landscape, as the touch controls do.
+        let adjustable_horz = if cfg!(target_os = "ios") {
+            (1.0 - 2.0 * PHONE_EDGE / width_px).clamp(0.5, 1.0)
+        } else {
+            hud_iw4::SAFE_AREA_ADJUSTED_DEFAULT
+        };
+        let place = ScreenPlacement::setup(
+            0.0,
+            0.0,
+            width_px,
+            height_px,
+            width_px,
+            height_px,
+            hud_iw4::SAFE_AREA_DEFAULT,
+            hud_iw4::SAFE_AREA_DEFAULT,
+            adjustable_horz,
+            hud_iw4::SAFE_AREA_ADJUSTED_DEFAULT,
+            SQUARE_PIXELS,
+        );
         Self {
             width,
             height,

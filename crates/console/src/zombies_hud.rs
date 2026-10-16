@@ -1,14 +1,14 @@
-//! The BO1 zombies HUD: points, the round and game over. BO1 draws them with script HUD
-//! elements and its own menus, which this runtime does not present; the zombies scripts'
-//! HUD feed sends them as client dvars (`ui_zm_points`, `ui_zm_round`, `ui_zm_gameover`)
-//! and this draws them. Nothing shows until a feed arrives, so other maps are untouched.
+//! Stand-ins for the parts of the BO1 zombies HUD that come from BO1's menus, which this
+//! runtime does not present yet: points and game over (the round is BO1's own chalk HUD
+//! element). The zombies scripts' HUD feed sends them as client dvars (`ui_zm_points`,
+//! `ui_zm_gameover`) and this draws them. Nothing shows until a feed arrives, so other
+//! maps are untouched.
 
 use bevy::prelude::*;
 use net::{LocalPresentClient, PresentedSnapshot};
 use ui::UiLayer;
 
 const POINTS_DVAR: &str = "ui_zm_points";
-const ROUND_DVAR: &str = "ui_zm_round";
 /// The rounds survived, once the game is over (empty while it is not).
 const GAME_OVER_DVAR: &str = "ui_zm_gameover";
 /// Clear of the notch / Dynamic Island in landscape, as the touch controls.
@@ -19,9 +19,6 @@ pub(crate) struct ZombiesHudRoot;
 
 #[derive(Component)]
 pub(crate) struct ZombiesPoints;
-
-#[derive(Component)]
-pub(crate) struct ZombiesRound;
 
 #[derive(Component)]
 pub(crate) struct ZombiesGameOver;
@@ -76,24 +73,7 @@ pub(crate) fn spawn_zombies_hud(commands: &mut Commands, font: Handle<Font>) {
             Visibility::Hidden,
         ))
         .with_children(|root| {
-            // The round, chalk red, top left.
-            root.spawn((
-                ZombiesRound,
-                Node {
-                    position_type: PositionType::Absolute,
-                    left: px(EDGE),
-                    top: px(10),
-                    ..default()
-                },
-                Text::new(""),
-                TextFont {
-                    font: font.clone().into(),
-                    font_size: FontSize::Px(34.0),
-                    ..default()
-                },
-                TextColor(Color::srgb(0.62, 0.05, 0.03)),
-                TextShadow::default(),
-            ));
+            // The round is BO1's own chalk HUD element now (bottom left).
             // Points, top right, in the yellow of BO1's score.
             root.spawn((
                 ZombiesPoints,
@@ -184,30 +164,8 @@ pub(crate) fn update_zombies_hud(
     screen: Option<Res<frame::AppScreen>>,
     mut root: Query<&mut Visibility, (With<ZombiesHudRoot>, Without<ZombiesGameOver>)>,
     mut over: Query<&mut Visibility, (With<ZombiesGameOver>, Without<ZombiesHudRoot>)>,
-    mut points: Query<
-        &mut Text,
-        (
-            With<ZombiesPoints>,
-            Without<ZombiesRound>,
-            Without<ZombiesSurvived>,
-        ),
-    >,
-    mut round: Query<
-        &mut Text,
-        (
-            With<ZombiesRound>,
-            Without<ZombiesPoints>,
-            Without<ZombiesSurvived>,
-        ),
-    >,
-    mut survived: Query<
-        &mut Text,
-        (
-            With<ZombiesSurvived>,
-            Without<ZombiesPoints>,
-            Without<ZombiesRound>,
-        ),
-    >,
+    mut points: Query<&mut Text, (With<ZombiesPoints>, Without<ZombiesSurvived>)>,
+    mut survived: Query<&mut Text, (With<ZombiesSurvived>, Without<ZombiesPoints>)>,
 ) {
     let Ok(mut visibility) = root.single_mut() else {
         return;
@@ -224,10 +182,10 @@ pub(crate) fn update_zombies_hud(
                     .find(|(key, _)| key.eq_ignore_ascii_case(name))
                     .map(|(_, value)| value.to_string())
             };
-            Some((value(POINTS_DVAR), value(ROUND_DVAR), value(GAME_OVER_DVAR)))
+            Some((value(POINTS_DVAR), value(GAME_OVER_DVAR)))
         });
     let in_game = screen.is_some_and(|s| *s == frame::AppScreen::InGame);
-    let Some((Some(score), round_number, game_over)) = dvars.filter(|_| in_game) else {
+    let Some((Some(score), game_over)) = dvars.filter(|_| in_game) else {
         visibility.set_if_neq(Visibility::Hidden);
         return;
     };
@@ -256,12 +214,6 @@ pub(crate) fn update_zombies_hud(
         && text.0 != score
     {
         text.0 = score;
-    }
-    let round_text = round_number.filter(|r| r != "0").unwrap_or_default();
-    if let Ok(mut text) = round.single_mut()
-        && text.0 != round_text
-    {
-        text.0 = round_text;
     }
 }
 
