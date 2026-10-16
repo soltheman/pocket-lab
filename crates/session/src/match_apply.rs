@@ -450,13 +450,13 @@ pub fn apply_prepared_match(
         }));
         content.set_weapon_script_names(weapons.0.script_names_table());
         let mut script_aliases = objective_weapons;
-        // BO1's singleplayer and zombies scripts name their weapons as the zones do
-        // (m1911_zm, knife_zm), not in the multiplayer `_mp` form script names take.
+        // BO1's weapons are named to its scripts as the zones name them (m1911_zm,
+        // knife_zm); the multiplayer `_mp` form other script names take still finds them.
         for id in 1..weapons.0.len() as u32 {
             if weapons.0.identity_namespace_of(id) == Some(asset_core::AssetNamespace::T5) {
                 let bare = weapons.0.name_of(id);
                 if !bare.is_empty() && !bare.ends_with("_mp") {
-                    script_aliases.push((bare.to_owned(), id));
+                    script_aliases.push((format!("{bare}_mp"), id));
                 }
             }
         }
@@ -1237,9 +1237,10 @@ fn preflight_match_install(
         // Debug modes of the zombies HUD script (iw4l_zombies/hud): IW4L_ZM_WATCH picks one
         // (1, aim, die, buy, door, power, box, perk, nuke), IW4L_ZM_LOOK refines it.
         // IW4L_ZM_WATCH=at takes IW4L_ZM_X/Y/Z/YAW/PITCH: where to stand and look, and
-        // IW4L_ZM_OPEN=1 opens every door.
+        // IW4L_ZM_OPEN=1 opens every door, IW4L_ZM_GUN=<weapon> arms the first player.
         for (env, dvar) in [
             ("IW4L_ZM_OPEN", "iw4l_zm_open"),
+            ("IW4L_ZM_GUN", "iw4l_zm_gun"),
             ("IW4L_ZM_WATCH", "iw4l_zm_watch"),
             ("IW4L_ZM_LOOK", "iw4l_zm_look"),
             ("IW4L_ZM_X", "iw4l_zm_x"),

@@ -8983,7 +8983,14 @@ impl WeaponRegistry {
     }
 
     pub fn script_name_of(&self, index: u32) -> String {
-        gsc_weapon_script_name(self.name_of(index))
+        let name = self.name_of(index);
+        // BO1's scripts know its weapons by their zone names as they are (`m1911_zm`,
+        // `ak47_mp`) and compare what the engine hands back against them (the starting
+        // pistol never gibs); MW2's take the bare catalog name with `_mp`.
+        if self.identity_namespace_of(index) == Some(crate::AssetNamespace::T5) {
+            return name.to_owned();
+        }
+        gsc_weapon_script_name(name)
     }
 
     pub fn world_models_table(&self) -> Vec<(String, Vec<String>)> {

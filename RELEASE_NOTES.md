@@ -1,6 +1,11 @@
-# Pocket Lab 0.3.22
+# Pocket Lab 0.3.23
 
 Smoother on the phone, every touch button does its job, and co-op over Wi-Fi.
+
+**New in 0.3.23**
+- The starting pistol no longer shoots zombies' limbs off. Black Ops never takes a limb off with the M1911 and checks that by its weapon name, `m1911_zm`. This game reported every Black Ops weapon with a multiplayer `_mp` ending (`m1911_zm_mp`), so the check never matched. Weapons now go by their real names, which also fixes any other Black Ops script that compares weapon names. Checked on PC with a test player shooting zombies:
+  - starting pistol, before: 29 hits, 6 limbs off; now: 24 hits, none;
+  - MP5K wall gun, now: 16 hits, 4 limbs off (as in Black Ops, where other guns still do).
 
 **New in 0.3.22**
 - Zombie pathfinding, mostly for once doors are open:

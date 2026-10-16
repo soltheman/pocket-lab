@@ -150,7 +150,10 @@ stand_at()
     if (!players.size)
         return;
     p = players[0];
-    bait = getdvar("iw4l_zm_look") == "bait";
+    // IW4L_ZM_LOOK=shoot: bait that also turns to the nearest zombie's chest with its
+    // ammo kept full (a test script holds fire), and logs each zombie that loses a limb.
+    shoot = getdvar("iw4l_zm_look") == "shoot";
+    bait = getdvar("iw4l_zm_look") == "bait" || shoot;
     if (bait)
         p setmaxhealth(100000);
     else
@@ -193,13 +196,40 @@ stand_at()
             logprint("probe debug: height " + h + " fraction " + t["fraction"] + " hit " + t["position"] + " " + what);
         }
     }
+    if (shoot)
+    {
+        gun = getdvar("iw4l_zm_gun");
+        if (gun != "")
+        {
+            p giveweapon(gun);
+            p switchtoweapon(gun);
+            wait 2;
+        }
+        level thread aim_at_zombies();
+        logprint("shoot debug: weapon " + p getcurrentweapon() + " has m1911_zm " + p hasweapon("m1911_zm"));
+    }
     for (;;)
     {
         wait 0.5;
         p setorigin(at);
-        p setplayerangles(look);
+        if (!shoot)
+            p setplayerangles(look);
         if (bait)
             p.health = 100000;
+        if (shoot)
+        {
+            weapon = p getcurrentweapon();
+            p givemaxammo(weapon);
+            zombies = getaiarray("axis");
+            for (i = 0; i < zombies.size; i++)
+            {
+                if (isdefined(zombies[i].a) && isdefined(zombies[i].a.gib_ref) && !isdefined(zombies[i].iw4l_gib_logged))
+                {
+                    zombies[i].iw4l_gib_logged = true;
+                    logprint("shoot debug: zombie lost " + zombies[i].a.gib_ref + " holding " + weapon);
+                }
+            }
+        }
     }
 }
 

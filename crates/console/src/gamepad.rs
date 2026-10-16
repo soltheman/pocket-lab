@@ -82,7 +82,10 @@ pub(crate) fn track_active_pad(
     windows: Query<&Window, With<bevy::window::PrimaryWindow>>,
     mut activity: Local<PadActivity>,
 ) {
-    devices.focused = windows.single().map_or(true, |window| window.focused);
+    // IW4L_INPUT_UNFOCUSED=1: buttons from the console count while the window is in the
+    // background (a test script holding fire).
+    devices.focused = windows.single().map_or(true, |window| window.focused)
+        || std::env::var_os("IW4L_INPUT_UNFOCUSED").is_some();
     if active.0.is_some_and(|entity| gamepads.get(entity).is_err()) {
         active.0 = None;
     }
