@@ -2262,6 +2262,7 @@ version = "0.1.0"
 dependencies = [
  "asset_core",
  "asset_game",
+ "asset_material",
  "asset_transport",
  "asset_world",
  "assets",
@@ -3909,7 +3910,7 @@ version = "0.1.0"
 
 [[package]]
 name = "launcher"
-version = "0.3.27"
+version = "0.3.28"
 dependencies = [
  "asset_transport",
  "bootstrap",

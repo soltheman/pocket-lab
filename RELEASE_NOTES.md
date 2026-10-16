@@ -1,6 +1,38 @@
-# Pocket Lab 0.3.27
+# Pocket Lab 0.3.28
 
 Smoother on the phone, every touch button does its job, and co-op over Wi-Fi.
+
+**New in 0.3.28**
+- **A main menu.** The app now opens on a zombies menu in Black Ops' style instead of dropping you straight into Kino:
+  - Kino's loading-screen art drifts behind a dark fade, under ZOMBIES and KINO DER TOTEN.
+  - SOLO loads the map; OPTIONS opens the options.
+  - With co-op set up the button says CO-OP. Joining someone else's room still goes straight in.
+- **Options**, from the menu or, in a game, from the new pause button at the top left:
+  - look sensitivity (5.0 as before);
+  - field of view;
+  - volume;
+  - invert look;
+  - button size and opacity for the touch controls.
+
+  Use the – and + buttons, or tap or drag a bar. Your settings are saved. The game keeps running while the options are open; there is no pause yet.
+- **Points and ammo.** The points move to Black Ops' place, with a new ammo counter: weapon name, the clip large and the reserve beside it ("8 / 32"), the clip red when low. With the touch buttons on, they sit along the top right, clear of the buttons.
+- **Touch controls**:
+  - dark buttons that light up orange while pressed, and a red FIRE button;
+  - a faint ring where the move stick rests;
+  - the stick turns orange while you sprint;
+  - size and opacity follow the options.
+- **Blood.** Shooting a zombie now plays Black Ops' own blood effects, bigger for head shots and kills. Bullets used to make the dust and sparks a wall makes.
+- **Zombies that rise out of the ground** (Kino's theater, once the power is on) now climb out and come for you. They used to stand where they spawned. In a 3-minute test with the power on, 22 of 24 zombies got into play (before: 11 of 18). Two still got stuck at one theater window.
+- **Starting ammo.** Black Ops counts a weapon's starting ammo in reserve, on top of a full clip. The game counted the clip in it, so every Black Ops weapon started a clip short. The pistol now starts with 8 / 32, not 8 / 24.
+- **New icon**: glowing zombie eyes over a red chalk round tally.
+- **Checked on PC:**
+  - menu, options and the pause button at an iPhone's screen size;
+  - blood on hits;
+  - the risers;
+  - starting ammo;
+  - a 3-minute game in the foyer with no zombie stuck.
+
+  Not tried on an iPhone yet.
 
 **New in 0.3.27**
 - Zombies move more like Black Ops zombies:
