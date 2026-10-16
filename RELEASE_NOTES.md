@@ -1,6 +1,38 @@
-# Pocket Lab 0.3.28
+# Pocket Lab 0.3.29
 
 Smoother on the phone, every touch button does its job, and co-op over Wi-Fi.
+
+**New in 0.3.29**
+- **Zombies walk like Black Ops zombies.** Black Ops moves a zombie by its walk animation itself, so its feet stay planted. Here every walker moved at one fixed speed, faster than any of its walks, so their feet slid along the floor. Now each zombie uses the walk Black Ops' script picks for it and moves at that walk's own pace, step by step. Kino's walkers go about half the old speed; some shamble even slower, as in Black Ops.
+- **No more instant hits.** A zombie that got close damaged you that same instant. Now it swings like in Black Ops:
+  - it uses one of Black Ops' attack animations (standing swipes, or walking and running ones that keep coming);
+  - the hit lands at the swipe's strike, and only if you're still within reach and in front of it;
+  - backing off makes it miss, and you have time to knife it first.
+- **Points on a blood stain**, bottom right as in Black Ops (top right with the touch buttons). It uses Black Ops' own score smear, coloured blood red.
+- **Ambience.** Kino's room tone now plays during a game. Black Ops starts it from client scripts this game doesn't run.
+- **Touch buttons: layouts, icons, and moving them yourself.** In OPTIONS → BUTTONS:
+  - **Button layout:**
+    - CLASSIC, as before;
+    - LEFT FIRE adds a second fire button above the move stick;
+    - COMPACT pulls the buttons in and makes them smaller;
+    - SOUTHPAW mirrors everything, with the buttons on the left and the stick on the right;
+    - CUSTOM is your own.
+  - **Button style:** new icons (bullet, scope, reload arrow, hand, jump and crouch arrows, knife, grenade, swap) or the old text.
+  - **Edit** (in a game): drag any button where you want it, then DONE. RESET goes back to CLASSIC.
+
+  Size and opacity work with every layout.
+- The options are now on two pages, GAMEPLAY and BUTTONS.
+- **Checked on PC:**
+  - every layout and both styles at an iPhone's screen size;
+  - edit mode moving and saving a button;
+  - zombies' walk paces read from the animations;
+  - their swings landing on the strike;
+  - the blood-stain points;
+  - Kino's room tone starting;
+  - a 3-minute game with no zombie stuck.
+
+  Not tried on an iPhone yet.
+- Not done yet: when you knife a zombie slightly out of reach, Black Ops lunges you onto it. Here the lunge still only goes for other players.
 
 **New in 0.3.28**
 - **A main menu.** The app now opens on a zombies menu in Black Ops' style instead of dropping you straight into Kino:
