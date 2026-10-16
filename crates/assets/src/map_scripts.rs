@@ -28,6 +28,8 @@ pub(crate) const ZOMBIES_HUD: (&str, &str) = (
         level thread face_power_switch();
     if (getdvar("iw4l_zm_watch") == "window")
         level thread face_window();
+    if (getdvar("iw4l_zm_watch") == "tour")
+        level thread tour();
     if (getdvar("iw4l_zm_watch") == "at")
         level thread stand_at();
     if (getdvar("iw4l_zm_watch") == "box")
@@ -231,6 +233,40 @@ stand_at()
             }
         }
     }
+}
+
+// Debug (IW4L_ZM_WATCH=tour): with every door open, the first player (ignored by
+// zombies) visits each "x y z" of IW4L_ZM_TOUR (","-separated), looking each way for a
+// second, so one run draws the whole map.
+tour()
+{
+    wait 8;
+    players = getplayers();
+    if (!players.size)
+        return;
+    p = players[0];
+    p.ignoreme = true;
+    all = getentarray("zombie_door", "targetname");
+    debris = getentarray("zombie_debris", "targetname");
+    for (i = 0; i < debris.size; i++)
+        all[all.size] = debris[i];
+    for (i = 0; i < all.size; i++)
+        all[i] notify("trigger", p, true);
+    wait 2;
+    spots = strtok(getdvar("iw4l_zm_tour"), ",");
+    for (i = 0; i < spots.size; i++)
+    {
+        xyz = strtok(spots[i], " ");
+        at = (int(xyz[0]), int(xyz[1]), int(xyz[2]));
+        logprint("tour debug: spot " + i + " at " + at);
+        for (yaw = 0; yaw < 360; yaw += 90)
+        {
+            p setorigin(at);
+            p setplayerangles((10, yaw, 0));
+            wait 1;
+        }
+    }
+    logprint("tour debug: done");
 }
 
 // Debug (IW4L_ZM_WATCH=window): the first player stands back from the nearest boarded

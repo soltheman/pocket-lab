@@ -1241,6 +1241,7 @@ fn preflight_match_install(
         for (env, dvar) in [
             ("IW4L_ZM_OPEN", "iw4l_zm_open"),
             ("IW4L_ZM_GUN", "iw4l_zm_gun"),
+            ("IW4L_ZM_TOUR", "iw4l_zm_tour"),
             ("IW4L_ZM_WATCH", "iw4l_zm_watch"),
             ("IW4L_ZM_LOOK", "iw4l_zm_look"),
             ("IW4L_ZM_X", "iw4l_zm_x"),
