@@ -218,6 +218,46 @@ pub(crate) fn radius_targets(
     targets
 }
 
+/// A bullet about to hit a living actor's body (script model `model`, at `bone`): whether
+/// it is a head shot and whether `amount` kills it, so the hit plays BO1's flesh impact
+/// (head / fatal variants) instead of the world's. None for anything but a living actor.
+pub(crate) fn actor_flesh_hit(
+    world: &mut World,
+    model: crate::ScriptModelId,
+    bone: Option<usize>,
+    amount: i32,
+) -> Option<(bool, bool)> {
+    let object = world.get_resource::<Runtime>()?.presented_by(model)?;
+    let health = {
+        let mut runtime = world.resource_mut::<Runtime>();
+        if runtime
+            .actors
+            .get(&object)
+            .is_none_or(|actor| actor.is_dead())
+        {
+            return None;
+        }
+        match runtime.object_field(object, "health") {
+            Value::Int(health) => health,
+            Value::Float(health) => health as i32,
+            _ => 0,
+        }
+    };
+    let frame = FrameWorld::from_world(world);
+    let head = bone
+        .and_then(|bone| {
+            frame
+                .entity_collision_capabilities()
+                .iter()
+                .find(|row| row.owner.script_model() == Some(model))
+                .and_then(|row| row.dobj.as_ref())
+                .and_then(|dobj| dobj.bone_name(bone))
+                .map(|name| name.starts_with("j_head") || name.starts_with("j_neck"))
+        })
+        .unwrap_or(false);
+    Some((head, amount >= health))
+}
+
 pub(crate) fn damage_entity(world: &mut World, hit: &EntityHit) -> bool {
     let Some(object) = world
         .get_resource::<Runtime>()

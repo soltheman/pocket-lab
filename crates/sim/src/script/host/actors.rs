@@ -110,7 +110,8 @@ enum Goal {
     Entity(u64),
 }
 
-/// An `animScripted` clip: the actor holds its place while the notetracks fire.
+/// An `animScripted` clip: the actor holds its place while the notetracks fire, or with
+/// root motion (a rise out of the ground) moves along it from where the clip started.
 #[derive(Clone, Debug)]
 struct Scripted {
     notify: std::sync::Arc<str>,
@@ -118,6 +119,25 @@ struct Scripted {
     length_ms: i64,
     notes: std::sync::Arc<[crate::AnimNote]>,
     fired: usize,
+    /// The clip's root motion, the origin it starts from and the yaw it plays facing.
+    motion: Option<(std::sync::Arc<[[f32; 3]]>, [f32; 3], f32)>,
+}
+
+/// Where root motion `samples` (sampled evenly over a clip) has moved it `t` (0..1)
+/// through the clip, from where the clip started.
+fn motion_sample(samples: &[[f32; 3]], t: f32) -> [f32; 3] {
+    let last = samples.len() - 1;
+    if last == 0 {
+        return [0.0; 3];
+    }
+    let at = t.clamp(0.0, 1.0) * last as f32;
+    let i = (at as usize).min(last - 1);
+    let f = at - i as f32;
+    std::array::from_fn(|k| {
+        let a = samples[i][k] - samples[0][k];
+        let b = samples[i + 1][k] - samples[0][k];
+        a + (b - a) * f
+    })
 }
 
 /// Carried through a window: from where it stood to where it lands inside.
@@ -165,16 +185,7 @@ impl Traverse {
     /// same way, and the rest of the gap to `to` closed as the clip moves across.
     fn along_motion(&self, samples: &[[f32; 3]], yaw: f32, t: f32) -> [f32; 3] {
         let last = samples.len() - 1;
-        let sample = |t: f32| -> [f32; 3] {
-            let at = t.clamp(0.0, 1.0) * last as f32;
-            let i = (at as usize).min(last - 1);
-            let f = at - i as f32;
-            std::array::from_fn(|k| {
-                let a = samples[i][k] - samples[0][k];
-                let b = samples[i + 1][k] - samples[0][k];
-                a + (b - a) * f
-            })
-        };
+        let sample = |t: f32| motion_sample(samples, t);
         let (sin, cos) = yaw.sin_cos();
         let turn = |v: [f32; 3]| [v[0] * cos - v[1] * sin, v[0] * sin + v[1] * cos, v[2]];
         let flat_len =
@@ -250,6 +261,13 @@ pub(crate) struct Actor {
     blocked_cuts: Vec<[f32; 3]>,
     /// The height it spawned at: far below that it has fallen out of the map.
     home_z: f32,
+}
+
+impl Actor {
+    /// Killed: its body is on its way out.
+    pub(crate) fn is_dead(&self) -> bool {
+        self.died_ms.is_some()
+    }
 }
 
 /// How far above or below its goal an actor may be and still be at it.
@@ -691,7 +709,8 @@ pub(crate) fn anim_scripted(
         .filter(|timing| timing.frequency > 0.0)
         .map_or(1000, |timing| (1000.0 / timing.frequency) as i64);
     let notes = frame.anim_notes(&clip);
-    {
+    let samples = frame.anim_delta(&clip);
+    let (start, yaw) = {
         let mut runtime = world.resource_mut::<Runtime>();
         if let Some(origin) = vector_arg(args, 1) {
             runtime.set_object_field(object, "origin", Value::Vector(origin));
@@ -699,7 +718,12 @@ pub(crate) fn anim_scripted(
         if let Some(angles) = vector_arg(args, 2) {
             runtime.set_object_field(object, "angles", Value::Vector([0.0, angles[1], 0.0]));
         }
-    }
+        (
+            vec_field(&mut runtime, object, "origin"),
+            vec_field(&mut runtime, object, "angles")[1].to_radians(),
+        )
+    };
+    let motion = samples.filter(|s| s.len() >= 2).map(|s| (s, start, yaw));
     let previous = world
         .resource::<Runtime>()
         .actors
@@ -729,6 +753,7 @@ pub(crate) fn anim_scripted(
             length_ms: length_ms.max(50),
             notes,
             fired: 0,
+            motion,
         });
     }
     Ok(Value::Undefined)
@@ -1118,7 +1143,8 @@ pub(crate) fn spawn_from_spawner(
     // The spawner's script keys and `target` go to the actor it spawns, as the engine
     // spawns an AI from its spawner's key/values: BO1 reads them on the zombie
     // (`script_string` "zombie_chaser" skips the windows, "riser" climbs out of the
-    // ground, `target` names the window it heads for).
+    // ground, `target` names the window it heads for). Also the `zone_name` BO1's zone
+    // manager writes on each spawner: a riser climbs out at that zone's rise spots.
     let inherited: Vec<(u32, Value)> = runtime
         .objects
         .get(&spawner)
@@ -1127,7 +1153,7 @@ pub(crate) fn spawn_from_spawner(
                 .iter()
                 .filter(|(symbol, _)| {
                     super::restart::symbol_name(&runtime, **symbol)
-                        .is_some_and(|name| name.starts_with("script_") || &*name == "target")
+                        .is_some_and(|name| name.starts_with("script_") || matches!(&*name, "target" | "zone_name"))
                 })
                 .map(|(symbol, value)| (*symbol, value.clone()))
                 .collect()
@@ -1533,6 +1559,18 @@ fn think(
         }
         let notify = scripted.notify.clone();
         let done = elapsed >= scripted.length_ms;
+        if let Some((samples, start, yaw)) = &scripted.motion {
+            let moved = motion_sample(samples, at);
+            let (sin, cos) = yaw.sin_cos();
+            let at = [
+                start[0] + moved[0] * cos - moved[1] * sin,
+                start[1] + moved[0] * sin + moved[1] * cos,
+                start[2] + moved[2],
+            ];
+            world
+                .resource_mut::<Runtime>()
+                .set_object_field(object, "origin", Value::Vector(at));
+        }
         for note in fire {
             raise(
                 world,

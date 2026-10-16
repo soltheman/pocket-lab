@@ -1405,6 +1405,23 @@ pub(crate) fn phase_trace(
                     flesh_flags = fx_iw4::flesh_hit_flags(head, fatal) as u8;
                 }
             }
+            // A zombie's body is flesh, as a player's is: the hit plays BO1's blood impact
+            // (head and fatal variants), not the default dust and sparks.
+            let (mut surf_type, mut surface_flags) = (segment.surf_type, segment.surface_flags);
+            if !exit
+                && let Some(ColliderId::EntityDObjBone { owner, bone, .. }) = segment.collider
+                && let Some(model) = owner.script_model()
+                && let Some((head, fatal)) = crate::script::host::entity_damage::actor_flesh_hit(
+                    world.ecs(),
+                    model,
+                    Some(usize::from(bone)),
+                    scaled,
+                )
+            {
+                flesh_flags = fx_iw4::flesh_hit_flags(head, fatal) as u8;
+                surf_type = weapon_iw4::SURF_TYPE_FLESH as u8;
+                surface_flags = weapon_iw4::SURF_TYPE_FLESH << 20;
+            }
             let payload = crate::EntityEventPayload {
                 number: em.attacker.0 as i32,
                 attacker_entity_num: em.attacker.0 as i32,
@@ -1428,8 +1445,8 @@ pub(crate) fn phase_trace(
                 origin: segment.end,
                 origin2: segment.start,
                 direction: segment.normal,
-                surf_type: segment.surf_type,
-                surface_flags: segment.surface_flags,
+                surf_type,
+                surface_flags,
                 simulation_flags: u8::from(segment.penetrated),
             };
             let victim = match segment.collider {
@@ -1475,8 +1492,8 @@ pub(crate) fn phase_trace(
                         start: segment.start,
                         end: segment.end,
                         normal: segment.normal,
-                        surf_type: segment.surf_type,
-                        surface_flags: segment.surface_flags,
+                        surf_type,
+                        surface_flags,
                         flesh_flags,
                     });
                 }
