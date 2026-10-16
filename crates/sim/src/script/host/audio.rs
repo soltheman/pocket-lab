@@ -17,7 +17,8 @@ fn change(world: &mut World, args: &[Value], stop: bool, ac130: bool) -> Result<
         if name.is_empty() || name.len() > 1023 {
             return Err("ambient alias must be 1–1023 bytes".into());
         }
-        Some(name)
+        // A BO1 script names its own game's alias bare (`amb_theater_bg`).
+        Some(crate::frame::FrameWorld::from_world(world).script_sound_alias(&name))
     };
     let seconds = optional(args, usize::from(!stop), float)?.unwrap_or(0.0);
     let duration = (seconds * 1000.0 + 0.5).floor();
@@ -47,6 +48,7 @@ fn music_play(world: &mut World, args: &[Value]) -> Result<Value, String> {
     if alias.len() > 1023 {
         return Err("music alias exceeds 1023 bytes".into());
     }
+    let alias = crate::frame::FrameWorld::from_world(world).script_sound_alias(&alias);
     crate::frame::FrameWorld::from_world(world)
         .push_script_audio(crate::ScriptAudioCommand::MusicPlay(alias));
     Ok(Value::Undefined)

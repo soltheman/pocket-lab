@@ -92,6 +92,11 @@ pub struct GameSettings {
     /// The touch buttons' size (1 = as designed) and how solid they are drawn.
     pub touch_button_scale: f32,
     pub touch_opacity: f32,
+    /// Which button layout (`TOUCH_LAYOUT_*`), icons or text on them, and where each
+    /// button sits in the custom layout ("FIRE:0.82,0.68;AIM:..", shares of the screen).
+    pub touch_layout: u8,
+    pub touch_icons: bool,
+    pub touch_custom: String,
 
     pub revision: u64,
 }
@@ -128,6 +133,9 @@ impl Default for GameSettings {
             pad_deadzone_right: 0.12,
             touch_button_scale: 1.0,
             touch_opacity: 1.0,
+            touch_layout: Self::TOUCH_LAYOUT_CLASSIC,
+            touch_icons: true,
+            touch_custom: String::new(),
             revision: 0,
         }
     }
@@ -149,6 +157,12 @@ impl GameSettings {
     }
 
     pub const PAD_LAYOUT_CUSTOM: u8 = 255;
+
+    pub const TOUCH_LAYOUT_CLASSIC: u8 = 0;
+    pub const TOUCH_LAYOUT_LEFT_FIRE: u8 = 1;
+    pub const TOUCH_LAYOUT_COMPACT: u8 = 2;
+    pub const TOUCH_LAYOUT_SOUTHPAW: u8 = 3;
+    pub const TOUCH_LAYOUT_CUSTOM: u8 = 4;
 
     pub fn game_folder(&self, game: OtherGame) -> &str {
         &self.game_folders[game.index()]
@@ -198,6 +212,8 @@ impl GameSettings {
         self.pad_deadzone_right = finite(self.pad_deadzone_right, 0.0, 0.4, 0.12);
         self.touch_button_scale = finite(self.touch_button_scale, 0.75, 1.35, 1.0);
         self.touch_opacity = finite(self.touch_opacity, 0.3, 1.0, 1.0);
+        self.touch_layout = self.touch_layout.min(Self::TOUCH_LAYOUT_CUSTOM);
+        self.touch_custom.retain(|c| c != '\n' && c != '\r' && c != '=');
         self.player_name = self.player_name.trim().chars().take(16).collect();
         if self.player_name.is_empty() {
             self.player_name = "Player".to_owned();

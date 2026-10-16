@@ -13,6 +13,7 @@ pub(crate) const ZOMBIES_HUD: (&str, &str) = (
     level notify("prematch_over");
     level thread hud_feed();
     level thread game_over();
+    level thread room_tone();
     level thread place_joiners();
     if (getdvar("iw4l_zm_watch") == "1")
         level thread watch_zombie();
@@ -42,6 +43,22 @@ pub(crate) const ZOMBIES_HUD: (&str, &str) = (
         level thread log_player_volumes();
     if (getdvar("iw4l_zm_watch") == "revive")
         level thread revive_test();
+}
+
+// The map's room tone, which BO1 plays from its client scripts (`<map>_amb.csc`:
+// `setAmbientRoomTone` on the room it starts in), as a looping 2D ambience.
+room_tone()
+{
+    wait 1;
+    tone = undefined;
+    switch (tolower(getdvar("mapname")))
+    {
+    case "zombie_theater":
+        tone = "amb_theater_bg";
+        break;
+    }
+    if (isdefined(tone))
+        ambientplay(tone, 3);
 }
 
 // Debug (IW4L_ZM_WATCH=1): every new zombie is put a few metres in front of

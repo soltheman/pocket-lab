@@ -53,11 +53,21 @@ impl Catalog {
     pub fn t5() -> Self {
         Self::from_list(crate::script::Realm::T5, super::t5_catalog::T5)
     }
-    /// BO1 zombies: the T5 catalog plus the singleplayer builtins its scripts call.
+    /// BO1 zombies: the T5 catalog plus the singleplayer builtins its scripts call, and the
+    /// ones this runtime's own zombies scripts call where BO1 does it in client scripts
+    /// (the map's ambience).
     pub fn t5_zombies() -> Self {
         let mut catalog = Self::t5();
         for builtin in super::t5_zombies_catalog::T5_ZOMBIES {
             catalog.insert(builtin.clone());
+        }
+        for name in ["ambientplay", "ambientstop", "musicplay", "musicstop"] {
+            catalog.insert(Builtin::new(
+                Namespace::Function,
+                name,
+                Owner::Script,
+                false,
+            ));
         }
         catalog
     }

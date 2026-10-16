@@ -353,7 +353,7 @@ pub(crate) fn place_zombies_hud(
         let top = 8.0 * scale;
         (
             (px(EDGE), None, Some(px(top))),
-            (px(EDGE + 120.0 * scale), None, Some(px(top))),
+            (px(EDGE + 170.0 * scale), None, Some(px(top))),
         )
     } else {
         let right = px(height * 0.05);
@@ -418,6 +418,49 @@ pub(crate) fn place_zombies_hud(
         }
     }
 }
+
+/// BO1's blood smear behind the points (`scorebar_zom_<slot>`) once it has loaded: the
+/// points sit on it, as BO1 draws them; the dark plate stands in until then.
+pub(crate) fn stain_zombies_score(
+    mut commands: Commands,
+    stains: Option<Res<hud::ScoreStains>>,
+    local: Option<Res<LocalPresentClient>>,
+    window: Query<&Window, With<bevy::window::PrimaryWindow>>,
+    mut block: Query<
+        (Entity, &mut Node, &mut BackgroundColor, Option<&ImageNode>),
+        With<ZombiesScoreBlock>,
+    >,
+) {
+    let Ok((entity, mut node, mut plate, image)) = block.single_mut() else {
+        return;
+    };
+    let slot = local.as_deref().map_or(0, |local| local.0.0 as usize % 4);
+    let Some(stain) = stains.as_deref().and_then(|stains| stains.0[slot].clone()) else {
+        return;
+    };
+    if image.is_none_or(|image| image.image != stain) {
+        // BO1's smear is white; the engine tints it. Blood red here, as asked for.
+        commands
+            .entity(entity)
+            .insert(ImageNode::new(stain).with_color(Color::srgba(0.55, 0.03, 0.02, 0.92)));
+        plate.0 = Color::NONE;
+    }
+    let scale = window.single().map_or(1.0, |window| {
+        (window.height() / REFERENCE_HEIGHT).clamp(0.8, 2.5)
+    });
+    // The smear is 8:1; drawn at 4:1 it keeps its shape well enough and fits by the ammo.
+    let (width, height) = (px(STAIN_WIDTH * scale), px(STAIN_HEIGHT * scale));
+    if node.width != width || node.height != height {
+        node.width = width;
+        node.height = height;
+        node.justify_content = JustifyContent::Center;
+        node.align_items = AlignItems::Center;
+        node.padding = UiRect::ZERO;
+    }
+}
+
+const STAIN_WIDTH: f32 = 200.0;
+const STAIN_HEIGHT: f32 = 66.0;
 
 /// The use hint, when the IW4 HUD could not draw it (a BO1-only install has no IW4 menus
 /// or font); hidden with the rest of the zombies HUD.

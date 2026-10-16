@@ -58,3 +58,5 @@ mod use_hint;
 pub use use_hint::UseHintText;
 mod ammo_readout;
 pub use ammo_readout::AmmoReadout;
+mod score_stain;
+pub use score_stain::ScoreStains;

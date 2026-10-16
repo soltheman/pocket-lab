@@ -443,38 +443,33 @@ pub fn apply_prepared_match(
                 )
             })
         }));
-        // BO1's traverse clips (window mantles, jumps down and up) carry the zombie with
-        // their root motion: the sim moves it along their sampled delta.
+        // BO1 moves a zombie by its clip's root motion: walking, swinging, climbing in and
+        // jumping down. The sim samples each zombie clip's delta (that track alone).
         content.set_anim_deltas(xanims.0.names().filter_map(|name| {
-            let lower = name.to_ascii_lowercase();
-            if !lower.starts_with("ai_zombie")
-                || !["traverse", "jump_down", "jump_up"]
-                    .iter()
-                    .any(|kind| lower.contains(kind))
-            {
+            if !name.to_ascii_lowercase().starts_with("ai_zombie") {
                 return None;
             }
-            let clip = [
+            let parts = &[
                 anim_namespace,
                 asset_core::AssetNamespace::T5,
                 asset_core::AssetNamespace::Iw4,
             ]
             .into_iter()
-            .find_map(|namespace| xanims.0.clip(namespace, name))?;
-            if !clip.has_delta() {
-                return None;
-            }
-            const SAMPLES: usize = 32;
-            let samples: Vec<[f32; 3]> = (0..=SAMPLES)
-                .map(|i| clip.abs_delta_trans(i as f32 / SAMPLES as f32))
-                .collect();
+            .find_map(|namespace| xanims.0.get(namespace, name))?
+            .parts;
+            const SAMPLES: usize = 48;
+            let samples = xmodel_runtime::sample_root_motion(parts, SAMPLES)?;
             if std::env::var_os("IW4L_ACTOR_DEBUG").is_some() {
                 let end = samples[SAMPLES];
                 let top = samples.iter().map(|s| s[2]).fold(f32::MIN, f32::max);
+                let seconds = if parts.framerate > 0.0 {
+                    f32::from(parts.numframes) / parts.framerate
+                } else {
+                    0.0
+                };
                 diag::info!(
                     Sim,
-                    "traverse clip {name}: {:.2}s, moves ({:.0} {:.0} {:.0}), top {top:.0}",
-                    clip.duration(),
+                    "zombie clip {name}: {seconds:.2}s, moves ({:.0} {:.0} {:.0}), top {top:.0}",
                     end[0],
                     end[1],
                     end[2]

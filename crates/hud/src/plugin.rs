@@ -42,6 +42,7 @@ impl Plugin for HudPlugin {
             .init_resource::<HudImages>()
             .init_resource::<crate::use_hint::UseHintText>()
             .init_resource::<crate::ammo_readout::AmmoReadout>()
+            .init_resource::<crate::score_stain::ScoreStains>()
             .init_resource::<HudPresentationGaps>()
             .init_resource::<ReticleAdsLatch>()
             .init_resource::<IrisLetterboxFill>()
@@ -123,6 +124,7 @@ impl Plugin for HudPlugin {
                             crate::breath_hint::update,
                             crate::use_hint::update,
                             crate::ammo_readout::publish_ammo_readout,
+                            crate::score_stain::publish_score_stains,
                             update_hud_elems,
                             update_targetmap,
                             crate::menus::update_script_menus,

@@ -29,7 +29,7 @@ pub use semantic::{
 };
 pub use xanim_clip::{
     AnimClip, ClipError, ClipNotify, FrameIndices, Keyed, RawDeltaTrans, RawXAnimParts, Rotation,
-    SampledTrack, Track, Translation,
+    SampledTrack, Track, Translation, sample_root_motion,
 };
 pub use xanim_tree::{
     XAnimNodeDefinition, XAnimNodeId, XAnimNodeKind, XAnimNodeState, XAnimTreeDefinition,

@@ -115,7 +115,9 @@ impl Plugin for ConsolePlugin {
             .insert_resource(crate::touch_controls::touch_gameplay_resource())
             .init_resource::<crate::touch_controls::TouchFrame>()
             .init_resource::<crate::touch_controls::TouchState>()
+            .init_resource::<crate::touch_controls::TouchEditing>()
             .init_resource::<crate::zombies_menu::ZombiesOptionsOpen>()
+            .init_resource::<crate::zombies_menu::OptionsTab>()
             .init_resource::<crate::zombies_menu::MenuCommand>()
             .add_systems(
                 PreUpdate,
@@ -131,14 +133,17 @@ impl Plugin for ConsolePlugin {
                 Update,
                 (
                     crate::touch_controls::update_touch_overlay,
+                    crate::touch_controls::load_touch_icons,
                     crate::zombies_hud::update_zombies_hud,
                     crate::zombies_hud::update_zombies_hint,
                     crate::zombies_hud::place_zombies_hud,
+                    crate::zombies_hud::stain_zombies_score,
                     crate::zombies_menu::spawn_zombies_menu,
                     crate::zombies_menu::animate_zombies_menu,
                     crate::zombies_menu::zombies_menu_buttons,
                     crate::zombies_menu::show_zombies_options,
                     crate::zombies_menu::zombies_options_input,
+                    crate::zombies_menu::zombies_options_pages,
                     crate::zombies_menu::handle_zombies_menu_commands
                         .after(ConsoleDispatchSet)
                         .before(crate::zombies_menu::zombies_menu_buttons),

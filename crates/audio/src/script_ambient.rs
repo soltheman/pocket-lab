@@ -98,6 +98,7 @@ pub(crate) fn update_script_ambient(
         oldest.release(now, 0);
     }
     let (namespace, name) = namespace_alias(alias);
+    diag::info!(Audio, "audio: script ambience {alias} ({namespace:?} {name})");
     let handle = runtime.trigger_faded_cue(
         CueTrigger {
             event: None,

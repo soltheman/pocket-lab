@@ -41,17 +41,38 @@ const RUN_CLIPS: [&str; 4] = [
     "ai_zombie_run_v4",
 ];
 const SPRINT_CLIPS: [&str; 2] = ["ai_zombie_sprint_v1", "ai_zombie_sprint_v2"];
-const ATTACK_CLIPS: [&str; 4] = [
-    "ai_zombie_attack_v1",
+const DEATH_CLIPS: [&str; 2] = ["ai_zombie_death_v1", "ai_zombie_death_v2"];
+/// BO1's swings (`level._zombie_melee`), and the ones a walker or a runner adds, which
+/// keep it stepping forward (`_zombie_walk_melee`, `_zombie_run_melee`).
+const MELEE_CLIPS: [&str; 6] = [
     "ai_zombie_attack_v2",
     "ai_zombie_attack_v4",
     "ai_zombie_attack_v6",
+    "ai_zombie_attack_v1",
+    "ai_zombie_attack_forward_v1",
+    "ai_zombie_attack_forward_v2",
 ];
-const DEATH_CLIPS: [&str; 2] = ["ai_zombie_death_v1", "ai_zombie_death_v2"];
-/// Close enough to swing at a player (from feet to feet, horizontally).
+const WALK_MELEE_CLIPS: [&str; 4] = [
+    "ai_zombie_walk_attack_v1",
+    "ai_zombie_walk_attack_v2",
+    "ai_zombie_walk_attack_v3",
+    "ai_zombie_walk_attack_v4",
+];
+const RUN_MELEE_CLIPS: [&str; 3] = [
+    "ai_zombie_run_attack_v1",
+    "ai_zombie_run_attack_v2",
+    "ai_zombie_run_attack_v3",
+];
+/// Where it stops walking at a player (from feet to feet, horizontally).
 const REACH: f32 = 52.0;
+/// BO1 swings at a player this close (`anim.meleeRange`), and its hit lands only if the
+/// player is still this close, and in front, when the swing's "fire" note comes.
+const MELEE_RANGE: f32 = 64.0;
+/// How far round from where it faces a swing still connects.
+const MELEE_ARC: f32 = 70.0 * std::f32::consts::PI / 180.0;
+/// A swing that steps forward stops short of this (it does not walk into the player).
+const MELEE_CLOSEST: f32 = 30.0;
 const HIT_DAMAGE: i32 = 50;
-const HIT_INTERVAL_MS: i64 = 1250;
 /// The collision cube's half size; its centre sits this far above the feet.
 const RADIUS: f32 = 15.0;
 /// A killed actor's body stays this long before it is deleted.
@@ -121,6 +142,53 @@ struct Scripted {
     fired: usize,
     /// The clip's root motion, the origin it starts from and the yaw it plays facing.
     motion: Option<(std::sync::Arc<[[f32; 3]]>, [f32; 3], f32)>,
+}
+
+/// A swing at a player: its clip, when it started and how long it runs, and when (shares
+/// of the clip) its "fire" notes come, where BO1's `melee()` lands the hit.
+#[derive(Clone, Debug)]
+struct Swing {
+    clip: &'static str,
+    start_ms: i64,
+    length_ms: i64,
+    fires: Vec<f32>,
+    fired: usize,
+    target: crate::ClientId,
+}
+
+/// A clip name a script handed over, as the `&'static str` an actor's state keeps: each
+/// distinct name is kept once (a map uses a few dozen).
+fn intern(name: &str) -> &'static str {
+    static NAMES: std::sync::Mutex<Vec<&'static str>> = std::sync::Mutex::new(Vec::new());
+    let mut names = NAMES
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner);
+    if let Some(known) = names.iter().find(|known| known.eq_ignore_ascii_case(name)) {
+        return known;
+    }
+    let kept: &'static str = Box::leak(name.to_ascii_lowercase().into_boxed_str());
+    names.push(kept);
+    kept
+}
+
+/// How fast a clip's root motion carries the body along (units a second) at `phase`
+/// (0..1) through it, over a short stretch so one sample doesn't jitter: BO1 moves a
+/// zombie by its clip, so its feet stay planted.
+fn root_speed(world: &mut World, clip: &str, phase: f32) -> Option<f32> {
+    let frame = FrameWorld::from_world(world);
+    let samples = frame.anim_delta(clip)?;
+    let length = frame
+        .script_model_anim(clip)
+        .filter(|timing| timing.frequency > 0.0)
+        .map(|timing| 1.0 / timing.frequency)?;
+    let last = samples.len().checked_sub(1).filter(|last| *last >= 2)?;
+    let at = phase.rem_euclid(1.0) * last as f32;
+    let i = (at as usize).min(last - 1);
+    let (lo, hi) = (i.saturating_sub(1), (i + 2).min(last));
+    let dx = samples[hi][0] - samples[lo][0];
+    let dy = samples[hi][1] - samples[lo][1];
+    let span = (hi - lo) as f32 / last as f32 * length;
+    (span > 0.0).then(|| (dx * dx + dy * dy).sqrt() / span)
 }
 
 /// Where root motion `samples` (sampled evenly over a clip) has moved it `t` (0..1)
@@ -234,7 +302,10 @@ fn ledge_ms(from: [f32; 3], to: [f32; 3]) -> i64 {
 
 #[derive(Clone, Debug, Default)]
 pub(crate) struct Actor {
-    next_hit_ms: i64,
+    /// The swing in progress (BO1's `MeleeCombat`), if any.
+    swing: Option<Swing>,
+    /// When the body's clip started, for where it is in its cycle.
+    clip_start_ms: i64,
     fall: f32,
     died_ms: Option<i64>,
     /// The clip the body plays now (dogs play none yet).
@@ -1062,16 +1133,31 @@ fn start_traverse(
 }
 
 /// The gait BO1's scripts asked for (`self.zombie_move_speed`): its speed and clips.
-fn gait(runtime: &mut Runtime, object: u64) -> (f32, &'static [&'static str]) {
+/// The clip it moves with: the one BO1's script picked for it (`self.run_combatanim`,
+/// a random walk, run or sprint of its gait), else one of the gait's.
+fn gait(
+    runtime: &mut Runtime,
+    object: u64,
+) -> (f32, &'static [&'static str], Option<&'static str>) {
     let speed = match runtime.object_field(object, "zombie_move_speed") {
         Value::String(speed) => speed.to_string(),
         _ => String::new(),
     };
-    match speed.as_str() {
+    let chosen = match runtime.object_field(object, "run_combatanim") {
+        Value::Animation { name, .. } => Some(intern(&name.to_string())),
+        _ => None,
+    };
+    let (speed, clips): (f32, &'static [&'static str]) = match speed.as_str() {
         "sprint" => (SPRINT_SPEED, &SPRINT_CLIPS),
         "run" => (RUN_SPEED, &RUN_CLIPS),
         _ => (WALK_SPEED, &WALK_CLIPS),
-    }
+    };
+    (speed, clips, chosen)
+}
+
+/// Whether it walks (BO1's `zombie_move_speed`), for the swings a walker adds.
+fn walks(runtime: &mut Runtime, object: u64) -> bool {
+    !matches!(runtime.object_field(object, "zombie_move_speed"), Value::String(speed) if matches!(&*speed.to_string(), "run" | "sprint"))
 }
 
 /// Start `clip` on the actor's body unless it already plays it.
@@ -1082,7 +1168,13 @@ fn play(world: &mut World, object: u64, state: &mut Actor, clip: &'static str) {
     static UNTIMED: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
     let timing = FrameWorld::from_world(world).script_model_anim(clip);
     if std::env::var_os("IW4L_ACTOR_DEBUG").is_some() {
-        diag::info!(Sim, "actor debug: {object} plays {clip} {timing:?}");
+        let pace = root_speed(world, clip, 0.0)
+            .zip(root_speed(world, clip, 0.5))
+            .map(|(a, b)| (a + b) * 0.5);
+        diag::info!(
+            Sim,
+            "actor debug: {object} plays {clip} {timing:?} pace {pace:?}"
+        );
     }
     if timing.is_none() && !UNTIMED.swap(true, std::sync::atomic::Ordering::Relaxed) {
         diag::warn!(
@@ -1099,6 +1191,7 @@ fn play(world: &mut World, object: u64, state: &mut Actor, clip: &'static str) {
     }
     state.clip = Some(clip);
     entity.anim_op = Some(Some(clip.into()));
+    state.clip_start_ms = super::players::now_ms(world);
 }
 
 fn vec_field(runtime: &mut Runtime, object: u64, name: &str) -> [f32; 3] {
@@ -1152,8 +1245,9 @@ pub(crate) fn spawn_from_spawner(
             fields
                 .iter()
                 .filter(|(symbol, _)| {
-                    super::restart::symbol_name(&runtime, **symbol)
-                        .is_some_and(|name| name.starts_with("script_") || matches!(&*name, "target" | "zone_name"))
+                    super::restart::symbol_name(&runtime, **symbol).is_some_and(|name| {
+                        name.starts_with("script_") || matches!(&*name, "target" | "zone_name")
+                    })
                 })
                 .map(|(symbol, value)| (*symbol, value.clone()))
                 .collect()
@@ -1711,17 +1805,30 @@ fn think(
             .resource_mut::<Runtime>()
             .object_field(object, "ignoreall"),
     );
-    let attacking = in_play
-        && nearest.is_some_and(|(_, at)| {
-            flat_distance(origin, at) <= REACH && (at[2] - origin[2]).abs() < 72.0
-        });
+    // A player within BO1's melee range starts a swing (`MeleeCombat`); the hit lands, or
+    // misses, at the swing's "fire" notes (after the move, below).
+    if state.swing.is_none()
+        && in_play
+        && let Some((client, _)) = nearest.filter(|(_, at)| {
+            flat_distance(origin, *at) <= MELEE_RANGE && (at[2] - origin[2]).abs() < 72.0
+        })
+    {
+        start_swing(world, object, state, client, now);
+    }
+    let attacking = state.swing.is_some();
 
-    let (speed, clips) = gait(&mut world.resource_mut::<Runtime>(), object);
+    let (speed, clips, chosen) = gait(&mut world.resource_mut::<Runtime>(), object);
     let dt = crate::MATCH_TICK_MS as f32 / 1000.0;
     let mut yaw = None;
     let mut walk = [0.0, 0.0];
     let mut steering = None;
-    if let Some((_, at)) = nearest.filter(|_| attacking) {
+    if let Some(swing) = state.swing.clone() {
+        // It turns to face whom it swings at, and a walking or running swing carries it
+        // on with the clip's own step, short of walking into them.
+        let at = targets
+            .iter()
+            .find(|(client, _)| *client == swing.target)
+            .map_or(origin, |(_, at)| *at);
         let toward = (at[1] - origin[1]).atan2(at[0] - origin[0]);
         let heading = turn_toward(
             state.heading.unwrap_or(toward),
@@ -1730,8 +1837,13 @@ fn think(
         );
         state.heading = Some(heading);
         yaw = Some(heading.to_degrees());
-        if !state.clip.is_some_and(|clip| ATTACK_CLIPS.contains(&clip)) {
-            play(world, object, state, pick(&ATTACK_CLIPS, object));
+        let phase = (now - swing.start_ms) as f32 / swing.length_ms.max(1) as f32;
+        let room = flat_distance(origin, at) - MELEE_CLOSEST;
+        if room > 0.0
+            && let Some(step) = root_speed(world, swing.clip, phase.min(0.999))
+        {
+            let step = step.min(room / dt);
+            walk = [heading.cos() * step, heading.sin() * step];
         }
     } else if let Some(at) = headed {
         let to = [at[0] - origin[0], at[1] - origin[1]];
@@ -1761,10 +1873,18 @@ fn think(
             } else {
                 angle_between(heading, toward).cos().max(0.25)
             };
-            let step = (speed * along).min(leg / dt);
+            // The clip BO1 picked for it, and the pace its root motion sets at this point
+            // of its cycle (each step's surge), so its feet don't slide.
+            let clip = chosen
+                .filter(|clip| clip_length(world, clip).is_some())
+                .unwrap_or_else(|| pick(clips, object));
+            play(world, object, state, clip);
+            let length = clip_length(world, clip).unwrap_or(1.0).max(0.05);
+            let phase = (now - state.clip_start_ms) as f32 / 1000.0 / length;
+            let pace = root_speed(world, clip, phase).unwrap_or(speed);
+            let step = (pace * along).min(leg / dt);
             walk = [heading.cos() * step, heading.sin() * step];
             yaw = Some(heading.to_degrees());
-            play(world, object, state, pick(clips, object));
         } else {
             play(world, object, state, "ai_zombie_idle_v1");
             if goal.is_some() && !state.goal_reached {
@@ -1989,18 +2109,104 @@ fn think(
             runtime.set_object_field(object, "angles", Value::Vector([0.0, yaw, 0.0]));
         }
     }
-    if let Some((client, _)) = nearest.filter(|_| attacking && now >= state.next_hit_ms) {
-        state.next_hit_ms = now + HIT_INTERVAL_MS;
-        // Attack clips play once: each swing starts one again.
-        state.clip = None;
-        play(
-            world,
-            object,
-            state,
-            pick(&ATTACK_CLIPS, object ^ now as u64),
-        );
+    // The swing's "fire" notes: BO1's `melee()` hits whom it swings at only if they are
+    // still in range and in front of it then; backing off (or killing it first) dodges.
+    let Some(swing) = state.swing.as_mut() else {
+        return;
+    };
+    let share = (now - swing.start_ms) as f32 / swing.length_ms.max(1) as f32;
+    let mut hits = Vec::new();
+    while swing.fired < swing.fires.len() && swing.fires[swing.fired] <= share {
+        swing.fired += 1;
+        let Some(&(client, at)) = targets.iter().find(|(client, _)| *client == swing.target) else {
+            continue;
+        };
+        let facing = state.heading.map_or(0.0, |heading| {
+            angle_between(heading, (at[1] - moved[1]).atan2(at[0] - moved[0]))
+        });
+        let connects = flat_distance(moved, at) <= MELEE_RANGE
+            && (at[2] - moved[2]).abs() < 72.0
+            && facing.abs() <= MELEE_ARC;
+        if std::env::var_os("IW4L_ACTOR_DEBUG").is_some() {
+            diag::info!(
+                Sim,
+                "actor debug: {object} swing {} {} at {:.0} units, {:.0} degrees off",
+                swing.clip,
+                if connects { "hits" } else { "misses" },
+                flat_distance(moved, at),
+                facing.to_degrees()
+            );
+        }
+        if connects {
+            hits.push(client);
+        }
+    }
+    if now - swing.start_ms >= swing.length_ms {
+        state.swing = None;
+    }
+    for client in hits {
         super::players::actor_hit_player(world, client, object, HIT_DAMAGE, moved);
     }
+}
+
+/// Starts a swing at `target`: one of BO1's swings for its gait (a walker's or runner's
+/// that steps on, or a standing one), its "fire" notes from the clip.
+fn start_swing(
+    world: &mut World,
+    object: u64,
+    state: &mut Actor,
+    target: crate::ClientId,
+    now: i64,
+) {
+    let walker = walks(&mut world.resource_mut::<Runtime>(), object);
+    let moving: &[&'static str] = if walker {
+        &WALK_MELEE_CLIPS
+    } else {
+        &RUN_MELEE_CLIPS
+    };
+    let choices: Vec<&'static str> = MELEE_CLIPS
+        .iter()
+        .chain(moving)
+        .copied()
+        .filter(|clip| clip_length(world, clip).is_some())
+        .collect();
+    if choices.is_empty() {
+        return;
+    }
+    // BO1 picks one at random each swing (mixed from the actor and the time, so swings
+    // that end on a beat don't fall into a cycle).
+    let mut roll = object ^ (now as u64).rotate_left(17);
+    roll = (roll ^ (roll >> 30)).wrapping_mul(0xBF58_476D_1CE4_E5B9);
+    roll = (roll ^ (roll >> 27)).wrapping_mul(0x94D0_49BB_1331_11EB);
+    roll ^= roll >> 31;
+    let clip = choices[(roll % choices.len() as u64) as usize];
+    let length_ms = clip_length(world, clip).map_or(1200, |seconds| (seconds * 1000.0) as i64);
+    let mut fires: Vec<f32> = clip_notes(world, clip)
+        .iter()
+        .filter(|note| note.name.eq_ignore_ascii_case("fire"))
+        .map(|note| note.time)
+        .collect();
+    if fires.is_empty() {
+        fires.push(0.45);
+    }
+    fires.sort_by(f32::total_cmp);
+    if std::env::var_os("IW4L_ACTOR_DEBUG").is_some() {
+        diag::info!(
+            Sim,
+            "actor debug: {object} swings {clip} ({length_ms} ms, fire at {fires:?})"
+        );
+    }
+    // Swings play once: the same clip twice running starts again.
+    state.clip = None;
+    play(world, object, state, clip);
+    state.swing = Some(Swing {
+        clip,
+        start_ms: now,
+        length_ms: length_ms.max(200),
+        fires,
+        fired: 0,
+        target,
+    });
 }
 
 fn flat_distance(a: [f32; 3], b: [f32; 3]) -> f32 {

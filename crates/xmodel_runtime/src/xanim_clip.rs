@@ -137,6 +137,27 @@ pub struct SampledTrack {
     pub translation: Option<Vec3>,
 }
 
+/// A clip's root motion (its delta translation) at `samples + 1` evenly spaced points from
+/// start to end, decoded on its own: none of the bones' tracks. None when the clip has no
+/// root motion.
+#[must_use]
+pub fn sample_root_motion(parts: &RawXAnimParts, samples: usize) -> Option<Vec<[f32; 3]>> {
+    let delta = decode_delta_trans(parts).ok()?;
+    if matches!(delta, Translation::Default) || samples == 0 {
+        return None;
+    }
+    Some(
+        (0..=samples)
+            .map(|i| {
+                let frac = i as f32 / samples as f32;
+                delta
+                    .sample(frac * f32::from(parts.numframes))
+                    .unwrap_or([0.0; 3])
+            })
+            .collect(),
+    )
+}
+
 impl AnimClip {
     pub fn from_parts(parts: &RawXAnimParts) -> Result<Self> {
         let quats: usize = parts.bone_count[..5].iter().map(|&n| n as usize).sum();

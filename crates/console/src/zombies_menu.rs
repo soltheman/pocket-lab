@@ -92,25 +92,65 @@ pub(crate) struct OptionValue(Setting);
 #[derive(Component, Clone, Copy)]
 pub(crate) struct OptionStep(Setting, f32);
 
+/// A row of the options panel, shown on its page.
+#[derive(Component, Clone, Copy)]
+pub(crate) struct OptionRow(OptionsTab);
+
+/// A page's tab at the top of the options panel.
+#[derive(Component, Clone, Copy)]
+pub(crate) struct OptionTabButton(OptionsTab);
+
+/// EDIT (the touch buttons' positions), on the BUTTONS page; only in a match.
+#[derive(Component)]
+pub(crate) struct OptionsEdit;
+
+#[derive(Component)]
+pub(crate) struct OptionsEditLabel;
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) enum Setting {
     Sensitivity,
     FieldOfView,
     Volume,
     InvertLook,
+    Layout,
+    Style,
     ButtonSize,
     ButtonOpacity,
 }
 
+/// The options panel's pages.
+#[derive(Resource, Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub(crate) enum OptionsTab {
+    #[default]
+    Gameplay,
+    Buttons,
+}
+
+const LAYOUT_NAMES: [&str; 5] = ["CLASSIC", "LEFT FIRE", "COMPACT", "SOUTHPAW", "CUSTOM"];
+
 impl Setting {
-    const ALL: [Setting; 6] = [
+    const ALL: [Setting; 8] = [
         Setting::Sensitivity,
         Setting::FieldOfView,
         Setting::Volume,
         Setting::InvertLook,
+        Setting::Layout,
+        Setting::Style,
         Setting::ButtonSize,
         Setting::ButtonOpacity,
     ];
+
+    fn tab(self) -> OptionsTab {
+        match self {
+            Setting::Sensitivity | Setting::FieldOfView | Setting::Volume | Setting::InvertLook => {
+                OptionsTab::Gameplay
+            }
+            Setting::Layout | Setting::Style | Setting::ButtonSize | Setting::ButtonOpacity => {
+                OptionsTab::Buttons
+            }
+        }
+    }
 
     fn label(self) -> &'static str {
         match self {
@@ -118,6 +158,8 @@ impl Setting {
             Setting::FieldOfView => "FIELD OF VIEW",
             Setting::Volume => "VOLUME",
             Setting::InvertLook => "INVERT LOOK",
+            Setting::Layout => "BUTTON LAYOUT",
+            Setting::Style => "BUTTON STYLE",
             Setting::ButtonSize => "BUTTON SIZE",
             Setting::ButtonOpacity => "BUTTON OPACITY",
         }
@@ -129,10 +171,16 @@ impl Setting {
             Setting::Sensitivity => (0.5, 20.0, 0.5),
             Setting::FieldOfView => (GameSettings::FOV_MIN, 110.0, 1.0),
             Setting::Volume => (0.0, 1.0, 0.05),
-            Setting::InvertLook => (0.0, 1.0, 1.0),
+            Setting::InvertLook | Setting::Style => (0.0, 1.0, 1.0),
+            Setting::Layout => (0.0, f32::from(GameSettings::TOUCH_LAYOUT_CUSTOM), 1.0),
             Setting::ButtonSize => (0.75, 1.35, 0.05),
             Setting::ButtonOpacity => (0.3, 1.0, 0.05),
         }
+    }
+
+    /// Steps that go round (the last layout's + comes back to the first) and toggles.
+    fn cycles(self) -> bool {
+        matches!(self, Setting::InvertLook | Setting::Style | Setting::Layout)
     }
 
     fn get(self, settings: &GameSettings) -> f32 {
@@ -141,6 +189,8 @@ impl Setting {
             Setting::FieldOfView => settings.fov,
             Setting::Volume => settings.master_volume,
             Setting::InvertLook => f32::from(u8::from(settings.invert_mouse)),
+            Setting::Layout => f32::from(settings.touch_layout),
+            Setting::Style => f32::from(u8::from(settings.touch_icons)),
             Setting::ButtonSize => settings.touch_button_scale,
             Setting::ButtonOpacity => settings.touch_opacity,
         }
@@ -154,6 +204,8 @@ impl Setting {
             Setting::FieldOfView => settings.fov = value,
             Setting::Volume => settings.master_volume = value,
             Setting::InvertLook => settings.invert_mouse = value >= 0.5,
+            Setting::Layout => settings.touch_layout = value as u8,
+            Setting::Style => settings.touch_icons = value >= 0.5,
             Setting::ButtonSize => settings.touch_button_scale = value,
             Setting::ButtonOpacity => settings.touch_opacity = value,
         }
@@ -164,6 +216,12 @@ impl Setting {
             Setting::Sensitivity => format!("{value:.1}"),
             Setting::FieldOfView => format!("{value:.0}"),
             Setting::InvertLook => if value >= 0.5 { "ON" } else { "OFF" }.to_owned(),
+            Setting::Style => if value >= 0.5 { "ICONS" } else { "TEXT" }.to_owned(),
+            Setting::Layout => LAYOUT_NAMES
+                .get(value.round() as usize)
+                .copied()
+                .unwrap_or("CLASSIC")
+                .to_owned(),
             Setting::Volume | Setting::ButtonSize | Setting::ButtonOpacity => {
                 format!("{:.0}%", value * 100.0)
             }
@@ -399,12 +457,41 @@ pub(crate) fn zombies_menu_buttons(
     mut labels: Query<&mut TextColor>,
     roots: Query<Entity, With<MenuRoot>>,
     mut scripted: ResMut<MenuCommand>,
+    mut tests: ScriptedOptions,
 ) {
-    let mut pressed = match scripted.0.take().as_deref() {
+    let command = scripted.0.take();
+    let mut words = command.as_deref().unwrap_or("").split_whitespace();
+    let mut pressed = match words.next() {
         Some("play") => Some(MenuAction::Play),
         Some("options") => Some(MenuAction::Options),
         Some("done") => {
             options.0 = false;
+            None
+        }
+        Some("tab_buttons") => {
+            *tests.tab = OptionsTab::Buttons;
+            None
+        }
+        Some("tab_gameplay") => {
+            *tests.tab = OptionsTab::Gameplay;
+            None
+        }
+        Some("edit") => {
+            options.0 = false;
+            tests.editing.begin();
+            None
+        }
+        Some("layout") => {
+            if let Some(layout) = words.next().and_then(|n| n.parse::<u8>().ok()) {
+                tests.settings.touch_layout = layout;
+                tests.settings.sanitize();
+                tests.settings.touch();
+            }
+            None
+        }
+        Some("style") => {
+            tests.settings.touch_icons = words.next() != Some("text");
+            tests.settings.touch();
             None
         }
         _ => None,
@@ -508,15 +595,91 @@ pub(crate) fn show_zombies_options(
                 BorderColor::all(RED),
             ))
             .with_children(|panel| {
-                panel.spawn(text(&font, 22.0 * s, WHITE, "OPTIONS"));
-                for setting in Setting::ALL {
-                    panel
-                        .spawn(Node {
+                // OPTIONS, and the pages' tabs on its right.
+                panel
+                    .spawn(Node {
+                        align_items: AlignItems::Center,
+                        justify_content: JustifyContent::SpaceBetween,
+                        margin: UiRect::bottom(px(4.0 * s)),
+                        ..default()
+                    })
+                    .with_children(|top| {
+                        top.spawn(text(&font, 22.0 * s, WHITE, "OPTIONS"));
+                        top.spawn(Node {
+                            column_gap: px(6.0 * s),
+                            ..default()
+                        })
+                        .with_children(|tabs| {
+                            for (tab, label) in [
+                                (OptionsTab::Gameplay, "GAMEPLAY"),
+                                (OptionsTab::Buttons, "BUTTONS"),
+                            ] {
+                                tabs.spawn((
+                                    OptionTabButton(tab),
+                                    Button,
+                                    Node {
+                                        padding: UiRect::axes(px(12.0 * s), px(4.0 * s)),
+                                        border: UiRect::bottom(px(2.0 * s)),
+                                        ..default()
+                                    },
+                                    BorderColor::all(Color::NONE),
+                                    BackgroundColor(Color::NONE),
+                                ))
+                                .with_child(text(
+                                    &font,
+                                    14.0 * s,
+                                    WHITE,
+                                    label,
+                                ));
+                            }
+                        });
+                    });
+                // EDIT on the BUTTONS page: drag the touch buttons about (in a match).
+                panel
+                    .spawn((
+                        OptionRow(OptionsTab::Buttons),
+                        Node {
                             height: px(row_height),
                             align_items: AlignItems::Center,
                             column_gap: px(8.0 * s),
                             ..default()
+                        },
+                    ))
+                    .with_children(|row| {
+                        row.spawn(Node {
+                            width: percent(36),
+                            ..default()
                         })
+                        .with_child(text(
+                            &font,
+                            13.0 * s,
+                            LABEL,
+                            "MOVE BUTTONS",
+                        ));
+                        row.spawn((
+                            OptionsEdit,
+                            Button,
+                            Node {
+                                padding: UiRect::axes(px(16.0 * s), px(4.0 * s)),
+                                border: UiRect::all(px(1.0)),
+                                ..default()
+                            },
+                            BorderColor::all(HOT),
+                            BackgroundColor(Color::srgba(1.0, 0.66, 0.18, 0.14)),
+                        ))
+                        .with_child((OptionsEditLabel, text(&font, 14.0 * s, WHITE, "EDIT")));
+                    });
+                for setting in Setting::ALL {
+                    panel
+                        .spawn((
+                            OptionRow(setting.tab()),
+                            Node {
+                                height: px(row_height),
+                                align_items: AlignItems::Center,
+                                column_gap: px(8.0 * s),
+                                ..default()
+                            },
+                        ))
                         .with_children(|row| {
                             row.spawn(Node {
                                 width: percent(36),
@@ -626,10 +789,12 @@ pub(crate) fn zombies_options_input(
             continue;
         }
         let OptionStep(setting, sign) = *step;
-        let (_, _, size) = setting.range();
+        let (low, high, size) = setting.range();
         let now = setting.get(&settings);
-        let next = if setting == Setting::InvertLook {
-            1.0 - now
+        // Toggles flip; the layouts go round; the rest step and stop at their ends.
+        let next = if setting.cycles() {
+            let count = ((high - low) / size).round() + 1.0;
+            low + ((now - low) / size + sign).rem_euclid(count) * size
         } else {
             now + sign * size
         };
@@ -684,7 +849,7 @@ pub(crate) fn register_zombies_menu_commands(registry: &mut crate::ConsoleRegist
     if registry.resolve("zm_menu").is_none() {
         registry.register(
             crate::CommandSpec::new("zm_menu")
-                .usage("zm_menu <play|options|done> — press a zombies menu entry (tests)"),
+                .usage("zm_menu <play|options|done|tab_buttons|tab_gameplay|edit|layout N|style icons|text> — tests"),
         );
     }
 }
@@ -695,7 +860,73 @@ pub(crate) fn handle_zombies_menu_commands(
 ) {
     for command in events.read() {
         if command.name == "zm_menu" {
-            pending.0 = command.args.first().cloned();
+            pending.0 = Some(command.args.join(" "));
         }
     }
+}
+
+/// The options' pages: a tab shows its rows; EDIT (in a match, with the touch buttons on)
+/// closes the panel and puts the touch layer into edit mode.
+#[allow(clippy::type_complexity, clippy::too_many_arguments)]
+pub(crate) fn zombies_options_pages(
+    mut open: ResMut<ZombiesOptionsOpen>,
+    mut tab: ResMut<OptionsTab>,
+    screen: Res<AppScreen>,
+    touch: Option<Res<crate::touch_controls::TouchGameplay>>,
+    mut editing: ResMut<crate::touch_controls::TouchEditing>,
+    tabs: Query<(&OptionTabButton, &Interaction), Changed<Interaction>>,
+    mut tab_looks: Query<(&OptionTabButton, &mut BorderColor)>,
+    edit: Query<&Interaction, (With<OptionsEdit>, Changed<Interaction>)>,
+    mut edit_label: Query<&mut Text, With<OptionsEditLabel>>,
+    mut rows: Query<(&OptionRow, &mut Node)>,
+) {
+    if !open.0 {
+        return;
+    }
+    for (button, interaction) in &tabs {
+        if *interaction == Interaction::Pressed {
+            *tab = button.0;
+        }
+    }
+    for (button, mut border) in &mut tab_looks {
+        let want = BorderColor::all(if button.0 == *tab { HOT } else { Color::NONE });
+        if *border != want {
+            *border = want;
+        }
+    }
+    for (row, mut node) in &mut rows {
+        let display = if row.0 == *tab {
+            Display::Flex
+        } else {
+            Display::None
+        };
+        if node.display != display {
+            node.display = display;
+        }
+    }
+    let can_edit =
+        *screen == AppScreen::InGame && touch.as_deref().is_some_and(|touch| touch.enabled);
+    if let Ok(mut label) = edit_label.single_mut() {
+        let want = if can_edit { "EDIT" } else { "IN A MATCH" };
+        if label.0 != want {
+            label.0 = want.to_owned();
+        }
+    }
+    if can_edit
+        && edit
+            .iter()
+            .any(|interaction| *interaction == Interaction::Pressed)
+    {
+        open.0 = false;
+        editing.begin();
+    }
+}
+
+/// What the scripted `zm_menu` presses reach besides the menu: the options' page, edit
+/// mode and the button settings.
+#[derive(bevy::ecs::system::SystemParam)]
+pub(crate) struct ScriptedOptions<'w> {
+    tab: ResMut<'w, OptionsTab>,
+    editing: ResMut<'w, crate::touch_controls::TouchEditing>,
+    settings: ResMut<'w, GameSettings>,
 }
