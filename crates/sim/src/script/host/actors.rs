@@ -58,12 +58,46 @@ const RADIUS: f32 = 15.0;
 const CORPSE_MS: i64 = 1500;
 const DEFAULT_HEALTH: i32 = 150;
 
-/// BO1's window climb clips.
-const TRAVERSE_CLIPS: [&str; 4] = [
-    "ai_zombie_traverse_v1",
-    "ai_zombie_traverse_v2",
-    "ai_zombie_traverse_v3",
-    "ai_zombie_traverse_v4",
+/// `animscripts/traverse/zombie_mantle_over_40` (windows, low walls) by
+/// `zombie_move_speed`, and a crawler's.
+const MANTLE_WALK_CLIPS: [&str; 2] = ["ai_zombie_traverse_v1", "ai_zombie_traverse_v2"];
+const MANTLE_RUN_CLIPS: [&str; 1] = ["ai_zombie_traverse_v5"];
+const MANTLE_SPRINT_CLIPS: [&str; 2] = ["ai_zombie_traverse_v6", "ai_zombie_traverse_v7"];
+const MANTLE_CRAWL_CLIPS: [&str; 2] = ["ai_zombie_traverse_crawl_v1", "ai_zombie_traverse_v4"];
+/// BO1's jumps down by the drop they were made for (`animscripts/traverse/
+/// zombie_jump_down_<height>`), a zombie's and a crawler's. A map's zones hold only some:
+/// a jump plays the nearest one loaded, scaled to its drop.
+const JUMP_DOWN_CLIPS: [(f32, &str); 10] = [
+    (40.0, "ai_zombie_jump_down_40"),
+    (72.0, "ai_zombie_jump_down_72"),
+    (96.0, "ai_zombie_jump_down_96"),
+    (120.0, "ai_zombie_jump_down_120"),
+    (127.0, "ai_zombie_jump_down_127"),
+    (184.0, "ai_zombie_jump_down_184"),
+    (190.0, "ai_zombie_jump_down_190"),
+    (222.0, "ai_zombie_jump_down_222"),
+    (240.0, "ai_zombie_jump_down_240"),
+    (286.0, "ai_zombie_jump_down_286"),
+];
+const CRAWL_JUMP_DOWN_CLIPS: [(f32, &str); 9] = [
+    (72.0, "ai_zombie_crawl_jump_down_72"),
+    (97.0, "ai_zombie_crawl_jump_down_97"),
+    (120.0, "ai_zombie_crawl_jump_down_120"),
+    (127.0, "ai_zombie_crawl_jump_down_127"),
+    (184.0, "ai_zombie_crawl_jump_down_184"),
+    (189.0, "ai_zombie_crawl_jump_down_189"),
+    (222.0, "ai_zombie_crawl_jump_down_222"),
+    (240.0, "ai_zombie_crawl_jump_down_240"),
+    (286.0, "ai_zombie_crawl_jump_down_286"),
+];
+/// Jumps up (`zombie_jump_up_222`) by the climb they were made for.
+const JUMP_UP_CLIPS: [(f32, &str); 2] = [
+    (222.0, "ai_zombie_jump_up_222"),
+    (98.0, "ai_zombie_jump_up_2_climb"),
+];
+const CRAWL_JUMP_UP_CLIPS: [(f32, &str); 2] = [
+    (222.0, "ai_zombie_crawl_jump_up_222"),
+    (97.0, "ai_zombie_crawl_jump_up_2_climb"),
 ];
 /// How far past its exterior goal (along the goal's facing) a zombie lands inside.
 const WINDOW_HOP: f32 = 110.0;
@@ -98,12 +132,22 @@ struct Traverse {
     /// Over a ledge (a traversal link or a hop): up before across when climbing, across
     /// before down when dropping, so it doesn't pass through the ledge's corner.
     ledge: bool,
+    /// Carried by its clip's root motion (sampled over the clip), played facing this yaw
+    /// (radians): BO1 plays a traverse animscript's clip from the link's start node and
+    /// lets the clip move it. What the clip falls short of `to` is made up along the way.
+    motion: Option<(std::sync::Arc<[[f32; 3]]>, f32)>,
 }
 
 impl Traverse {
     /// Where it is `t` (0..1) of the way through.
     fn at(&self, t: f32) -> [f32; 3] {
-        let mut at: [f32; 3] = std::array::from_fn(|i| self.from[i] + (self.to[i] - self.from[i]) * t);
+        if let Some((samples, yaw)) = &self.motion
+            && samples.len() >= 2
+        {
+            return self.along_motion(samples, *yaw, t);
+        }
+        let mut at: [f32; 3] =
+            std::array::from_fn(|i| self.from[i] + (self.to[i] - self.from[i]) * t);
         if self.ledge {
             let rise = self.to[2] - self.from[2];
             let share = if rise > 0.0 {
@@ -114,6 +158,60 @@ impl Traverse {
             at[2] = self.from[2] + rise * share;
         }
         at
+    }
+
+    /// Where the clip's root motion has it `t` of the way through: the clip's delta
+    /// turned to `yaw`, its height scaled to the link's when the clip climbs or drops the
+    /// same way, and the rest of the gap to `to` closed as the clip moves across.
+    fn along_motion(&self, samples: &[[f32; 3]], yaw: f32, t: f32) -> [f32; 3] {
+        let last = samples.len() - 1;
+        let sample = |t: f32| -> [f32; 3] {
+            let at = t.clamp(0.0, 1.0) * last as f32;
+            let i = (at as usize).min(last - 1);
+            let f = at - i as f32;
+            std::array::from_fn(|k| {
+                let a = samples[i][k] - samples[0][k];
+                let b = samples[i + 1][k] - samples[0][k];
+                a + (b - a) * f
+            })
+        };
+        let (sin, cos) = yaw.sin_cos();
+        let turn = |v: [f32; 3]| [v[0] * cos - v[1] * sin, v[0] * sin + v[1] * cos, v[2]];
+        let flat_len =
+            |a: [f32; 3], b: [f32; 3]| ((b[0] - a[0]).powi(2) + (b[1] - a[1]).powi(2)).sqrt();
+        // How far across the clip has come by `t`: the share of the gap made up by then.
+        let path: f32 = (0..last)
+            .map(|i| flat_len(samples[i], samples[i + 1]))
+            .sum();
+        let across = if path > 8.0 {
+            let whole = t.clamp(0.0, 1.0) * last as f32;
+            let full = whole as usize;
+            let mut done: f32 = (0..full.min(last))
+                .map(|i| flat_len(samples[i], samples[i + 1]))
+                .sum();
+            if full < last {
+                done += flat_len(samples[full], samples[full + 1]) * (whole - full as f32);
+            }
+            (done / path).clamp(0.0, 1.0)
+        } else {
+            t.clamp(0.0, 1.0)
+        };
+        let now = turn(sample(t));
+        let end = turn(sample(1.0));
+        let rise = self.to[2] - self.from[2];
+        let z = if end[2].abs() > 16.0
+            && rise * end[2] > 0.0
+            && (0.5..2.0).contains(&(rise / end[2]))
+        {
+            self.from[2] + now[2] * (rise / end[2])
+        } else {
+            self.from[2] + now[2] + (rise - end[2]) * across
+        };
+        [
+            self.from[0] + now[0] + (self.to[0] - self.from[0] - end[0]) * across,
+            self.from[1] + now[1] + (self.to[1] - self.from[1] - end[1]) * across,
+            z,
+        ]
     }
 }
 
@@ -144,6 +242,12 @@ pub(crate) struct Actor {
     replan_ms: i64,
     /// Since when its walk has made no headway, and where it was steering.
     stuck_since: Option<i64>,
+    /// Where it faces and walks, turning toward where it steers at a limited rate.
+    heading: Option<f32>,
+    /// When to look ahead along its route again (`LOOKAHEAD`).
+    lookahead_ms: i64,
+    /// Route nodes it got stuck heading straight for: never cut to them again.
+    blocked_cuts: Vec<[f32; 3]>,
     /// The height it spawned at: far below that it has fallen out of the map.
     home_z: f32,
 }
@@ -154,6 +258,8 @@ const GOAL_HEIGHT: f32 = 80.0;
 /// No headway for this long and the actor hops to where it steers, when that is in sight
 /// and near (a rail, a ledge, a step too tall for the walk).
 const STUCK_MS: i64 = 800;
+/// After it gets stuck it follows its route node by node (no look-ahead) this long.
+const STUCK_DIRECT_MS: i64 = 5000;
 const HOP_REACH: f32 = 260.0;
 /// Fallen this far below its spawn: out of the map, so it dies.
 const FELL_OUT: f32 = 1500.0;
@@ -172,6 +278,25 @@ fn clear_between(world: &mut World, object: u64, a: [f32; 3], b: [f32; 3]) -> bo
             ignore,
         ),
         crate::bullet_collision::TraceOutcome::Miss { .. }
+    )
+}
+
+/// Floor an actor walks on (monster clip too: the ramp over a flight of stairs) within a
+/// step of `at`'s height.
+fn floor_near(world: &mut World, object: u64, at: [f32; 3]) -> bool {
+    const CONTENTS_PLAYERCLIP: u32 = 0x0001_0000;
+    const CONTENTS_MONSTERCLIP: u32 = 0x0002_0000;
+    let ignore = super::natives::engine::trace_ignore(world, Some(&Value::Object(object)));
+    matches!(
+        super::natives::engine::entity_trace(
+            world,
+            [at[0], at[1], at[2] + 24.0],
+            [at[0], at[1], at[2] - 24.0],
+            (crate::bullet_collision::MASK_PLAYER_SOLID & !CONTENTS_PLAYERCLIP)
+                | CONTENTS_MONSTERCLIP,
+            ignore,
+        ),
+        crate::bullet_collision::TraceOutcome::Hit { .. }
     )
 }
 
@@ -257,7 +382,9 @@ fn route_starts(
         .map(|node| (node, cost(node)))
         .collect();
     if seen.is_empty() {
-        near.first().map(|&node| vec![(node, cost(node))]).unwrap_or_default()
+        near.first()
+            .map(|&node| vec![(node, cost(node))])
+            .unwrap_or_default()
     } else {
         seen
     }
@@ -374,6 +501,7 @@ fn steer_point(
         // stairs (Kino's back stairwell: 62), so one up to the goal height counts.
         let rise = next[2] - origin[2];
         if flat_distance(origin, *next) < NODE_REACHED && rise < GOAL_HEIGHT && rise > -48.0 {
+            let begin = *next;
             state.route.remove(0);
             if !state.route_traverse.is_empty() {
                 state.route_traverse.remove(0);
@@ -392,30 +520,95 @@ fn steer_point(
             {
                 state.route.remove(0);
                 state.route_traverse.remove(0);
-                state.traverse = Some(Traverse {
-                    from: origin,
-                    to: end,
-                    start_ms: now,
-                    ms: ledge_ms(origin, end),
-                    window: false,
-                    ledge: true,
-                });
-                play(world, object, state, pick(&TRAVERSE_CLIPS, object));
-                if std::env::var_os("IW4L_ACTOR_DEBUG").is_some() {
-                    diag::info!(
-                        Sim,
-                        "actor debug: {object} traverses {:?} -> {:?}",
-                        origin.map(|v| v as i32),
-                        end.map(|v| v as i32)
-                    );
-                }
+                let node = traverse_node(world, begin);
+                let yaw = node.as_ref().map_or_else(
+                    || (end[1] - origin[1]).atan2(end[0] - origin[0]),
+                    |(_, yaw, _)| *yaw,
+                );
+                let script = node.as_ref().map(|(script, ..)| script.as_str());
+                let clip = traverse_clip(world, object, script, origin, end, now);
+                start_traverse(world, object, state, origin, end, yaw, clip, now, false);
                 return end;
             }
         } else {
             break;
         }
     }
+    look_ahead(world, object, state, origin, now);
     state.route.first().copied().unwrap_or(target)
+}
+
+/// How many route nodes past the next one an actor may head straight for.
+const LOOKAHEAD: usize = 8;
+const LOOKAHEAD_MS: i64 = 150;
+
+/// Heads for the furthest of the next few route nodes it can walk straight to: in sight
+/// at knee and chest, on the floor of the next node, with no traversal on the way. The
+/// map's path nodes lie on a grid, and touching each one in turn zigzags; AI cut along
+/// their path instead.
+fn look_ahead(world: &mut World, object: u64, state: &mut Actor, origin: [f32; 3], now: i64) {
+    if state.route.len() < 2 || now < state.lookahead_ms {
+        return;
+    }
+    state.lookahead_ms = now + LOOKAHEAD_MS;
+    let floor = state.route[0][2];
+    let mut skip = 0;
+    for k in 1..state.route.len().min(LOOKAHEAD + 1) {
+        let node = state.route[k];
+        let rise = node[2] - floor;
+        if state.route_traverse.get(k).copied().unwrap_or(false) || rise.abs() > 64.0 {
+            break;
+        }
+        if state
+            .blocked_cuts
+            .iter()
+            .any(|cut| cut.iter().zip(node).all(|(a, b)| (a - b).abs() < 1.0))
+        {
+            break;
+        }
+        // Up or down a flight of stairs or a ramp, the floor under the way has to be
+        // where the slope puts it: no cutting over a balcony's edge to the floor below.
+        if rise.abs() > 24.0
+            && ![1.0 / 3.0, 2.0 / 3.0].into_iter().all(|f: f32| {
+                let at = [
+                    origin[0] + (node[0] - origin[0]) * f,
+                    origin[1] + (node[1] - origin[1]) * f,
+                    origin[2] + rise * f,
+                ];
+                floor_near(world, object, at)
+            })
+        {
+            break;
+        }
+        // The width of its body, not just a line through its middle: a line clear of a
+        // window frame's corner can still take its shoulder into it.
+        let along = [node[0] - origin[0], node[1] - origin[1]];
+        let length = (along[0] * along[0] + along[1] * along[1])
+            .sqrt()
+            .max(0.001);
+        let side = [-along[1] / length * RADIUS, along[0] / length * RADIUS];
+        let clear = [20.0, 40.0].into_iter().all(|height| {
+            [-1.0, 0.0, 1.0].into_iter().all(|offset: f32| {
+                let (dx, dy) = (side[0] * offset, side[1] * offset);
+                clear_between(
+                    world,
+                    object,
+                    [origin[0] + dx, origin[1] + dy, origin[2] + height],
+                    [node[0] + dx, node[1] + dy, origin[2] + height + rise],
+                )
+            })
+        });
+        if !clear {
+            break;
+        }
+        skip = k;
+    }
+    if skip > 0 {
+        state.route.drain(..skip);
+        state
+            .route_traverse
+            .drain(..skip.min(state.route_traverse.len()));
+    }
 }
 
 fn actor_id(world: &mut World, receiver: &Value) -> Result<u64, String> {
@@ -618,6 +811,229 @@ pub(crate) fn clip_notes(world: &mut World, name: &str) -> std::sync::Arc<[crate
 /// One of a set of clips, the same one for an actor every time.
 fn pick(clips: &[&'static str], object: u64) -> &'static str {
     clips[(object as usize) % clips.len()]
+}
+
+/// The map's traverse node (`node_negotiation_begin`) a link starts at near `at`: its
+/// animscript, the yaw (radians) BO1 faces the zombie to (`OrientMode "face angle"`) and
+/// where its end node (the one it targets) stands.
+fn traverse_node(world: &mut World, at: [f32; 3]) -> Option<(String, f32, Option<[f32; 3]>)> {
+    let mut runtime = world.resource_mut::<Runtime>();
+    let nodes = runtime.engine.map_nodes.clone();
+    let mut best: Option<(f32, String, f32, u64)> = None;
+    for &node in &nodes {
+        let Value::String(kind) = runtime.object_field(node, "type") else {
+            continue;
+        };
+        if kind.to_string() != "Begin" {
+            continue;
+        }
+        let Value::String(script) = runtime.object_field(node, "animscript") else {
+            continue;
+        };
+        let origin = vec_field(&mut runtime, node, "origin");
+        let away = flat_distance(origin, at);
+        if away > 64.0 || (origin[2] - at[2]).abs() > 64.0 {
+            continue;
+        }
+        if best.as_ref().is_none_or(|(was, ..)| away < *was) {
+            let yaw = vec_field(&mut runtime, node, "angles")[1].to_radians();
+            best = Some((away, script.to_string(), yaw, node));
+        }
+    }
+    let (_, script, yaw, node) = best?;
+    let end = match runtime.object_field(node, "target") {
+        Value::String(target) => {
+            let target = target.to_string();
+            nodes.iter().copied().find(|&other| {
+                matches!(runtime.object_field(other, "targetname"), Value::String(name) if name.to_string() == target)
+            })
+        }
+        _ => None,
+    }
+    .map(|end| vec_field(&mut runtime, end, "origin"));
+    Some((script, yaw, end))
+}
+
+/// The clip a zombie traverses from `from` to `to` with: what the link's animscript plays
+/// (else what its height calls for), for its gait and whether it still has legs.
+fn traverse_clip(
+    world: &mut World,
+    object: u64,
+    script: Option<&str>,
+    from: [f32; 3],
+    to: [f32; 3],
+    now: i64,
+) -> &'static str {
+    let (legs, speed) = {
+        let mut runtime = world.resource_mut::<Runtime>();
+        let legs = match runtime.object_field(object, "has_legs") {
+            Value::Undefined => true,
+            legs => truthy(&legs),
+        };
+        let speed = match runtime.object_field(object, "zombie_move_speed") {
+            Value::String(speed) => speed.to_string(),
+            _ => String::new(),
+        };
+        (legs, speed)
+    };
+    let drop = from[2] - to[2];
+    let script = script.unwrap_or("");
+    let crawl_first = |crawl: &'static [(f32, &'static str)],
+                       walk: &'static [(f32, &'static str)]| {
+        if legs { vec![walk] } else { vec![crawl, walk] }
+    };
+    if (script.starts_with("zombie_jump_up") || (script.is_empty() && drop < -100.0))
+        && let Some(clip) = nearest_clip(
+            world,
+            &crawl_first(&CRAWL_JUMP_UP_CLIPS, &JUMP_UP_CLIPS),
+            -drop,
+        )
+    {
+        return clip;
+    }
+    if script.starts_with("zombie_jump_down")
+        || script.starts_with("zombie_wall_crawl")
+        || (script.is_empty() && drop > 30.0)
+    {
+        let height = script
+            .strip_prefix("zombie_jump_down_")
+            .and_then(|height| height.parse::<f32>().ok())
+            .unwrap_or(drop);
+        if let Some(clip) = nearest_clip(
+            world,
+            &crawl_first(&CRAWL_JUMP_DOWN_CLIPS, &JUMP_DOWN_CLIPS),
+            height,
+        ) {
+            return clip;
+        }
+    }
+    let clips: &[&'static str] = if !legs {
+        &MANTLE_CRAWL_CLIPS
+    } else {
+        match speed.as_str() {
+            "sprint" => &MANTLE_SPRINT_CLIPS,
+            "run" => &MANTLE_RUN_CLIPS,
+            _ => &MANTLE_WALK_CLIPS,
+        }
+    };
+    // BO1 picks one of the set at random each time.
+    clips[(object as usize).wrapping_add((now / 50) as usize) % clips.len()]
+}
+
+/// Of the first of `sets` with a clip loaded, the one made for the height nearest `height`.
+fn nearest_clip(
+    world: &mut World,
+    sets: &[&'static [(f32, &'static str)]],
+    height: f32,
+) -> Option<&'static str> {
+    let frame = FrameWorld::from_world(world);
+    sets.iter().find_map(|set| {
+        set.iter()
+            .filter(|(_, clip)| frame.anim_delta(clip).is_some())
+            .min_by(|a, b| (a.0 - height).abs().total_cmp(&(b.0 - height).abs()))
+            .map(|(_, clip)| *clip)
+    })
+}
+
+/// Where it can stand near `at` when its collision box there is inside something (it
+/// landed on a sill's edge or a bump in the floor): a little higher, else a little further
+/// along `yaw`. None when it is clear at `at` already, or nothing near is.
+fn clear_of_solid(world: &mut World, object: u64, at: [f32; 3], yaw: f32) -> Option<[f32; 3]> {
+    let center = [0.0, 0.0, RADIUS + 1.0];
+    if !crate::step::actor_box_solid(world, object, at, center, RADIUS) {
+        return None;
+    }
+    for ahead in [0.0f32, 4.0, 8.0, 16.0, 24.0] {
+        for up in [2.0f32, 4.0, 8.0, 12.0, 18.0] {
+            let spot = [
+                at[0] + yaw.cos() * ahead,
+                at[1] + yaw.sin() * ahead,
+                at[2] + up,
+            ];
+            if !crate::step::actor_box_solid(world, object, spot, center, RADIUS) {
+                if std::env::var_os("IW4L_ACTOR_DEBUG").is_some() {
+                    diag::info!(
+                        Sim,
+                        "actor debug: {object} inside something at {:?}; stands clear {ahead} ahead {up} up",
+                        at.map(|v| v as i32)
+                    );
+                }
+                return Some(spot);
+            }
+        }
+    }
+    None
+}
+
+/// The floor under `at` within a step above and a drop below.
+fn floor_below(world: &mut World, object: u64, at: [f32; 3]) -> Option<f32> {
+    const CONTENTS_PLAYERCLIP: u32 = 0x0001_0000;
+    const CONTENTS_MONSTERCLIP: u32 = 0x0002_0000;
+    let ignore = super::natives::engine::trace_ignore(world, Some(&Value::Object(object)));
+    match super::natives::engine::entity_trace(
+        world,
+        [at[0], at[1], at[2] + 8.0],
+        [at[0], at[1], at[2] - 96.0],
+        (crate::bullet_collision::MASK_PLAYER_SOLID & !CONTENTS_PLAYERCLIP) | CONTENTS_MONSTERCLIP,
+        ignore,
+    ) {
+        crate::bullet_collision::TraceOutcome::Hit { end, .. } => Some(end[2]),
+        _ => None,
+    }
+}
+
+/// Carry it from `from` to `to` by `clip` (played facing `yaw`, radians) as BO1's
+/// `DoTraverse` does: no gravity or collision, its root motion moving it, for the clip's
+/// length. A clip without root motion moves it over the ledge in a straight line.
+#[allow(clippy::too_many_arguments)]
+fn start_traverse(
+    world: &mut World,
+    object: u64,
+    state: &mut Actor,
+    from: [f32; 3],
+    to: [f32; 3],
+    yaw: f32,
+    clip: &'static str,
+    now: i64,
+    window: bool,
+) {
+    let to = floor_below(world, object, to).map_or(to, |z| [to[0], to[1], z]);
+    // A clip that stays level (a mantle) carries it over a big climb or drop only in
+    // a slant through the air: over the ledge instead.
+    let motion = FrameWorld::from_world(world)
+        .anim_delta(clip)
+        .filter(|samples| {
+            let height = samples[samples.len() - 1][2] - samples[0][2];
+            (to[2] - from[2]).abs() < 40.0 || height.abs() > 16.0
+        });
+    let ms = clip_length(world, clip)
+        .map(|seconds| (seconds * 1000.0) as i64)
+        .filter(|ms| *ms > 100)
+        .unwrap_or(if window {
+            TRAVERSE_MS
+        } else {
+            ledge_ms(from, to)
+        });
+    if std::env::var_os("IW4L_ACTOR_DEBUG").is_some() {
+        diag::info!(
+            Sim,
+            "actor debug: {object} traverses {:?} -> {:?} with {clip} ({ms} ms, root motion {})",
+            from.map(|v| v as i32),
+            to.map(|v| v as i32),
+            motion.is_some()
+        );
+    }
+    state.traverse = Some(Traverse {
+        from,
+        to,
+        start_ms: now,
+        ms,
+        window,
+        ledge: !window || motion.is_some() || (to[2] - from[2]).abs() > 40.0,
+        motion: motion.map(|samples| (samples, yaw)),
+    });
+    state.heading = Some(yaw);
+    play(world, object, state, clip);
 }
 
 /// The gait BO1's scripts asked for (`self.zombie_move_speed`): its speed and clips.
@@ -1008,7 +1424,7 @@ fn truthy(value: &Value) -> bool {
 /// A zombie that has torn its window open climbs in: BO1 sets `got_to_entrance` at the
 /// window and clears `ignoreall` once the boards are down, then waits for its pathing to
 /// carry it over the sill (`zombie_start_traverse` / `zombie_end_traverse`).
-fn window_climb(runtime: &mut Runtime, object: u64, origin: [f32; 3]) -> Option<Traverse> {
+fn window_climb(runtime: &mut Runtime, object: u64) -> Option<([f32; 3], f32)> {
     if !truthy(&runtime.object_field(object, "got_to_entrance"))
         || truthy(&runtime.object_field(object, "ignoreall"))
         || truthy(&runtime.object_field(object, "completed_emerging_into_playable_area"))
@@ -1025,14 +1441,7 @@ fn window_climb(runtime: &mut Runtime, object: u64, origin: [f32; 3]) -> Option<
         at[1] + yaw.sin() * WINDOW_HOP,
         at[2],
     ];
-    Some(Traverse {
-        from: origin,
-        to,
-        start_ms: 0,
-        ms: TRAVERSE_MS,
-        window: true,
-        ledge: false,
-    })
+    Some((to, yaw))
 }
 
 /// Each tick: play out scripted clips and window climbs, walk every other living actor at
@@ -1042,6 +1451,7 @@ pub(crate) fn advance(world: &mut World) {
     if world.resource::<Runtime>().actors.is_empty() {
         return;
     }
+    super::natives::t5::close_dynamic_paths(world);
     let now = super::players::now_ms(world);
     let targets: Vec<(crate::ClientId, [f32; 3])> = {
         let runtime = world.resource::<Runtime>();
@@ -1049,7 +1459,11 @@ pub(crate) fn advance(world: &mut World) {
         let clients: Vec<u32> = runtime
             .players
             .iter()
-            .filter(|(_, slot)| !runtime.peek_field(slot.object, "ignoreme").is_some_and(truthy))
+            .filter(|(_, slot)| {
+                !runtime
+                    .peek_field(slot.object, "ignoreme")
+                    .is_some_and(truthy)
+            })
             .map(|(client, _)| *client)
             .collect();
         let frame = FrameWorld::from_world(world);
@@ -1140,12 +1554,32 @@ fn think(
     }
     let origin = vec_field(&mut world.resource_mut::<Runtime>(), object, "origin");
     if state.traverse.is_none() && !state.climbed {
-        let climb = window_climb(&mut world.resource_mut::<Runtime>(), object, origin);
-        if let Some(mut climb) = climb {
-            climb.start_ms = now;
-            state.traverse = Some(climb);
+        let climb = window_climb(&mut world.resource_mut::<Runtime>(), object);
+        if let Some((hop, yaw)) = climb {
+            // The window's own mantle link (its `zombie_mantle_over_40` node by the
+            // window) when one leads in the window's way, else a hop past the window.
+            let node = traverse_node(world, origin);
+            let (to, yaw) = match &node {
+                Some((script, node_yaw, Some(end)))
+                    if script.starts_with("zombie_mantle")
+                        && flat_distance(*end, hop) < WINDOW_HOP
+                        && angle_between(*node_yaw, yaw).abs() < 0.8 =>
+                {
+                    (*end, *node_yaw)
+                }
+                _ => (hop, yaw),
+            };
+            let script = node.as_ref().map(|(script, ..)| script.as_str());
+            let clip = traverse_clip(
+                world,
+                object,
+                script.filter(|s| s.starts_with("zombie_mantle")),
+                origin,
+                origin,
+                now,
+            );
+            start_traverse(world, object, state, origin, to, yaw, clip, now, true);
             state.climbed = true;
-            play(world, object, state, pick(&TRAVERSE_CLIPS, object));
             raise(
                 world,
                 Value::Object(object),
@@ -1157,7 +1591,21 @@ fn think(
     if let Some(climb) = state.traverse.clone() {
         let t = ((now - climb.start_ms) as f32 / climb.ms.max(1) as f32).clamp(0.0, 1.0);
         let at = climb.at(t);
-        let yaw = (climb.to[1] - climb.from[1]).atan2(climb.to[0] - climb.from[0]);
+        if std::env::var_os("IW4L_ACTOR_TRACE").is_some()
+            && now % 100 < i64::from(crate::MATCH_TICK_MS)
+        {
+            diag::info!(
+                Sim,
+                "actor trace: {object} {:.1} {:.1} {:.1} traverse",
+                at[0],
+                at[1],
+                at[2]
+            );
+        }
+        let yaw = climb.motion.as_ref().map_or_else(
+            || (climb.to[1] - climb.from[1]).atan2(climb.to[0] - climb.from[0]),
+            |(_, yaw)| *yaw,
+        );
         {
             let mut runtime = world.resource_mut::<Runtime>();
             runtime.set_object_field(object, "origin", Value::Vector(at));
@@ -1171,6 +1619,15 @@ fn think(
             state.traverse = None;
             state.fall = 0.0;
             state.stuck_since = None;
+            state.heading = Some(yaw);
+            // Landed with its collision box inside something: it couldn't walk off.
+            if let Some(spot) = clear_of_solid(world, object, at, yaw) {
+                world.resource_mut::<Runtime>().set_object_field(
+                    object,
+                    "origin",
+                    Value::Vector(spot),
+                );
+            }
             if climb.window {
                 raise(
                     world,
@@ -1227,7 +1684,14 @@ fn think(
     let mut walk = [0.0, 0.0];
     let mut steering = None;
     if let Some((_, at)) = nearest.filter(|_| attacking) {
-        yaw = Some((at[1] - origin[1]).atan2(at[0] - origin[0]).to_degrees());
+        let toward = (at[1] - origin[1]).atan2(at[0] - origin[0]);
+        let heading = turn_toward(
+            state.heading.unwrap_or(toward),
+            toward,
+            ATTACK_TURN_RATE * dt,
+        );
+        state.heading = Some(heading);
+        yaw = Some(heading.to_degrees());
         if !state.clip.is_some_and(|clip| ATTACK_CLIPS.contains(&clip)) {
             play(world, object, state, pick(&ATTACK_CLIPS, object));
         }
@@ -1244,9 +1708,24 @@ fn think(
             steering = Some(via);
             let to = [via[0] - origin[0], via[1] - origin[1]];
             let leg = (to[0] * to[0] + to[1] * to[1]).sqrt().max(0.001);
-            let step = speed.min(leg / dt);
-            walk = [to[0] / leg * step, to[1] / leg * step];
-            yaw = Some(to[1].atan2(to[0]).to_degrees());
+            // It turns toward where it steers at a walking turn rate and walks the way it
+            // faces, slower while the turn is sharp: arcs, not snaps between directions.
+            let toward = to[1].atan2(to[0]);
+            // A sharp turn (round a window frame's corner) it makes nearly on the spot,
+            // quickly; an arc that wide would take its shoulder into the corner.
+            let was = state.heading.unwrap_or(toward);
+            let sharp = angle_between(was, toward).abs() > SHARP_TURN;
+            let rate = if sharp { TURN_RATE * 3.0 } else { TURN_RATE };
+            let heading = turn_toward(was, toward, rate * dt);
+            state.heading = Some(heading);
+            let along = if sharp {
+                0.1
+            } else {
+                angle_between(heading, toward).cos().max(0.25)
+            };
+            let step = (speed * along).min(leg / dt);
+            walk = [heading.cos() * step, heading.sin() * step];
+            yaw = Some(heading.to_degrees());
             play(world, object, state, pick(clips, object));
         } else {
             play(world, object, state, "ai_zombie_idle_v1");
@@ -1287,9 +1766,108 @@ fn think(
     if wanted > 1.0 && flat_distance(origin, moved) < wanted * 0.25 {
         let since = *state.stuck_since.get_or_insert(now);
         if now - since >= STUCK_MS {
+            // IW4L_ACTOR_DEBUG: what stops it, along its walk at knee, waist and chest.
+            if std::env::var_os("IW4L_ACTOR_DEBUG").is_some() {
+                const CONTENTS_PLAYERCLIP: u32 = 0x0001_0000;
+                const CONTENTS_MONSTERCLIP: u32 = 0x0002_0000;
+                let mask = (crate::bullet_collision::MASK_PLAYER_SOLID & !CONTENTS_PLAYERCLIP)
+                    | CONTENTS_MONSTERCLIP;
+                let length = (walk[0] * walk[0] + walk[1] * walk[1]).sqrt().max(1.0);
+                let ahead = [walk[0] / length * 32.0, walk[1] / length * 32.0];
+                let ignore =
+                    super::natives::engine::trace_ignore(world, Some(&Value::Object(object)));
+                let sides = [
+                    ahead,
+                    [-ahead[0], -ahead[1]],
+                    [-ahead[1], ahead[0]],
+                    [ahead[1], -ahead[0]],
+                ];
+                let hits: Vec<String> = [8.0f32, 24.0, 48.0]
+                    .iter()
+                    .flat_map(|height| sides.iter().map(move |side| (*height, *side)))
+                    .map(|(height, side)| {
+                        let start = [origin[0], origin[1], origin[2] + height];
+                        let end = [start[0] + side[0], start[1] + side[1], start[2]];
+                        match super::natives::engine::entity_trace(
+                            world,
+                            start,
+                            end,
+                            mask,
+                            ignore.clone(),
+                        ) {
+                            crate::bullet_collision::TraceOutcome::Miss { .. } => {
+                                format!("{height}{side:?}: clear")
+                            }
+                            crate::bullet_collision::TraceOutcome::Hit {
+                                fraction,
+                                collider,
+                                ..
+                            } if let Some(model) = match collider {
+                                crate::ColliderId::EntityLinkedBrush { owner, .. }
+                                | crate::ColliderId::EntityDObjBone { owner, .. } => {
+                                    owner.script_model()
+                                }
+                                _ => None,
+                            } =>
+                            {
+                                let mut runtime = world.resource_mut::<Runtime>();
+                                let id = runtime
+                                    .entities
+                                    .iter()
+                                    .find(|(_, entity)| entity.presence == Some(model))
+                                    .map(|(id, entity)| (*id, entity.classname.to_string()));
+                                let what = id.map(|(id, classname)| {
+                                    let field = |runtime: &mut Runtime, name: &str| match runtime
+                                        .object_field(id, name)
+                                    {
+                                        Value::String(text) => text.to_string(),
+                                        Value::Vector(v) => format!("{:?}", v.map(|c| c as i32)),
+                                        _ => String::new(),
+                                    };
+                                    format!(
+                                        "{classname} {} {} at {} model {}",
+                                        field(&mut runtime, "targetname"),
+                                        field(&mut runtime, "script_noteworthy"),
+                                        field(&mut runtime, "origin"),
+                                        field(&mut runtime, "model")
+                                    )
+                                });
+                                format!("{height}{side:?}: hit {what:?} at {:.0}", fraction * 32.0)
+                            }
+                            crate::bullet_collision::TraceOutcome::Hit {
+                                fraction,
+                                collider,
+                                ..
+                            } => {
+                                format!(
+                                    "{height}{side:?}: hit {collider:?} at {:.0}",
+                                    fraction * 32.0
+                                )
+                            }
+                            other => format!("{height}{side:?}: {other:?}"),
+                        }
+                    })
+                    .collect();
+                diag::info!(
+                    Sim,
+                    "actor debug: {object} stuck at {:?} walking {:?}: {}",
+                    origin.map(|v| v as i32),
+                    ahead.map(|v| v as i32),
+                    hits.join(", ")
+                );
+            }
             state.stuck_since = None;
             state.route.clear();
             state.replan_ms = 0;
+            // Node by node for a while: a look-ahead past a step it can't walk up would
+            // only steer it back into the step (and too far off to hop to).
+            state.lookahead_ms = now + STUCK_DIRECT_MS;
+            if let Some(via) = steering {
+                if state.blocked_cuts.len() >= 8 {
+                    state.blocked_cuts.remove(0);
+                }
+                state.blocked_cuts.push(via);
+            }
             if let Some(via) = steering.filter(|via| {
                 flat_distance(moved, *via) < HOP_REACH && (via[2] - moved[2]).abs() < 300.0
             }) && in_sight(world, object, moved, via)
@@ -1302,11 +1880,24 @@ fn think(
                     ms: ms.clamp(400, 1500),
                     window: false,
                     ledge: true,
+                    motion: None,
                 });
             }
         }
     } else {
         state.stuck_since = None;
+    }
+    // IW4L_ACTOR_TRACE=1: every actor's position ten times a second (path shape).
+    if std::env::var_os("IW4L_ACTOR_TRACE").is_some() && now % 100 < i64::from(crate::MATCH_TICK_MS)
+    {
+        diag::info!(
+            Sim,
+            "actor trace: {object} {:.1} {:.1} {:.1} {}",
+            moved[0],
+            moved[1],
+            moved[2],
+            attacking
+        );
     }
     if std::env::var_os("IW4L_ACTOR_DEBUG").is_some()
         && now % 2000 < i64::from(crate::MATCH_TICK_MS)
@@ -1376,4 +1967,93 @@ fn think(
 
 fn flat_distance(a: [f32; 3], b: [f32; 3]) -> f32 {
     ((a[0] - b[0]).powi(2) + (a[1] - b[1]).powi(2)).sqrt()
+}
+
+/// Whether each player's crosshair is on an enemy actor (a BO1 zombie): the engine turns
+/// it red there. A trace along the view, as a bullet would go; the client reads the
+/// client dvar `iw4l_crosshair_enemy` ("1" on one), written only when it changes.
+pub(crate) fn crosshair_targets(world: &mut World) {
+    const DVAR: &str = "iw4l_crosshair_enemy";
+    const RANGE: f32 = 8192.0;
+    let clients: Vec<u32> = world
+        .resource::<Runtime>()
+        .players
+        .keys()
+        .copied()
+        .collect();
+    for client in clients {
+        let id = crate::ClientId(client);
+        let (view, shown) = {
+            let frame = FrameWorld::from_world(world);
+            let view = frame.player(id).map(|ps| {
+                let eye = [
+                    ps.origin[0],
+                    ps.origin[1],
+                    ps.origin[2] + ps.view_height_current,
+                ];
+                (eye, ps.viewangles)
+            });
+            let shown = frame.client_meta(id).and_then(|meta| {
+                meta.client_dvars
+                    .iter()
+                    .find(|(name, _)| name == DVAR)
+                    .map(|(_, value)| value == "1")
+            });
+            (view, shown)
+        };
+        let tick = world.resource::<crate::step::StepRequest>().tick;
+        let enemy = view.is_some_and(|(eye, angles)| {
+            let Some(model) = crate::combat::aimed_script_model(
+                &FrameWorld::from_world(world),
+                tick,
+                id,
+                eye,
+                angles,
+                RANGE,
+            ) else {
+                return false;
+            };
+            let mut runtime = world.resource_mut::<Runtime>();
+            let target = runtime
+                .entities
+                .iter()
+                .find(|(_, entity)| entity.presence == Some(model))
+                .map(|(object, _)| *object);
+            target.is_some_and(|object| {
+                runtime.actors.contains_key(&object)
+                    && runtime.object_field(object, "team") == Value::string("axis")
+            })
+        });
+        if shown != Some(enemy) {
+            super::natives::player::publish_client_dvar(
+                world,
+                client,
+                DVAR,
+                if enemy { "1" } else { "0" }.to_owned(),
+            );
+        }
+    }
+}
+
+/// How fast an actor turns while it walks, and while it swings at a player (radians/s).
+const TURN_RATE: f32 = 300.0 * std::f32::consts::PI / 180.0;
+const ATTACK_TURN_RATE: f32 = 600.0 * std::f32::consts::PI / 180.0;
+/// A turn sharper than this is made nearly on the spot.
+const SHARP_TURN: f32 = 60.0 * std::f32::consts::PI / 180.0;
+
+/// The signed angle from `from` to `to`, in (-pi, pi].
+fn angle_between(from: f32, to: f32) -> f32 {
+    let mut delta = (to - from) % std::f32::consts::TAU;
+    if delta > std::f32::consts::PI {
+        delta -= std::f32::consts::TAU;
+    } else if delta <= -std::f32::consts::PI {
+        delta += std::f32::consts::TAU;
+    }
+    delta
+}
+
+/// `from` turned toward `to` by at most `max_step` radians.
+fn turn_toward(from: f32, to: f32, max_step: f32) -> f32 {
+    let delta = angle_between(from, to);
+    from + delta.clamp(-max_step, max_step)
 }

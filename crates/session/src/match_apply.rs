@@ -443,6 +443,45 @@ pub fn apply_prepared_match(
                 )
             })
         }));
+        // BO1's traverse clips (window mantles, jumps down and up) carry the zombie with
+        // their root motion: the sim moves it along their sampled delta.
+        content.set_anim_deltas(xanims.0.names().filter_map(|name| {
+            let lower = name.to_ascii_lowercase();
+            if !lower.starts_with("ai_zombie")
+                || !["traverse", "jump_down", "jump_up"]
+                    .iter()
+                    .any(|kind| lower.contains(kind))
+            {
+                return None;
+            }
+            let clip = [
+                anim_namespace,
+                asset_core::AssetNamespace::T5,
+                asset_core::AssetNamespace::Iw4,
+            ]
+            .into_iter()
+            .find_map(|namespace| xanims.0.clip(namespace, name))?;
+            if !clip.has_delta() {
+                return None;
+            }
+            const SAMPLES: usize = 32;
+            let samples: Vec<[f32; 3]> = (0..=SAMPLES)
+                .map(|i| clip.abs_delta_trans(i as f32 / SAMPLES as f32))
+                .collect();
+            if std::env::var_os("IW4L_ACTOR_DEBUG").is_some() {
+                let end = samples[SAMPLES];
+                let top = samples.iter().map(|s| s[2]).fold(f32::MIN, f32::max);
+                diag::info!(
+                    Sim,
+                    "traverse clip {name}: {:.2}s, moves ({:.0} {:.0} {:.0}), top {top:.0}",
+                    clip.duration(),
+                    end[0],
+                    end[1],
+                    end[2]
+                );
+            }
+            Some((name.to_owned(), samples))
+        }));
         content.set_mantle_xanims(sim::MantleXAnimBind::from_clips(|fast, i| {
             let name = sim::MantleXAnimBind::clip_name(fast, i)?;
             xanims

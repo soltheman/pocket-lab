@@ -1,6 +1,26 @@
-# Pocket Lab 0.3.26
+# Pocket Lab 0.3.27
 
 Smoother on the phone, every touch button does its job, and co-op over Wi-Fi.
+
+**New in 0.3.27**
+- Zombies move more like Black Ops zombies:
+  - **No more floating through windows and off ledges.** Black Ops moves a zombie through a window, off a ledge or over a wall along the path built into that climb or jump animation. This game slid it in a straight line while a generic climb animation played, so zombies glided through window sills and floated down from ledges. Each window and drop now plays the animation Kino's map gives it (the window climb for the zombie's walk, run or sprint speed; jumps down 40, 72, 120 and 190), and the zombie follows that animation's own path up onto the sill and down to the floor. The game wasn't reading that path out of Black Ops' animation files at all; it does now.
+  - **No more gliding over things to get unstuck.** When a zombie couldn't move, the game slid it straight to where it was headed, through whatever was in the way. Testing found what was catching them:
+    - landing from a window 1 or 2 units into the floor. They now land standing on it.
+    - Kino's closed stage curtain. Black Ops keeps zombies from routing through it until the power opens it. Zombies here took that route anyway and glided through the curtain.
+    - Before, a 3-minute test with every door open had 18 of those slides. Now: none with every door open and the power on, and none in 3 minutes in the foyer with the doors shut.
+  - **No zigzag.** Zombies walked to each point of Kino's path grid in turn and turned sharply at every one. They now head for the furthest point ahead they can walk straight to, and turn gradually. A shortcut that walks a zombie into a wall is never tried again.
+  - **Smoother changes between animations.** Going from walking to attacking or climbing blends over 0.2 seconds, as in Black Ops, instead of snapping to the new pose.
+- The knife works: melee now hurts zombies (one stab kills a round 1 zombie, as in Black Ops).
+- The crosshair turns red when it's on a zombie.
+- Coming out of a sprint uses Black Ops' own timing for each weapon (0.3 seconds for the pistol). The game wasn't reading Black Ops' sprint timings at all.
+- Checked on PC:
+  - 3 minutes in the foyer with the doors shut: 38 zombies, none stuck, 32 window climbs, all with Black Ops' climb animations, none sliding;
+  - close-up screenshots of zombies climbing in through a foyer window;
+  - zombies jumping off the stage into the theater: they step to the edge, then drop along the jump's curve and land on the floor (before: a straight slide down through the air);
+  - knifing round 1 zombies kills them;
+  - the red crosshair on a zombie.
+- Found while testing, not fixed yet: once the power is on, the zombies that climb up out of the ground in Kino's theater stay where they spawn. The Black Ops script that raises them fails here. That's next.
 
 **New in 0.3.26**
 - First part of Black Ops' own HUD. The round counter is now Black Ops' dark red chalk tally, bottom left: one mark per round up to five, then a crossed five plus more marks up to round 10. The old red number at the top left is gone. Perks you buy show their Black Ops icon above the chalk.

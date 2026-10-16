@@ -462,6 +462,20 @@ pub struct XAnimPartsGeometry {
     pub indices: Option<Ptr>,
     pub index_count: usize,
     pub indices_are_bytes: bool,
+    /// The root motion's translation (`XAnimDeltaPart::trans`).
+    pub delta_trans: XAnimDeltaTransGeometry,
+}
+
+/// An `XAnimPartTrans`: `size` (frames with keys, less one; 0 for a constant), whether the
+/// frames are packed in bytes, the struct itself (the constant at 4; else mins at 4, the
+/// step at 16 and `size + 1` frame indices at 32) and the packed frames.
+#[derive(Clone, Copy, Debug, Default, PartialEq)]
+pub struct XAnimDeltaTransGeometry {
+    pub size: u16,
+    pub small: u8,
+    pub body: Option<Ptr>,
+    pub frames: Option<Ptr>,
+    pub indices_are_bytes: bool,
 }
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]

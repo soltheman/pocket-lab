@@ -3447,6 +3447,10 @@ fn capture_t5_body_facts(
     facts.fire_delay_ms = i32_at_t5(stream, body, sz::WEAPON_DEF_FIRE_DELAY_OFF);
     facts.quick_drop_time_ms = i32_at_t5(stream, body, sz::WEAPON_QUICK_DROP_TIME_OFF);
     facts.quick_raise_time_ms = i32_at_t5(stream, body, sz::WEAPON_QUICK_RAISE_TIME_OFF);
+    facts.first_raise_time_ms = i32_at_t5(stream, body, sz::WEAPON_FIRST_RAISE_TIME_OFF);
+    facts.sprint_raise_time_ms = i32_at_t5(stream, body, sz::WEAPON_SPRINT_IN_TIME_OFF);
+    facts.sprint_loop_time_ms = i32_at_t5(stream, body, sz::WEAPON_SPRINT_LOOP_TIME_OFF);
+    facts.sprint_drop_time_ms = i32_at_t5(stream, body, sz::WEAPON_SPRINT_OUT_TIME_OFF);
     facts.melee_damage = i32_at_t5(stream, body, sz::WEAPON_DEF_MELEE_DAMAGE_OFF);
     facts.melee_time_ms = i32_at_t5(stream, body, sz::WEAPON_DEF_MELEE_TIME_OFF);
     facts.melee_delay_ms = i32_at_t5(stream, body, sz::WEAPON_DEF_MELEE_DELAY_OFF);
@@ -3455,6 +3459,17 @@ fn capture_t5_body_facts(
     facts.use_as_melee = u8_at_t5(stream, body, sz::WEAPON_DEF_USE_AS_MELEE_OFF) != 0;
     facts.rechamber_bolt_delay_ms = i32_at_t5(stream, body, sz::WEAPON_DEF_RECHAMBER_BOLT_TIME_OFF);
 
+    // IW4L_WEAPON_PROBE=<name part>: the weapon def's int block around its timings.
+    if let Ok(probe) = std::env::var("IW4L_WEAPON_PROBE")
+        && let Some(name) = geometry.name.and_then(|p| stream.cstr(p).ok())
+        && name.contains(probe.as_str())
+    {
+        let ints: Vec<String> = (0x3a0..0x480)
+            .step_by(4)
+            .map(|off| format!("{off:#x}={}", i32_at_t5(stream, body, off)))
+            .collect();
+        diag::info!(Zone, "weapon probe {name}: {}", ints.join(" "));
+    }
     facts.reload_show_rocket_time_ms = i32_at_t5(stream, body, 0x3d4);
     facts.reload_add_time_ms = i32_at_t5(stream, body, sz::WEAPON_DEF_RELOAD_ADD_TIME_OFF);
     facts.reload_empty_add_time_ms =

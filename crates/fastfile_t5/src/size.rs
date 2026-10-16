@@ -508,6 +508,12 @@ pub const WEAPON_RAISE_TIME_OFF: usize = 0x3fc;
 
 pub const WEAPON_QUICK_DROP_TIME_OFF: usize = 0x404;
 pub const WEAPON_QUICK_RAISE_TIME_OFF: usize = 0x408;
+/// BO1 follows MW2's order after the quick raise: first raise, empty raise, empty drop,
+/// then sprint in, loop and out (m1911_zm: 1100, 250, 450, 300, 550, 300).
+pub const WEAPON_FIRST_RAISE_TIME_OFF: usize = 0x40c;
+pub const WEAPON_SPRINT_IN_TIME_OFF: usize = 0x418;
+pub const WEAPON_SPRINT_LOOP_TIME_OFF: usize = 0x41c;
+pub const WEAPON_SPRINT_OUT_TIME_OFF: usize = 0x420;
 
 const _: () = assert!(WEAPON_QUICK_DROP_TIME_OFF == WEAPON_DROP_TIME_OFF + 12);
 const _: () = assert!(WEAPON_QUICK_RAISE_TIME_OFF == WEAPON_QUICK_DROP_TIME_OFF + 4);

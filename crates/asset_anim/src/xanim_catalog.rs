@@ -477,6 +477,7 @@ impl XAnimBuild {
             copy_u16_t5(s, geometry.indices, geometry.index_count)
         };
 
+        let delta_trans = copy_delta_trans_t5(s, geometry.delta_trans);
         self.insert_in(
             AssetNamespace::T5,
             CapturedXAnim {
@@ -490,17 +491,75 @@ impl XAnimBuild {
                     random_data_short,
                     random_data_int,
                     numframes: geometry.numframes,
-                    flags: geometry.flags,
+                    // T5 keeps a delta part only on clips with root motion (`bDelta`).
+                    flags: geometry.flags | if delta_trans.is_some() { 0x2 } else { 0 },
                     bone_count: geometry.bone_count,
                     framerate: geometry.framerate,
                     names,
                     notifies,
                     indices,
-                    delta_trans: None,
+                    delta_trans,
                 }),
             },
         );
     }
+}
+
+/// A T5 clip's root-motion translation, laid out as IW4's (`XAnimPartTrans`).
+fn copy_delta_trans_t5(
+    s: &fastfile_t5::ZoneStream<'_>,
+    geo: fastfile_t5::XAnimDeltaTransGeometry,
+) -> Option<RawDeltaTrans> {
+    let body = geo.body?;
+    let f32_3 = |off: usize| -> Option<[f32; 3]> {
+        let bytes = s.slice_at(body, off, 12).ok()?;
+        Some(std::array::from_fn(|i| {
+            f32::from_le_bytes([
+                bytes[4 * i],
+                bytes[4 * i + 1],
+                bytes[4 * i + 2],
+                bytes[4 * i + 3],
+            ])
+        }))
+    };
+    if geo.size == 0 {
+        return Some(RawDeltaTrans {
+            size: 0,
+            small: geo.small != 0,
+            mins: f32_3(4)?,
+            step: [0.0; 3],
+            indices: Vec::new(),
+            packed: Vec::new(),
+        });
+    }
+    let n = geo.size as usize + 1;
+    let indices = if geo.indices_are_bytes {
+        s.slice_at(body, 32, n)
+            .ok()?
+            .iter()
+            .copied()
+            .map(u16::from)
+            .collect()
+    } else {
+        s.slice_at(body, 32, 2 * n)
+            .ok()?
+            .chunks_exact(2)
+            .map(|c| u16::from_le_bytes([c[0], c[1]]))
+            .collect()
+    };
+    let packed_n = if geo.small != 0 { 3 * n } else { 6 * n };
+    let packed = copy_u8_t5(s, geo.frames, packed_n);
+    if packed.len() != packed_n {
+        return None;
+    }
+    Some(RawDeltaTrans {
+        size: geo.size,
+        small: geo.small != 0,
+        mins: f32_3(4)?,
+        step: f32_3(16)?,
+        indices,
+        packed,
+    })
 }
 
 impl XAnimBuild {

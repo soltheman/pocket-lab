@@ -95,6 +95,17 @@ pub(crate) fn update_reticle(
         hide_all(&mut quads);
         return;
     }
+    // Red over an enemy (a BO1 zombie), as the engine draws it; the server says so in
+    // the client dvar `iw4l_crosshair_enemy`.
+    let enemy = presented
+        .snapshot()
+        .and_then(|snapshot| snapshot.meta.for_client(local.0))
+        .is_some_and(|meta| {
+            meta.client_dvars
+                .iter()
+                .any(|(name, value)| name == "iw4l_crosshair_enemy" && value == "1")
+        });
+    let tint = if enemy { [1.0, 0.0, 0.0] } else { [1.0, 1.0, 1.0] };
 
     if ps.f_weapon_pos_frac > ads_latch.last_frac + 1e-4 {
         ads_latch.position_to_ads = true;
@@ -301,7 +312,7 @@ pub(crate) fn update_reticle(
         node.height = Val::Px(size);
         xform.rotation = Rot2::degrees(f32::from(turns) * 90.0);
         image_node.image = handle;
-        image_node.color = Color::srgba(1.0, 1.0, 1.0, alpha);
+        image_node.color = Color::srgba(tint[0], tint[1], tint[2], alpha);
     }
 }
 

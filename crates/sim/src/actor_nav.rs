@@ -15,9 +15,23 @@ use std::sync::Arc;
 pub struct NavLinkBlocks {
     count: HashMap<(u32, u32), u32>,
     by_entity: BTreeMap<u64, Vec<(u32, u32)>>,
+    /// Entities a script has run `connectpaths` on.
+    connected: std::collections::BTreeSet<u64>,
+    /// The map's dynamic-path brushes have closed their links (once, at the start).
+    dynamic_closed: bool,
 }
 
 impl NavLinkBlocks {
+    /// True the first time only: the map's dynamic-path brushes are due to close.
+    pub fn take_dynamic_pass(&mut self) -> bool {
+        !std::mem::replace(&mut self.dynamic_closed, true)
+    }
+
+    /// A script has opened the links through `entity` (`connectpaths`).
+    pub fn was_connected(&self, entity: u64) -> bool {
+        self.connected.contains(&entity)
+    }
+
     /// Closes `links` for `entity`; nothing when it already holds some closed.
     /// Returns how many it closed.
     pub fn disconnect(&mut self, entity: u64, links: Vec<(u32, u32)>) -> usize {
@@ -34,6 +48,7 @@ impl NavLinkBlocks {
 
     /// Reopens what `entity` closed; returns how many links it held.
     pub fn connect(&mut self, entity: u64) -> usize {
+        self.connected.insert(entity);
         let Some(links) = self.by_entity.remove(&entity) else {
             return 0;
         };

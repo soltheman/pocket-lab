@@ -1670,10 +1670,20 @@ fn fire_weapon_melee(
         return;
     };
     let amount = facts.melee_damage + (world.combat_rng_mut().next_u32() % 5) as i32;
+    let entity_hit = match segment.collider {
+        Some(
+            ColliderId::EntityDObjBone { owner, .. } | ColliderId::EntityLinkedBrush { owner, .. },
+        ) => owner.script_model(),
+        _ => None,
+    };
     let (kind, other) = match segment.collider {
         Some(ColliderId::Player { client, .. }) => {
             (entity_iw4::EntityEventKind::MELEE_HIT, client.0 as i32)
         }
+        _ if entity_hit.is_some() => (
+            entity_iw4::EntityEventKind::MELEE_HIT,
+            i32::from(trace_iw4::ENTITYNUM_WORLD),
+        ),
         _ => (
             entity_iw4::EntityEventKind::MELEE_MISS,
             i32::from(trace_iw4::ENTITYNUM_WORLD),
@@ -1737,6 +1747,61 @@ fn fire_weapon_melee(
                     },
                 );
             }
+        }
+        // A script entity: a BO1 zombie (an actor) or a destructible. Melee goes through
+        // the same damage callback as a bullet, with MOD_MELEE (the knife).
+        Some(
+            ColliderId::EntityDObjBone { owner, .. } | ColliderId::EntityLinkedBrush { owner, .. },
+        ) => {
+            if let Some(ColliderId::EntityDObjBone { bone, .. }) = segment.collider
+                && crate::t5_destructible::apply_hit(
+                    world,
+                    tick,
+                    owner,
+                    bone,
+                    amount as u32,
+                    Some(attacker),
+                )
+            {
+                return;
+            }
+            let Some(target) = entity_hit else {
+                return;
+            };
+            let bone = match segment.collider {
+                Some(ColliderId::EntityDObjBone { bone, .. }) => Some(usize::from(bone)),
+                _ => None,
+            };
+            crate::script::damage_entity(
+                world.ecs(),
+                &crate::script::EntityHit {
+                    target,
+                    amount,
+                    attacker: Some(attacker),
+                    means: "MOD_MELEE",
+                    weapon,
+                    point: segment.end,
+                    dir: forward,
+                    bone,
+                    flags: 0,
+                },
+            );
+            world.push_entity_event(
+                tick,
+                EventAudience::All,
+                entity_iw4::EntityEventKind::MELEE_BLOOD,
+                crate::EntityEventPayload {
+                    number: attacker.0 as i32,
+                    attacker_entity_num: attacker.0 as i32,
+                    other_entity_num: i32::from(trace_iw4::ENTITYNUM_WORLD),
+                    weapon,
+                    origin: segment.end,
+                    direction: forward,
+                    surf_type: segment.surf_type,
+                    surface_flags: segment.surface_flags,
+                    ..Default::default()
+                },
+            );
         }
         Some(ColliderId::World { .. }) => {
             if let Some(piece) = glass_piece_from_hit(segment.hit_type, segment.hit_id) {
@@ -1916,5 +1981,57 @@ pub(crate) fn raise_given_weapon(
             entity_iw4::EntityEventKind::FIRST_RAISE_WEAPON.0,
             0,
         );
+    }
+}
+
+/// The script entity (a BO1 zombie) a bullet from `eye` along `angles` would hit first,
+/// as a shot traces it; `None` when the world or nothing is first. The crosshair turns
+/// red on an enemy by it.
+pub(crate) fn aimed_script_model(
+    world: &FrameWorld,
+    tick: Tick,
+    shooter: ClientId,
+    eye: [f32; 3],
+    angles: [f32; 3],
+    range: f32,
+) -> Option<crate::ScriptModelId> {
+    let (forward, _, _) = math_iw4::angle_vectors(angles);
+    let end = std::array::from_fn(|i| eye[i] + forward[i] * range);
+    let query = world.lagcomp_query_for(shooter, tick);
+    let glass_pairs = world.world_objects().glass_damage_pairs();
+    let is_solid = |piece: u16| {
+        crate::world_objects::glass_piece_is_solid(
+            glass_pairs
+                .iter()
+                .find(|(id, _)| *id == u32::from(piece))
+                .map(|(_, d)| *d)
+                .unwrap_or(0),
+        )
+    };
+    let (segments, _) = bullet_trace_segments_filtered(
+        world.clip_brushes(),
+        world.clip_bsp(),
+        world.clip_cmodels(),
+        world.clip_mesh(),
+        &query.players.poses,
+        &query.entities.rows,
+        &BulletTraceQuery {
+            start: eye,
+            end,
+            mask: MASK_BULLET_WORLD,
+            ignore: Some(shooter),
+            ignore_hit: None,
+            ignore_model: None,
+        },
+        weapon_iw4::BulletPenFacts::default(),
+        world.penetration_table(),
+        &is_solid,
+        None,
+    );
+    match segments.iter().find_map(|segment| segment.collider)? {
+        ColliderId::EntityDObjBone { owner, .. } | ColliderId::EntityLinkedBrush { owner, .. } => {
+            owner.script_model()
+        }
+        _ => None,
     }
 }

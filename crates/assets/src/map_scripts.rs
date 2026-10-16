@@ -165,7 +165,7 @@ stand_at()
     p setorigin(at);
     p setplayerangles(look);
     // IW4L_ZM_OPEN=1: every door and debris pile the player could buy opens (Black Ops'
-    // own forced unlock), so zombies come from the whole map.
+    // own forced unlock) and the power goes on, so zombies come from the whole map.
     if (getdvar("iw4l_zm_open") == "1")
     {
         all = getentarray("zombie_door", "targetname");
@@ -175,6 +175,14 @@ stand_at()
         for (i = 0; i < all.size; i++)
             all[i] notify("trigger", p, true);
         logprint("open debug: forced " + all.size + " doors and debris open");
+        // The power too: it opens the electric doors and (Kino) the stage curtains, the
+        // only ways into the theater.
+        switch_trigger = getent("use_elec_switch", "targetname");
+        if (isdefined(switch_trigger))
+        {
+            switch_trigger notify("trigger", p);
+            logprint("open debug: power switch thrown");
+        }
     }
     wait 1;
     logprint("stand debug: player " + p.origin + " looking " + look);

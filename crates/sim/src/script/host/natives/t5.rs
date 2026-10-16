@@ -1392,24 +1392,7 @@ fn register_entity(registry: &mut NativeRegistry) {
     // through closed doors and push against them.
     registry.register(Method, "disconnectpaths", |world, receiver, _| {
         let id = super::engine::entity_id(world, receiver)?;
-        let Some(nav) = super::super::actors::nav(world) else {
-            return Ok(Value::Undefined);
-        };
-        let Some((mins, maxs)) = entity_world_box(world, id, receiver) else {
-            return Ok(Value::Undefined);
-        };
-        let links = nav.links_through(mins, maxs);
-        let through = links.len();
-        let closed = world
-            .resource_mut::<Runtime>()
-            .nav_blocks
-            .disconnect(id, links);
-        diag::info!(
-            Sim,
-            "disconnectpaths: entity {id} box {:?}..{:?} closes {closed} walk links ({through} pass through it)",
-            mins.map(|v| v as i32),
-            maxs.map(|v| v as i32)
-        );
+        disconnect_paths(world, id, "disconnectpaths");
         Ok(Value::Undefined)
     });
     registry.register(Method, "connectpaths", |world, receiver, _| {
@@ -1420,13 +1403,67 @@ fn register_entity(registry: &mut NativeRegistry) {
     });
 }
 
+/// Close the walk-graph links through brush entity `id` (`why` names who asks, for the log).
+fn disconnect_paths(world: &mut World, id: u64, why: &str) {
+    let Some(nav) = super::super::actors::nav(world) else {
+        return;
+    };
+    let Some((mins, maxs)) = entity_world_box(world, id, &Value::Object(id)) else {
+        return;
+    };
+    let links = nav.links_through(mins, maxs);
+    let through = links.len();
+    let closed = world
+        .resource_mut::<Runtime>()
+        .nav_blocks
+        .disconnect(id, links);
+    diag::info!(
+        Sim,
+        "{why}: entity {id} box {:?}..{:?} closes {closed} walk links ({through} pass through it)",
+        mins.map(|v| v as i32),
+        maxs.map(|v| v as i32)
+    );
+}
+
+/// Once, as the match starts: BO1's engine spawns a brush model flagged DYNAMICPATH
+/// (spawnflags 1: Kino's stage curtains, its doors) with the paths through it closed, until
+/// a script runs `connectpaths` on it. Without this zombies route through the closed
+/// curtains and push against them.
+pub(crate) fn close_dynamic_paths(world: &mut World) {
+    if !world
+        .resource_mut::<Runtime>()
+        .nav_blocks
+        .take_dynamic_pass()
+    {
+        return;
+    }
+    let dynamic: Vec<u64> = {
+        let mut runtime = world.resource_mut::<Runtime>();
+        let ids: Vec<u64> = runtime
+            .entities
+            .iter()
+            .filter(|(_, entity)| &*entity.classname == "script_brushmodel")
+            .map(|(id, _)| *id)
+            .collect();
+        ids.into_iter()
+            .filter(|&id| {
+                let flags = match runtime.object_field(id, "spawnflags") {
+                    Value::Int(n) => n,
+                    Value::String(text) => text.to_string().trim().parse().unwrap_or(0),
+                    _ => 0,
+                };
+                flags & 1 != 0 && !runtime.nav_blocks.was_connected(id)
+            })
+            .collect()
+    };
+    for id in dynamic {
+        disconnect_paths(world, id, "dynamic path");
+    }
+}
+
 /// A brush entity's world-space box: its `*N` model's bounds turned by its angles and
 /// moved to its origin. `None` for an entity with no brush model.
-fn entity_world_box(
-    world: &mut World,
-    id: u64,
-    receiver: &Value,
-) -> Option<([f32; 3], [f32; 3])> {
+fn entity_world_box(world: &mut World, id: u64, receiver: &Value) -> Option<([f32; 3], [f32; 3])> {
     let (local_mins, local_maxs) = super::super::triggers::entity_bounds(world, id);
     if local_mins == local_maxs {
         return None;
@@ -1437,12 +1474,25 @@ fn entity_world_box(
     let mut maxs = [f32::MIN; 3];
     for corner in 0..8 {
         let local = [
-            if corner & 1 == 0 { local_mins[0] } else { local_maxs[0] },
-            if corner & 2 == 0 { local_mins[1] } else { local_maxs[1] },
-            if corner & 4 == 0 { local_mins[2] } else { local_maxs[2] },
+            if corner & 1 == 0 {
+                local_mins[0]
+            } else {
+                local_maxs[0]
+            },
+            if corner & 2 == 0 {
+                local_mins[1]
+            } else {
+                local_maxs[1]
+            },
+            if corner & 4 == 0 {
+                local_mins[2]
+            } else {
+                local_maxs[2]
+            },
         ];
         for k in 0..3 {
-            let v = origin[k] + local[0] * axis[0][k] + local[1] * axis[1][k] + local[2] * axis[2][k];
+            let v =
+                origin[k] + local[0] * axis[0][k] + local[1] * axis[1][k] + local[2] * axis[2][k];
             mins[k] = mins[k].min(v);
             maxs[k] = maxs[k].max(v);
         }

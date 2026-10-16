@@ -309,6 +309,8 @@ pub struct SimContentBuilder {
     player_body_branches: Option<xmodel_runtime::PlayerBodyBranches>,
     script_model_anims: std::collections::BTreeMap<String, crate::ScriptModelPlayAnim>,
     anim_notes: std::collections::BTreeMap<String, Arc<[crate::AnimNote]>>,
+    /// Root motion of the clips actors traverse with, sampled evenly over each clip.
+    anim_deltas: std::collections::BTreeMap<String, Arc<[[f32; 3]]>>,
     ai_nav: Option<Arc<crate::actor_nav::ActorNav>>,
     xanims: Arc<crate::MantleXAnimBind>,
     weapon_script_names: Arc<[String]>,
@@ -365,6 +367,15 @@ impl SimContentBuilder {
     /// over before any baked walk graph.
     pub fn set_ai_nav(&mut self, nav: crate::actor_nav::ActorNav) {
         self.ai_nav = (!nav.is_empty()).then(|| Arc::new(nav));
+    }
+
+    /// Root motion by clip name (`AnimClip::abs_delta_trans` sampled from 0 to 1), for
+    /// the clips actors traverse with.
+    pub fn set_anim_deltas(&mut self, deltas: impl IntoIterator<Item = (String, Vec<[f32; 3]>)>) {
+        self.anim_deltas = deltas
+            .into_iter()
+            .map(|(name, samples)| (name.to_ascii_lowercase(), samples.into()))
+            .collect();
     }
 
     /// Animation notetracks by clip name, for `animScripted` and the notetrack queries.
@@ -3031,6 +3042,14 @@ impl SimState {
     /// over instead of a baked walk graph.
     pub fn has_map_ai_nav(&self) -> bool {
         self.content.data.ai_nav.is_some()
+    }
+
+    pub(crate) fn anim_delta(&self, name: &str) -> Option<Arc<[[f32; 3]]>> {
+        self.content
+            .data
+            .anim_deltas
+            .get(&name.to_ascii_lowercase())
+            .cloned()
     }
 
     pub(crate) fn anim_notes(&self, name: &str) -> Arc<[crate::AnimNote]> {

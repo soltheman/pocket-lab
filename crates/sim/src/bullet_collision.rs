@@ -164,6 +164,9 @@ pub struct AuthorityDObjCollTrace {
     pub hide_part_bits: [u32; anim_iw4::PartBits::WORDS],
 }
 
+/// How long an actor's animations crossfade when one starts over another.
+pub const ANIM_BLEND_SECONDS: f32 = 0.2;
+
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct ScriptModelPlayAnim {
     pub looping: bool,
@@ -194,6 +197,8 @@ pub struct AuthorityDObjState {
     pub materialize_error: Option<xmodel_runtime::MaterializeError>,
 
     pub play_anim: Option<ScriptModelPlayAnim>,
+    /// The clip fading out under `play_anim`'s (a crossfade, `ANIM_BLEND_SECONDS`).
+    pub fading_anim: Option<ScriptModelPlayAnim>,
 
     pub apos: Option<entity_iw4::Trajectory>,
 
@@ -340,6 +345,7 @@ impl AuthorityDObjState {
             current_collision: None,
             materialize_error: None,
             play_anim: None,
+            fading_anim: None,
             apos: None,
             bone_hits: false,
             t5_destructible: None,
@@ -527,6 +533,7 @@ impl AuthorityDObjState {
         if self.play_anim.take().is_none() {
             return;
         }
+        self.fading_anim = None;
         self.pose_revision = self.pose_revision.wrapping_add(1);
         let attached = self.attached_composition();
         self.semantic_state = xmodel_runtime::DObjSemanticState {
@@ -578,6 +585,16 @@ impl AuthorityDObjState {
 
     pub fn begin_script_model_play_anim(&mut self, clip: &str, looping: bool, frequency: f32) {
         self.pose_revision = self.pose_revision.wrapping_add(1);
+        // The clip playing now fades out under the new one, as the engine blends an AI's
+        // animations (a zombie going from its walk to a swing), rather than cutting.
+        let previous = self.play_anim.zip(
+            self.semantic_state
+                .tree
+                .as_ref()
+                .and_then(|tree| tree.nodes.last())
+                .filter(|leaf| leaf.clip.as_deref().is_some_and(|name| name != clip))
+                .cloned(),
+        );
         self.play_anim = Some(ScriptModelPlayAnim { looping, frequency });
         let attached = self.attached_composition();
         self.semantic_state = xmodel_runtime::DObjSemanticState::one_leaf(
@@ -587,6 +604,35 @@ impl AuthorityDObjState {
             self.pose_revision,
             0.0,
         );
+        self.fading_anim = None;
+        if let (Some((play, mut old)), Some(tree)) = (previous, self.semantic_state.tree.as_mut())
+        {
+            use xmodel_runtime::{XAnimNodeId, XAnimSemanticNode, XAnimSemanticNodeKind};
+            let mut new = tree.nodes.remove(0);
+            new.parent = Some(XAnimNodeId(0));
+            new.state.weight = 0.0;
+            old.parent = Some(XAnimNodeId(0));
+            old.state.weight = 1.0;
+            old.state.goal_weight = 0.0;
+            tree.nodes = vec![
+                XAnimSemanticNode {
+                    parent: None,
+                    kind: XAnimSemanticNodeKind::Blend,
+                    clip: None,
+                    parts: None,
+                    state: xmodel_runtime::XAnimNodeState {
+                        weight: 1.0,
+                        goal_weight: 1.0,
+                        rate: 1.0,
+                        ..Default::default()
+                    },
+                },
+                old,
+                new,
+            ];
+            tree.definition_revision = tree.definition_revision.wrapping_add(1);
+            self.fading_anim = Some(play);
+        }
         if let Some(composition) = attached {
             self.semantic_state.composition = composition;
         }
@@ -603,21 +649,49 @@ impl AuthorityDObjState {
         let Some(tree) = self.semantic_state.tree.as_mut() else {
             return 0.0;
         };
-        let Some(leaf) = tree.nodes.first_mut() else {
+        // A crossfade: the old clip (second to last) keeps playing as it fades out, the
+        // new one (last) fades in; once the old is gone the tree is the new clip alone.
+        let blend = (dt_seconds / ANIM_BLEND_SECONDS).max(0.0);
+        let leaves = tree.nodes.len();
+        for (index, node) in tree.nodes.iter_mut().enumerate() {
+            let settings = if index + 1 == leaves {
+                play
+            } else if let Some(fading) = self.fading_anim.filter(|_| node.clip.is_some()) {
+                fading
+            } else {
+                continue;
+            };
+            node.state.old_time = node.state.time;
+            node.state.old_cycle_count = node.state.cycle_count;
+            let (time, cycle) = anim_iw4::advance_leaf_time(
+                node.state.old_time,
+                node.state.cycle_count,
+                node.state.rate,
+                settings.frequency,
+                dt_seconds,
+                settings.looping,
+            );
+            node.state.time = time;
+            node.state.cycle_count = cycle;
+            if leaves > 1 {
+                let goal = node.state.goal_weight;
+                node.state.weight = if node.state.weight < goal {
+                    (node.state.weight + blend).min(goal)
+                } else {
+                    (node.state.weight - blend).max(goal)
+                };
+            }
+        }
+        if leaves > 1 && tree.nodes.last().is_some_and(|leaf| leaf.state.weight >= 1.0) {
+            let mut leaf = tree.nodes.pop().expect("a crossfade has its new clip");
+            leaf.parent = None;
+            tree.nodes = vec![leaf];
+            tree.definition_revision = tree.definition_revision.wrapping_add(1);
+            self.fading_anim = None;
+        }
+        let Some(leaf) = tree.nodes.last() else {
             return 0.0;
         };
-        leaf.state.old_time = leaf.state.time;
-        leaf.state.old_cycle_count = leaf.state.cycle_count;
-        let (time, cycle) = anim_iw4::advance_leaf_time(
-            leaf.state.old_time,
-            leaf.state.cycle_count,
-            leaf.state.rate,
-            play.frequency,
-            dt_seconds,
-            play.looping,
-        );
-        leaf.state.time = time;
-        leaf.state.cycle_count = cycle;
         tree.state_revision = tree.state_revision.wrapping_add(1);
         self.pose_revision = self.pose_revision.wrapping_add(1);
         self.semantic_state.pose_revision = self.pose_revision;

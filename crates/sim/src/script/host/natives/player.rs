@@ -67,7 +67,7 @@ fn client_dvar_value(value: &Value, params: &[Value]) -> Result<String, String> 
     Ok(out)
 }
 
-fn publish_client_dvar(world: &mut World, client: u32, name: &str, value: String) {
+pub(crate) fn publish_client_dvar(world: &mut World, client: u32, name: &str, value: String) {
     let value = if let Some(setting) = crate::TargetBoxDvar::named(name) {
         let Some(value) = setting.parse(&value) else {
             return;

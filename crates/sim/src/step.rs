@@ -2190,6 +2190,50 @@ fn slide_masked(
     slide: &mut crate::script::host::mechanics::Slide,
     base_mask: u32,
 ) -> [f32; 3] {
+    with_slide_collision(world, object, base_mask, |backend, mask| {
+        slide.advance(origin, backend, mask)
+    })
+}
+
+/// Whether an actor's slide box (centred `center` above `at`, `radius` half size) starts
+/// in something solid there: what it collides with on a walk.
+pub(crate) fn actor_box_solid(
+    world: &mut World,
+    object: u64,
+    at: [f32; 3],
+    center: [f32; 3],
+    radius: f32,
+) -> bool {
+    use movement_iw4::CollisionBackend;
+    let mins = center.map(|v| v - radius);
+    let maxs = center.map(|v| v + radius);
+    with_slide_collision(
+        world,
+        object,
+        (crate::bullet_collision::MASK_PLAYER_SOLID & !CONTENTS_PLAYERCLIP) | CONTENTS_MONSTERCLIP,
+        |backend, mask| {
+            backend
+                .trace(movement_iw4::GroundTraceInput {
+                    start: at,
+                    end: at,
+                    mins,
+                    maxs,
+                    tracemask: mask,
+                })
+                .startsolid
+                != 0
+        },
+    )
+}
+
+/// The collision a slide moves through for `object` (the world, entity brushes and
+/// bodies, less what it is linked to) and the mask it moves with.
+fn with_slide_collision<R>(
+    world: &mut World,
+    object: u64,
+    base_mask: u32,
+    use_backend: impl FnOnce(&ClipBackend<'_>, u32) -> R,
+) -> R {
     let runtime = world.resource::<crate::script::Runtime>();
     let linked = |mut child: u64| {
         for _ in 0..runtime.entities.len() {
@@ -2268,7 +2312,7 @@ fn slide_masked(
         linked_brushes: &linked_brushes,
         model_brushes: &model_brushes,
     };
-    slide.advance(origin, &backend, mask)
+    use_backend(&backend, mask)
 }
 
 pub(crate) fn script_mantle(

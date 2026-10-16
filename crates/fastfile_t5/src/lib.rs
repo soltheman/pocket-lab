@@ -35,7 +35,7 @@ pub use zone::{
     MaterialGeometry, PTR_SIZE, Ptr, Result, ShaderGeometry, TECHNIQUE_ARGUMENT_CAP,
     TECHNIQUE_PASS_ROW_CAP, TechniqueArgumentGeometry, TechniqueGraphGeometry,
     TechniquePassGeometry, TechniqueSetGeometry, VertexDeclGeometry, WeaponGeometry,
-    XAnimPartsGeometry, XFILE_BLOCK_LARGE, XFILE_BLOCK_LARGE_RUNTIME, XFILE_BLOCK_PHYSICAL,
+    XAnimDeltaTransGeometry, XAnimPartsGeometry, XFILE_BLOCK_LARGE, XFILE_BLOCK_LARGE_RUNTIME, XFILE_BLOCK_PHYSICAL,
     XFILE_BLOCK_PHYSICAL_RUNTIME, XFILE_BLOCK_RUNTIME, XFILE_BLOCK_TEMP, XFILE_BLOCK_VIRTUAL,
     XFILE_HEADER_LEN, XModelGeometry, ZoneError, ZoneHeader, ZonePtr, ZoneStream,
     block_is_aliasable, parse_zone_header,

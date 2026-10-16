@@ -245,6 +245,7 @@ pub(crate) fn sync_engine_events(world: &mut World) {
     settle_items(world);
     super::vehicles::advance(world);
     super::actors::advance(world);
+    super::actors::crosshair_targets(world);
     super::spectators::advance(world);
     super::players::publish_radar(world);
     super::physics::select_usables(world);

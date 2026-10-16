@@ -474,6 +474,24 @@ pub(super) async fn walk_prepared_match(
             "T5 first-person hands: m1911_zm uses {:?}; arm models loaded: {arms:?}",
             pistol.and_then(|id| weapons.fpv_hands_of(id, false).map(|(hands, _)| hands.clone())),
         ));
+        for name in ["m1911_zm", "mp5k_zm", "knife_zm"] {
+            if let Some(facts) = weapons
+                .resolve_index(name)
+                .ok()
+                .flatten()
+                .and_then(|id| weapons.facts_of(id))
+            {
+                report.push(format!(
+                    "T5 weapon timings {name}: sprint in {} loop {} out {} raise {} drop {} melee {}",
+                    facts.sprint_raise_time_ms,
+                    facts.sprint_loop_time_ms,
+                    facts.sprint_drop_time_ms,
+                    facts.raise_time_ms,
+                    facts.drop_time_ms,
+                    facts.melee_time_ms,
+                ));
+            }
+        }
     }
     let assembly_started = std::time::Instant::now();
     let assemblies = weapons.resolve_fpv_assemblies(&fpv_meshes, &xanims);
