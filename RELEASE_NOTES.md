@@ -1,6 +1,10 @@
-# Pocket Lab 0.3.24
+# Pocket Lab 0.3.25
 
 Smoother on the phone, every touch button does its job, and co-op over Wi-Fi.
+
+**New in 0.3.25**
+- Each character's own arms in first person. Black Ops gives each Kino character their own: Dempsey (player 1) the POW arms, Nikolai (player 2) the prisoner arms, Takeo (player 3) the NVA arms, Richtofen (player 4) the hazmat arms. Black Ops' weapons only carry stand-in hands (the grey ones you've had). The script's choice now reaches your phone, and every weapon is held in those arms. Checked on PC: Dempsey's arms on the pistol and the MP5K, including the MP5K's first-raise animation.
+- Not done yet: Black Ops' own HUD (next).
 
 **New in 0.3.24**
 - Zombies have eyes again, glowing orange like in Black Ops:

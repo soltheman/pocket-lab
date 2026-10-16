@@ -1225,3 +1225,58 @@ pub fn prepare_fpv_compositions(inputs: PrepareFpvInputs, mut prepared: ResMut<P
         prepared.table = Some((owner, Arc::new(table)));
     }
 }
+
+/// BO1 characters' first-person arms. When the local player's `iw4l_viewmodel` (its
+/// `SetViewModel`) names arms its weapons are not yet held in, the weapon registry is
+/// swapped for one rebuilt around them; `prepare_fpv_compositions` then prepares the new
+/// rigs. A map restart brings the stock registry back, and the arms are applied again.
+pub fn apply_view_arms(
+    presented: Res<net::PresentedSnapshot>,
+    local: Res<net::LocalPresentClient>,
+    weapons: Option<Res<PreparedWeapons>>,
+    fpv_meshes: Option<Res<PreparedFpvMeshes>>,
+    xanims: Option<Res<PreparedXAnims>>,
+    mut applied: Local<Option<(String, usize)>>,
+    mut commands: Commands,
+) {
+    let (Some(weapons), Some(fpv_meshes), Some(xanims)) = (weapons, fpv_meshes, xanims) else {
+        return;
+    };
+    let Some(arms) = presented
+        .snapshot()
+        .and_then(|snapshot| snapshot.meta.for_client(local.0))
+        .and_then(|meta| {
+            meta.client_dvars
+                .iter()
+                .find(|(name, _)| name == "iw4l_viewmodel")
+                .map(|(_, value)| value.clone())
+        })
+    else {
+        return;
+    };
+    let current = Arc::as_ptr(&weapons.0) as usize;
+    if applied
+        .as_ref()
+        .is_some_and(|(name, registry)| *name == arms && *registry == current)
+    {
+        return;
+    }
+    match weapons
+        .0
+        .with_t5_view_arms(&fpv_meshes.0, &xanims.0, &arms)
+    {
+        Some(registry) => {
+            let registry = Arc::new(registry);
+            *applied = Some((arms.clone(), Arc::as_ptr(&registry) as usize));
+            commands.insert_resource(PreparedWeapons(registry));
+            diag::info!(Fpv, "fpv: first-person arms are now `{arms}`");
+        }
+        None => {
+            *applied = Some((arms.clone(), current));
+            diag::warn!(
+                Fpv,
+                "fpv: `{arms}` is not a first-person arms model; weapons keep their hands"
+            );
+        }
+    }
+}

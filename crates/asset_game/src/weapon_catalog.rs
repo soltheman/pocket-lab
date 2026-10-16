@@ -7868,6 +7868,47 @@ impl WeaponBuild {
 }
 
 impl WeaponRegistry {
+    /// This registry with BO1's first-person weapons held in `arms`, the model a player's
+    /// `SetViewModel` names (BO1 weapons only carry stand-in hands), and their rigs
+    /// rebuilt around them. `None` when `arms` is not a first-person arms skeleton.
+    pub fn with_t5_view_arms(
+        &self,
+        fpv: &crate::FpvMeshCatalog,
+        xanims: &crate::XAnimCatalog,
+        arms: &str,
+    ) -> Option<WeaponRegistry> {
+        let ns = crate::AssetNamespace::T5;
+        let index = fpv.index_by_name(ns, arms)?;
+        let skel = &fpv.get_at(index)?.skel;
+        if skel.pose.is_none() || !skel.bone_names.iter().any(|bone| bone == "tag_weapon") {
+            return None;
+        }
+        let dual = skel.bone_names.iter().any(|bone| bone == "tag_weapon1");
+        let hands = (
+            asset_model::FpvHands::FromKit {
+                namespace: ns,
+                name: arms.to_owned(),
+            },
+            crate::FpvMeshIndex::from_order(index),
+        );
+        let mut build = WeaponBuild {
+            registry: self.clone(),
+            combat_slots: Vec::new(),
+            family_tables: Vec::new(),
+        };
+        for row in &mut build.registry.rows {
+            if row.namespace != ns || row.fpv_hands[0].is_none() {
+                continue;
+            }
+            if row.secondary_gun_xmodel.is_some() && !dual {
+                continue;
+            }
+            row.fpv_hands = [Some(hands.clone()), Some(hands.clone())];
+        }
+        build.resolve_fpv_assemblies(fpv, xanims);
+        Some(build.registry)
+    }
+
     pub fn vehicle_compass(&self) -> impl Iterator<Item = (&str, &[String; 2], [i32; 2])> {
         self.vehicle_compass
             .iter()

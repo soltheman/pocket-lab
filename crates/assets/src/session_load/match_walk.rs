@@ -452,6 +452,17 @@ pub(super) async fn walk_prepared_match(
     fpv_meshes.set_map_namespace(map_namespace);
     weapons.resolve_fpv_mesh_edges(&fpv_meshes);
     weapons.resolve_fpv_hands(&fpv_meshes, &bodies);
+    if map_namespace == Some(asset_core::AssetNamespace::T5) {
+        let arms: Vec<&str> = fpv_meshes
+            .names_in(asset_core::AssetNamespace::T5)
+            .filter(|name| name.contains("arms") || name.contains("hands"))
+            .collect();
+        let pistol = weapons.resolve_index("m1911_zm").ok().flatten();
+        report.push(format!(
+            "T5 first-person hands: m1911_zm uses {:?}; arm models loaded: {arms:?}",
+            pistol.and_then(|id| weapons.fpv_hands_of(id, false).map(|(hands, _)| hands.clone())),
+        ));
+    }
     let assembly_started = std::time::Instant::now();
     let assemblies = weapons.resolve_fpv_assemblies(&fpv_meshes, &xanims);
     report.push(format!(

@@ -277,6 +277,18 @@ pub(crate) fn register(registry: &mut NativeRegistry) {
         player(world, receiver)?;
         Ok(Value::Int(0))
     });
+    // `player SetViewModel(model)`: the arms a BO1 character holds its weapons in
+    // (Kino gives each of its four characters their own). Sent to that player's client,
+    // whose first-person weapons are rebuilt around them.
+    registry.register(Method, "setviewmodel", |world, receiver, args| {
+        let client = player(world, receiver)?;
+        let model = text(arg(args, 0)?)?;
+        slot(world, client)?
+            .presented
+            .insert("setviewmodel", args.to_vec());
+        publish_client_dvar(world, client, "iw4l_viewmodel", model.to_string());
+        Ok(Value::Undefined)
+    });
     registry.register(Method, "setclientdvar", |world, receiver, args| {
         let client = player(world, receiver)?;
         let name: Arc<str> = string(args, 0)?.to_ascii_lowercase().into();
@@ -476,7 +488,6 @@ pub(crate) fn register(registry: &mut NativeRegistry) {
         "setweaponhudiconoverride",
         "pingplayer",
         "kc_regweaponforfxremoval",
-        "setviewmodel",
         "forceusehinton",
         "forceusehintoff",
         "predictstreampos",

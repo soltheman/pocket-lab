@@ -18,6 +18,7 @@ pub use anim::fpv_host::{
 };
 pub use anim::fpv_prepared::{
     FpvPreparationCensus, FpvRigSet, FpvWeaponSlot, FpvWeaponTable, FpvWeaponView, PreparedFpv,
+    apply_view_arms,
     prepare_fpv_compositions,
 };
 pub use anim::model_materials::{PreparedModelMaterials, prepare_model_materials};
