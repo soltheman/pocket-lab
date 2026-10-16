@@ -41,6 +41,7 @@ impl Plugin for HudPlugin {
         app.init_resource::<frame::ScreenEffectsView>()
             .init_resource::<HudImages>()
             .init_resource::<crate::use_hint::UseHintText>()
+            .init_resource::<crate::ammo_readout::AmmoReadout>()
             .init_resource::<HudPresentationGaps>()
             .init_resource::<ReticleAdsLatch>()
             .init_resource::<IrisLetterboxFill>()
@@ -121,6 +122,7 @@ impl Plugin for HudPlugin {
                             update_mantle_hint,
                             crate::breath_hint::update,
                             crate::use_hint::update,
+                            crate::ammo_readout::publish_ammo_readout,
                             update_hud_elems,
                             update_targetmap,
                             crate::menus::update_script_menus,

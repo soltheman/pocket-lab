@@ -56,3 +56,5 @@ pub use surface::Hud2dSurface;
 
 mod use_hint;
 pub use use_hint::UseHintText;
+mod ammo_readout;
+pub use ammo_readout::AmmoReadout;

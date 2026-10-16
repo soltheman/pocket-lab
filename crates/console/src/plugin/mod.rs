@@ -131,6 +131,7 @@ impl Plugin for ConsolePlugin {
                     crate::touch_controls::update_touch_overlay,
                     crate::zombies_hud::update_zombies_hud,
                     crate::zombies_hud::update_zombies_hint,
+                    crate::zombies_hud::place_zombies_hud,
                     crate::touch_controls::handle_touch_commands.after(ConsoleDispatchSet),
                 ),
             )
