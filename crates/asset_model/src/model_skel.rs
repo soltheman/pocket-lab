@@ -1063,6 +1063,23 @@ fn capture_model_skel_t5(
         }));
     }
 
+    // IW4L_MODEL_PROBE=<model name part>: each surface's material, technique set and size.
+    if std::env::var("IW4L_MODEL_PROBE").is_ok_and(|probe| name.contains(probe.as_str())) {
+        for (surface, material) in surface_materials.iter().enumerate() {
+            let authored = material
+                .zip(materials)
+                .and_then(|(index, catalog)| catalog.materials.get(index.get()));
+            diag::info!(
+                Zone,
+                "model probe {name} surface {surface}: material {:?} techset {:?} sort {:?} verts {:?} indices {:?}",
+                authored.map(|m| m.name.as_str()),
+                authored.map(|m| m.technique_set.as_str()),
+                authored.map(|m| m.sort_key),
+                surface_vertex_ranges.get(surface).map(|r| r.1),
+                surface_index_ranges.get(surface).map(|r| r.1),
+            );
+        }
+    }
     let (bone_collision, coll_surfs) = capture_collision_t5(stream, geometry).or_else(|| {
         diag::warn!(Zone, "T5 XModel {name}: malformed collision payload");
         None

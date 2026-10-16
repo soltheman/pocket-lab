@@ -1336,6 +1336,26 @@ fn prepare_camera_rows(
             Ok(()) => executor.execution(),
             Err(ref cause) => {
                 exec_refused = exec_refused.saturating_add(1);
+                // IW4L_MATERIAL_REFUSALS=1: each draw skipped here, once per material,
+                // technique and cause.
+                if std::env::var_os("IW4L_MATERIAL_REFUSALS").is_some()
+                    && let Some(view) = exec_view
+                {
+                    static SEEN: std::sync::Mutex<Option<std::collections::HashSet<String>>> =
+                        std::sync::Mutex::new(None);
+                    let name = render_material::resolve_sorted_material(
+                        view.catalog,
+                        render_material::MaterialDrawKey::new(item.key, item.material_rank)
+                            .with_material_id(item.material_id),
+                    )
+                    .map_or_else(|_| "?".to_owned(), |m| m.name.clone());
+                    let line = format!("{name} tech {tech:?}: {cause:?}");
+                    if let Ok(mut seen) = SEEN.lock()
+                        && seen.get_or_insert_default().insert(line.clone())
+                    {
+                        diag::warn!(World, "material exec refused: {line}");
+                    }
+                }
                 if census_on && let (Some(kind), _, _, _) = bsp_draw_source(&item.kind) {
                     let lane = bsp_kind_index(kind);
                     bsp_submit_refused_surfaces[lane] =

@@ -1276,6 +1276,7 @@ fn lod_culled(
 fn publish_script_model_bolt_poses(
     owners: Query<(&WorldScriptModelInstance, &Transform)>,
     persist: Res<ScriptModelDobjs>,
+    xanims: Option<Res<assets::PreparedXAnims>>,
     mut demand: ResMut<crate::anim::dobj_pose::ScriptModelBoltDemand>,
     mut dobj_poses: ResMut<crate::anim::dobj_pose::HostDObjPoseFrame>,
 ) {
@@ -1295,9 +1296,25 @@ fn publish_script_model_bolt_poses(
         else {
             continue;
         };
+        // The pose it is drawn in (its animation), so an effect on a walking zombie's
+        // eye sits on the eye; the bind pose when the request cannot be resolved.
+        let request = owner
+            .dobj_state
+            .resolve_request(|name| {
+                let xanims = &xanims.as_ref()?.0;
+                [
+                    asset_core::AssetNamespace::Iw4,
+                    asset_core::AssetNamespace::T5,
+                    asset_core::AssetNamespace::Iw5,
+                    asset_core::AssetNamespace::T6,
+                ]
+                .into_iter()
+                .find_map(|namespace| xanims.clip(namespace, name))
+            })
+            .unwrap_or_else(|_| xmodel_runtime::DObjPoseRequest::bind_pose());
         let Ok(local) = xmodel_runtime::pose_dobj_with_controller(
             &slot.dobj,
-            &xmodel_runtime::DObjPoseRequest::bind_pose(),
+            &request,
             Mat4::IDENTITY,
             |_, _, _| {},
         ) else {

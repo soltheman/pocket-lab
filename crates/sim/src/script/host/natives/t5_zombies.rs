@@ -30,6 +30,50 @@ fn anim_name(args: &[Value], index: usize) -> Result<String, String> {
 
 /// The builtins implemented so far; `register` stubs the rest.
 fn register_implemented(registry: &mut NativeRegistry) {
+    // `zombie haseyes(on)` / `zombie haseyes()`: BO1's spawn script turns a zombie's eye
+    // glow on (and off when it dies or loses its head); its client script then plays
+    // `level._effect["eye_glow"]` on the left eyeball, as this does.
+    registry.register(Method, "haseyes", |world, receiver, args| {
+        let id = super::engine::entity_id(world, receiver)?;
+        let Some(on) = args.first() else {
+            let on = world
+                .resource_mut::<Runtime>()
+                .object_field(id, "iw4l_has_eyes");
+            return Ok(Value::Int(i32::from(on == Value::Int(1))));
+        };
+        let on = !matches!(on, Value::Undefined | Value::Int(0));
+        let fx = {
+            let mut runtime = world.resource_mut::<Runtime>();
+            let was = runtime.object_field(id, "iw4l_has_eyes") == Value::Int(1);
+            if was == on {
+                return Ok(Value::Undefined);
+            }
+            runtime.set_object_field(id, "iw4l_has_eyes", Value::Int(i32::from(on)));
+            match runtime.object_field(0, "_effect") {
+                Value::Array(effects) => runtime
+                    .arrays
+                    .get(&effects)
+                    .and_then(|effects| {
+                        effects.get(&crate::script::value::ArrayKey::String("eye_glow".into()))
+                    })
+                    .cloned(),
+                _ => None,
+            }
+        };
+        let Some(fx) = fx else {
+            return Ok(Value::Undefined);
+        };
+        let kind = if on {
+            entity_iw4::EntityEventKind::PLAY_FX_ON_TAG
+        } else {
+            entity_iw4::EntityEventKind::STOP_FX_ON_TAG
+        };
+        super::engine::fx_on_tag(
+            world,
+            &[fx, receiver.clone(), Value::string("J_Eyeball_LE")],
+            kind,
+        )
+    });
     // Engine state BO1 sets that nothing here shows yet (rope collision, water, network
     // stats, threat groups, the teleporter's "transported" screen state, a wall gun's
     // hidden parts, AI event listeners). Accepted, so the scripts calling them carry on
@@ -414,7 +458,6 @@ pub(crate) fn register(registry: &mut NativeRegistry) {
         Method "givegamerpicture",
         Function "groundtrace",
         Function "hascollectible",
-        Method "haseyes",
         Method "hidepart",
         Method "hideviewmodel",
         Function "iscoopepd",

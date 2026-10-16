@@ -538,6 +538,28 @@ pub fn produce_world_view_family(sources: &mut RuntimeCodeSources, world_view: M
     );
 }
 
+/// The view matrix family (code constants 0x4c..0x4f), laid out as the world-view family
+/// is. BO1's eyeball shader reads the inverse transpose; without it every zombie eye was
+/// refused and the head showed its empty sockets.
+pub fn produce_view_family(sources: &mut RuntimeCodeSources, view: Mat4) {
+    let inverse = view.inverse();
+    sources.set_constant_rows(CODE_VIEW_MATRIX, &code_transpose_matrix_row4(view.transpose()));
+    sources.set_constant_rows(
+        CODE_INVERSE_VIEW_MATRIX,
+        &code_transpose_matrix_row4(inverse.transpose()),
+    );
+    sources.set_constant_rows(CODE_TRANSPOSE_VIEW_MATRIX, &code_transpose_matrix_row4(view));
+    sources.set_constant_rows(
+        CODE_INVERSE_TRANSPOSE_VIEW_MATRIX,
+        &code_transpose_matrix_row4(inverse),
+    );
+}
+
+pub const CODE_VIEW_MATRIX: u16 = 0x4c;
+pub const CODE_INVERSE_VIEW_MATRIX: u16 = 0x4d;
+pub const CODE_TRANSPOSE_VIEW_MATRIX: u16 = 0x4e;
+pub const CODE_INVERSE_TRANSPOSE_VIEW_MATRIX: u16 = 0x4f;
+
 pub fn produce_material_color_cmdbuf_init(sources: &mut RuntimeCodeSources) {
     sources.set_constant_rows(
         CODE_MATERIAL_COLOR,
@@ -583,6 +605,7 @@ pub fn produce_top_pair_command_context(
         &code_transpose_matrix_row4(clip_from_world),
     );
     produce_world_view_family(sources, view_from_world);
+    produce_view_family(sources, view_from_world * Mat4::from_translation(view_origin));
     produce_material_color_cmdbuf_init(sources);
     produce_depth_from_clip(sources, false);
     produce_leftover_iw5_code_consts(sources, view_origin);

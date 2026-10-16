@@ -621,6 +621,17 @@ impl FxCatalog {
             return;
         }
 
+        // IW4L_FX_PROBE=<effect name part>: each element's first color sample as stored.
+        if std::env::var("IW4L_FX_PROBE").is_ok_and(|probe| name.contains(probe.as_str())) {
+            for (i, elem) in elems.iter().enumerate() {
+                diag::info!(
+                    World,
+                    "fx probe {name} elem {i}: first color sample bytes {:?} visuals {:?}",
+                    elem.vis_samples.get(..4),
+                    elem.visuals
+                );
+            }
+        }
         self.last_captured = Some(name.to_owned());
         let namespace = self.capture_ns;
         self.insert_owned(OwnedFxEffectDef {

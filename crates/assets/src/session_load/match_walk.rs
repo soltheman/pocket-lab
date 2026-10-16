@@ -233,6 +233,25 @@ pub(super) async fn walk_prepared_match(
     } = loaded;
     report.append(&mut common_report);
     report.append(&mut language_report);
+    // IW4L_MATERIAL_PROBE=<material name part>: what the map's materials route to.
+    if let Ok(probe) = std::env::var("IW4L_MATERIAL_PROBE") {
+        for material in materials
+            .materials
+            .iter()
+            .filter(|m| m.name.as_str().contains(probe.as_str()))
+        {
+            diag::info!(
+                World,
+                "material probe {}: techset {} sort {} route {:?} slots {:?} passes {:?}",
+                material.name.as_str(),
+                material.technique_set.as_str(),
+                material.sort_key,
+                material.route,
+                material.technique_table.as_ref().map(|t| format!("{:#x}", t.slots)),
+                material.technique_table.as_ref().map(|t| t.pass_count_by_slot),
+            );
+        }
+    }
 
     if facts.team_settings.allies.is_none() && facts.team_settings.axis.is_none() {
         if let Some(name) = facts.t5_teamset.as_ref() {

@@ -677,6 +677,20 @@ fn compact_product_draws(
         let mask = match super::draw_code_sampler_mask(catalog, prepared, material_key, draw_tech) {
             Ok(mask) => mask,
             Err(cause) => {
+                // IW4L_MATERIAL_REFUSALS=1: each draw dropped here, once per material,
+                // technique and cause (nothing else says why a surface is missing).
+                if std::env::var_os("IW4L_MATERIAL_REFUSALS").is_some() {
+                    static SEEN: std::sync::Mutex<Option<std::collections::HashSet<String>>> =
+                        std::sync::Mutex::new(None);
+                    let name = render_material::resolve_sorted_material(catalog, material_key)
+                        .map_or_else(|_| "?".to_owned(), |m| m.name.clone());
+                    let line = format!("{name} tech {draw_tech:?}: {cause:?}");
+                    if let Ok(mut seen) = SEEN.lock()
+                        && seen.get_or_insert_default().insert(line.clone())
+                    {
+                        diag::warn!(World, "material refused: {line}");
+                    }
+                }
                 product
                     .material_refusals
                     .push(render_frame::FrameMaterialRefusal {

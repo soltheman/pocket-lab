@@ -1,6 +1,12 @@
-# Pocket Lab 0.3.23
+# Pocket Lab 0.3.24
 
 Smoother on the phone, every touch button does its job, and co-op over Wi-Fi.
+
+**New in 0.3.24**
+- Zombies have eyes again, glowing orange like in Black Ops:
+  - **No more see-through heads.** The eyeballs are in the zombie head models, but their shader needs a view matrix the renderer never supplied, so every eye was skipped and you saw through the sockets. It's supplied now.
+  - **The glow.** Black Ops lights each zombie's eyes when it spawns and turns them off when it dies or loses its head. The game ignored that, and the eye bone lives on the head, which is a separate model, so the effect also had nowhere to attach. Effects now find bones on attached models, and they follow the animated pose instead of a stiff default pose, so the glow stays on the eyes as the zombie moves.
+  - Checked on PC with close-up screenshots of zombies attacking: solid eyes, orange glow on them. A 3-minute zombie test is unchanged: none stuck.
 
 **New in 0.3.23**
 - The starting pistol no longer shoots zombies' limbs off. Black Ops never takes a limb off with the M1911 and checks that by its weapon name, `m1911_zm`. This game reported every Black Ops weapon with a multiplayer `_mp` ending (`m1911_zm_mp`), so the check never matched. Weapons now go by their real names, which also fixes any other Black Ops script that compares weapon names. Checked on PC with a test player shooting zombies:

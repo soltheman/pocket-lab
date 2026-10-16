@@ -1291,6 +1291,26 @@ pub(crate) fn advance_scheduler(world: &mut World) {
     }
     world.resource_mut::<Runtime>().last_tick = Some(tick);
     let now = i64::from(tick.0) * i64::from(crate::MATCH_TICK_MS);
+    // Every minute: the engine calls the scripts made that this runtime only stands in
+    // for (an error, or a "no" to a yes/no question), most called first.
+    if now > 0 && now % 60_000 < i64::from(crate::MATCH_TICK_MS) {
+        let runtime = world.resource::<Runtime>();
+        if !runtime.unsupported.is_empty() {
+            let mut calls: Vec<_> = runtime.unsupported.iter().collect();
+            calls.sort_by(|a, b| b.1.cmp(a.1).then(a.0.cmp(b.0)));
+            let list: Vec<String> = calls
+                .iter()
+                .map(|(name, count)| format!("{name}x{count}"))
+                .collect();
+            diag::info!(
+                Sim,
+                "unsupported builtins after {}s ({}): {}",
+                now / 1000,
+                list.len(),
+                list.join(" ")
+            );
+        }
+    }
     super::host::mechanics::deliver_finished(world);
     {
         let mut runtime = world.resource_mut::<Runtime>();

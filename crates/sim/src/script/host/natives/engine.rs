@@ -492,7 +492,7 @@ fn name(world: &World, id: i32) -> Result<String, String> {
         .ok_or_else(|| format!("effect id {id} was not loaded"))
 }
 
-fn fx_on_tag(
+pub(crate) fn fx_on_tag(
     world: &mut World,
     args: &[Value],
     kind: entity_iw4::EntityEventKind,
@@ -511,9 +511,43 @@ fn fx_on_tag(
             .find(|row| row.owner.script_model() == Some(id))?
             .dobj
             .as_ref()
-            .map(|dobj| (dobj.tag_bone(&tag), dobj.tag_world_pose(&tag)))
+            .map(|dobj| {
+                let body_bones = dobj.capability.as_ref().map(|c| c.pose.bone_names.len());
+                (dobj.tag_bone(&tag), dobj.tag_world_pose(&tag), body_bones)
+            })
     });
-    let (bone, pose) = dobj.unwrap_or((None, None));
+    let (mut bone, pose, body_bones) = dobj.unwrap_or((None, None, None));
+    // A tag on an attached model (a BO1 zombie's eyes are on its head): the client's
+    // composed skeleton holds the body's bones, then each attachment's in order.
+    if bone.is_none()
+        && let Some(mut base) = body_bones
+    {
+        let attachments = runtime(world)
+            .entity(&entity)
+            .map(|(_, e)| e.attachments.clone())
+            .unwrap_or_default();
+        let frame = crate::frame::FrameWorld::from_world(world);
+        for (model, _) in &attachments {
+            let Some(capability) = frame.model_capability(model).flatten() else {
+                break;
+            };
+            let names = &capability.pose.bone_names;
+            if let Some(index) = names.iter().position(|n| n.eq_ignore_ascii_case(&tag)) {
+                bone = Some(base + index);
+                break;
+            }
+            base += names.len();
+        }
+        drop(frame);
+    }
+    let mut frame = super::super::presence::settled(world);
+    if bone.is_none() && std::env::var_os("IW4L_ACTOR_DEBUG").is_some() {
+        diag::info!(
+            Sim,
+            "fx on tag: {name} has no tag {tag:?} on entity {number:?} (dobj {}); played at its origin",
+            dobj.is_some()
+        );
+    }
     let (origin, direction) = pose.unwrap_or(fallback);
     let index = frame.effect_name_index(&name);
     match (number, bone.and_then(|bone| i32::try_from(bone).ok())) {
