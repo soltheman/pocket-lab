@@ -1145,6 +1145,9 @@ pub fn sample_client_input(
 }
 
 const AIM_AUTOMELEE_RANGE: f32 = 128.0;
+/// BO1's `aim_automelee_range` (90, read from its executable): how far a knife lunges onto
+/// a zombie; nearer than the knife's own reach (64) it just swings.
+const AIM_AUTOMELEE_RANGE_AI: f32 = 90.0;
 const MELEE_REGION_TAN_X: f32 = 0.849 * 0.5;
 const MELEE_REGION_TAN_Y: f32 = 0.478 * 0.5;
 fn melee_charge_target(
@@ -1178,16 +1181,22 @@ fn melee_charge_target(
                         && (local_team == 0 || meta.client_state_team != local_team)
                 })
         })
-        .map(|(_, other)| other.origin)
-        .chain(snapshot.meta.actor_targets.iter().copied());
-    for origin in enemies {
+        .map(|(_, other)| (other.origin, AIM_AUTOMELEE_RANGE))
+        .chain(
+            snapshot
+                .meta
+                .actor_targets
+                .iter()
+                .map(|at| (*at, AIM_AUTOMELEE_RANGE_AI)),
+        );
+    for (origin, range) in enemies {
         let other = OriginOnly { origin };
         let delta = [
             other.origin[0] - ps.origin[0],
             other.origin[1] - ps.origin[1],
             other.origin[2] - ps.origin[2],
         ];
-        if dot(delta, delta) > AIM_AUTOMELEE_RANGE * AIM_AUTOMELEE_RANGE {
+        if dot(delta, delta) > range * range {
             continue;
         }
         let center = [other.origin[0], other.origin[1], other.origin[2] + 36.0];
