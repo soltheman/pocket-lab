@@ -29,7 +29,7 @@ pub fn walk_move<C: CollisionBackend>(
     collision: &C,
 ) {
     if (ps.pm_flags & pm_flags::JUMPING) != 0 {
-        prone_velocity_scale(ps);
+        prone_velocity_scale(ps, pml.jump_slowdown);
     }
 
     let gate = JumpCheckContext {
@@ -88,7 +88,7 @@ pub fn walk_move<C: CollisionBackend>(
     }
 }
 
-fn prone_velocity_scale(ps: &mut PlayerState) {
+fn prone_velocity_scale(ps: &mut PlayerState, slowdown: bool) {
     let mut scale = 1.0_f32;
     if ps.pm_time < 0x709 {
         if ps.pm_time == 0 {
@@ -106,7 +106,7 @@ fn prone_velocity_scale(ps: &mut PlayerState) {
         scale = 0.65;
     }
 
-    if (ps.pm_flags & 0x400000) == 0 {
+    if slowdown && (ps.pm_flags & 0x400000) == 0 {
         ps.velocity[0] *= scale;
         ps.velocity[1] *= scale;
         ps.velocity[2] *= scale;
@@ -157,4 +157,28 @@ fn clip_to_ground_plane(vector: &mut [f32; 3], normal: &[u32]) {
         f32::from_bits(normal[2]),
     ];
     crate::project_velocity(vector, &normal);
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn landed() -> PlayerState {
+        let mut ps = PlayerState::ZERO;
+        ps.pm_flags = pm_flags::JUMPING;
+        ps.velocity = [200.0, 0.0, 0.0];
+        ps
+    }
+
+    #[test]
+    fn landing_slows_only_with_jump_slowdown() {
+        let mut mw2 = landed();
+        prone_velocity_scale(&mut mw2, true);
+        assert_eq!(mw2.velocity[0], 100.0);
+
+        let mut bo1 = landed();
+        prone_velocity_scale(&mut bo1, false);
+        assert_eq!(bo1.velocity[0], 200.0);
+        assert_eq!(bo1.pm_time, mw2.pm_time);
+    }
 }

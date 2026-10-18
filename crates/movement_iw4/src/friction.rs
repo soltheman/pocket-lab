@@ -21,7 +21,7 @@ pub fn friction(ps: &mut PlayerState, pml: &Pml) {
             if (flags & pm_flags::TIME_HARDLANDING) != 0 {
                 control *= 2.0;
             } else if (flags & pm_flags::JUMPING) != 0 {
-                control *= walking_scale(ps);
+                control *= walking_scale(ps, pml.jump_slowdown);
             }
 
             drop = control * 5.5;
@@ -45,9 +45,9 @@ pub fn friction(ps: &mut PlayerState, pml: &Pml) {
     ps.velocity[2] = scale * ps.velocity[2];
 }
 
-fn walking_scale(ps: &mut PlayerState) -> f32 {
+fn walking_scale(ps: &mut PlayerState, slowdown: bool) -> f32 {
     if ps.pm_time < 0x709 {
-        if (ps.pm_flags & 0x400000) == 0 {
+        if slowdown && (ps.pm_flags & 0x400000) == 0 {
             if ps.pm_time > 0x6a3 {
                 return 2.5;
             }

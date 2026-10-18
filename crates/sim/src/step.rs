@@ -387,6 +387,8 @@ fn run_players_system(ecs: &mut World) {
                     .and_then(|m| m.shellshock.as_ref())
                     .is_some_and(|shock| shock.movement),
             );
+            // BO1 ships jump_slowdownEnable 0: no landing slowdown, no weaker repeat jump.
+            context.walk.jump.slowdown = !crate::script::is_t5(world.ecs());
             context.view_angles.unclamped_pitch_bit =
                 ps.link_flags & playerstate_iw4::LINK_FLAGS_WEAPON_VIEW_ONLY != 0;
             crate::script::player_commands(world.ecs(), id.0, cmd.buttons, old_buttons);
@@ -2460,6 +2462,7 @@ fn pmove_context(
                 jump_height: 39.0,
                 dive: false,
                 crouch_jump_scale: 1.0,
+                slowdown: true,
                 jump_ladder_push_vel: 128.0,
             },
             air,

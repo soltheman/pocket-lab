@@ -15,6 +15,8 @@ pub struct Pml {
     pub jump_animations: [Option<(crate::JumpAnimation, bool)>; 4],
     pub mantle_movetype: Option<u8>,
     pub landing_animation: bool,
+    /// jump_slowdownEnable: MW2 slows a landing and the next jump; BO1 ships with it off.
+    pub jump_slowdown: bool,
 }
 
 impl Pml {

@@ -93,6 +93,7 @@ pub fn pmove<C: CollisionBackend, L: MantleXAnimLength, R: MantleRootDelta>(
         jump_animations: [None; 4],
         mantle_movetype: None,
         landing_animation: false,
+        jump_slowdown: context.walk.jump.slowdown,
     };
 
     update_view_angles(ps, cmd, context.view_angles);

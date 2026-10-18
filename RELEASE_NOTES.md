@@ -1,6 +1,17 @@
-# Bo1ZPocket 0.3.34
+# Bo1ZPocket 0.3.35
 
 Smoother on the phone, every touch button does its job, and co-op over Wi-Fi.
+
+**New in 0.3.35**
+
+Player movement is checked against Black Ops' own movement settings, read from the game's executable.
+- **Already right, now confirmed:** run speed, jump height, step height, friction, stopping, backpedal and strafe speed, and sprint (speed, length, recharge) all match Black Ops.
+- **Jumping is now Black Ops' jumping:**
+  - **Before:** you slowed down when you landed, and a jump right after landing was lower. That's Modern Warfare 2's jump slowdown.
+  - **Now:** Black Ops ships with jump slowdown turned off, so landing keeps your speed and back-to-back jumps are full height.
+  - Modern Warfare 2 multiplayer keeps its own behaviour.
+- **Knife lunge distance fixed:** the lunge onto zombies now starts from Black Ops' zombie lunge range (90 units) instead of Modern Warfare 2's 128. So you lunge onto a zombie between 64 and 90 units away and just slash anything closer. Backpedalling doesn't stop the lunge, same as Black Ops.
+- **Checked on PC:** four quick jumps in a row all leave the ground at the same speed, and lunges trigger between 64 and 90 units. Not tried on an iPhone yet.
 
 **New in 0.3.34**
 
@@ -20,8 +31,6 @@ The guns are checked against Black Ops' own weapon data, field by field from its
   - Co-op guests lunge onto zombies too.
 - **Checked on PC:** the MP40's numbers read back right, sway reads (max 30°), the penetration table loads, and knifing toward zombies coming in lunges from 100–128 units. Not tried on an iPhone yet.
 - **Not checked yet:** how Black Ops' engine turns recoil numbers into movement (ours is Modern Warfare 2's code reading Black Ops' numbers), and the wonder weapons one by one.
-
-**New in 0.3.33**
 
 **New in 0.3.33**
 

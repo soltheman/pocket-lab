@@ -375,6 +375,7 @@ pub(crate) fn advance_weapon_command(
                     jump_animations: [None; 4],
                     mantle_movetype: None,
                     landing_animation: false,
+                    jump_slowdown: true,
                 };
                 is_in_air(&ps, &pml)
             },

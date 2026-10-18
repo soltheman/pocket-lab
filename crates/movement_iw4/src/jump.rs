@@ -61,12 +61,14 @@ pub struct JumpLaunchContext {
 
     pub crouch_jump_scale: f32,
 
+    pub slowdown: bool,
+
     pub jump_ladder_push_vel: f32,
 }
 
 pub fn start(ps: &mut PlayerState, pml: &mut Pml, cmd: &UserCmd, context: JumpLaunchContext) {
     let mut energy = (ps.gravity as f32) * (context.jump_height + context.jump_height);
-    if (ps.pm_flags & pm_flags::JUMPING) != 0 && ps.pm_time <= 0x708 && !context.dive {
+    if (ps.pm_flags & pm_flags::JUMPING) != 0 && ps.pm_time <= 0x708 && !context.dive && context.slowdown {
         energy /= context.crouch_jump_scale;
     }
 
