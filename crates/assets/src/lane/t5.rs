@@ -702,7 +702,15 @@ impl ZoneLane for T5Lane {
             "common_mp T5 teamset scripts: {} (_teamset_*.gsc icons)",
             sink.teamsets.len()
         ));
+        // BO1's bullet penetration depths ride in code_post_gfx, beside this zone.
+        let pen_table = asset_game::load_t5_pen_table(&path.with_file_name("code_post_gfx.ff"));
+        report.push(format!(
+            "T5 bullet_penetration_sp: {}",
+            if pen_table.is_some() { "loaded" } else { "missing (bullets go through nothing)" }
+        ));
         CommonCensus {
+            pen_table_loaded: pen_table.is_some(),
+            pen_table: pen_table.unwrap_or_default(),
             pending_images,
             weapons,
             cac_tables: sink.stats_tables.into_values().collect(),

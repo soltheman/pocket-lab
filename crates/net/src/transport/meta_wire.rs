@@ -820,6 +820,7 @@ pub fn encode_snapshot_meta_body(
     mark = out.len();
     encode_item_ammo(out, &meta.item_ammo);
     encode_item_pickups(out, &meta.item_pickups);
+    encode_actor_targets(out, &meta.actor_targets);
     sizes.item_tables = section_span(out, mark);
     mark = out.len();
     encode_area_entities(out, meta.area_entities.as_ref());
@@ -892,6 +893,7 @@ pub fn decode_snapshot_meta(
     remaining_after[7] = input.remaining();
     let item_ammo = decode_item_ammo(input)?;
     let item_pickups = decode_item_pickups(input)?;
+    let actor_targets = decode_actor_targets(input)?;
     remaining_after[8] = input.remaining();
     let area_entities = decode_area_entities(input)?;
     remaining_after[9] = input.remaining();
@@ -927,6 +929,7 @@ pub fn decode_snapshot_meta(
             script_movers,
             entity_kernel,
             corpses,
+            actor_targets,
             item_ammo,
             item_pickups,
         },
@@ -2882,6 +2885,26 @@ fn decode_item_ammo(input: &mut WireReader<'_>) -> Result<Vec<DroppedItemAmmo>, 
             stock: input.get_i32()?,
             scavenger: input.get_i32()?,
         });
+    }
+    Ok(rows)
+}
+
+/// Where the living zombies stand: the targets of a player's knife lunge.
+fn encode_actor_targets(out: &mut WireWriter, rows: &[[f32; 3]]) {
+    let rows = &rows[..rows.len().min(u16::MAX as usize)];
+    out.put_u16(rows.len() as u16);
+    for at in rows {
+        for value in at {
+            out.put_f32(*value);
+        }
+    }
+}
+
+fn decode_actor_targets(input: &mut WireReader<'_>) -> Result<Vec<[f32; 3]>, WireError> {
+    let count = input.get_u16()? as usize;
+    let mut rows = Vec::with_capacity(count.min(64));
+    for _ in 0..count {
+        rows.push([input.get_f32()?, input.get_f32()?, input.get_f32()?]);
     }
     Ok(rows)
 }

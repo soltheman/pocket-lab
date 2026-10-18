@@ -3542,6 +3542,58 @@ fn capture_t5_body_facts(
     };
     facts.inherits_perks = leftover_t5_inherits_host_perks();
     facts.kick = leftover_t5_kick(stream, geometry);
+    // The gun's feel in the hands, which BO1 keeps in the weapon def too (offsets laid
+    // out from its WeaponDef and checked against the fields already read around them):
+    // sway, how it sits and moves with the player's stance and speed, ADS bob, and how
+    // its bullets go through things.
+    let f = |off: usize| f32_at_t5(stream, body, off);
+    let v3 = |off: usize| [f(off), f(off + 4), f(off + 8)];
+    facts.penetrate_type = i32_at_t5(stream, body, T5_WEAPON_DEF_PENETRATE_TYPE_OFF);
+    // BO1 has no multiplier (IW4 added it): the type alone sets how deep a bullet goes.
+    facts.penetrate_multiplier = 1.0;
+    facts.movement = WeaponMovementOfsInputs {
+        stand_move: v3(0x1b8),
+        stand_rot: v3(0x1c4),
+        strafe_move: v3(0x2cc),
+        strafe_rot: v3(0x2d8),
+        ducked_move: v3(0x1dc),
+        ducked_rot: v3(0x29c),
+        prone_move: v3(0x2b4),
+        prone_rot: v3(0x2c0),
+        pos_move_rate: f(0x2e4),
+        pos_prone_move_rate: f(0x2e8),
+        stand_move_min_speed: f(0x2ec),
+        ducked_move_min_speed: f(0x2f0),
+        prone_move_min_speed: f(0x2f4),
+        pos_rot_rate: f(0x2f8),
+        pos_prone_rot_rate: f(0x2fc),
+    };
+    facts.ducked_ofs = v3(0x1d0);
+    facts.prone_ofs = v3(0x2a8);
+    facts.ads_bob_factor = f(0x4c4);
+    facts.ads_view_bob_mult = f(0x4c8);
+    facts.sway = WeaponSwayFacts {
+        sway_max_angle: f(0x520),
+        sway_lerp_speed: f(0x524),
+        sway_pitch_scale: f(0x528),
+        sway_yaw_scale: f(0x52c),
+        sway_horiz_scale: f(0x530),
+        sway_vert_scale: f(0x534),
+        sway_shell_shock_scale: f(0x538),
+        ads_sway_max_angle: f(0x53c),
+        ads_sway_lerp_speed: f(0x540),
+        ads_sway_pitch_scale: f(0x544),
+        ads_sway_yaw_scale: f(0x548),
+        ads_sway_horiz_scale: geometry.variant.map_or(0.0, |v| f32_at_t5(stream, v, 0x54)),
+        ads_sway_vert_scale: geometry.variant.map_or(0.0, |v| f32_at_t5(stream, v, 0x58)),
+    };
+    // IW4L_WEAPON_FACTS=<name part>: everything read for the weapon, to hold against BO1.
+    if let Ok(probe) = std::env::var("IW4L_WEAPON_FACTS")
+        && let Some(name) = geometry.name.and_then(|p| stream.cstr(p).ok())
+        && name.contains(probe.as_str())
+    {
+        diag::info!(Zone, "weapon facts {name}: {facts:?}");
+    }
     facts
 }
 
@@ -9909,3 +9961,6 @@ pub struct FpvAssemblyCensus {
     pub refused: usize,
     pub clip_tables: usize,
 }
+
+/// BO1's `WeaponDef.penetrateType` (none, small, medium, large).
+const T5_WEAPON_DEF_PENETRATE_TYPE_OFF: usize = 0x24;

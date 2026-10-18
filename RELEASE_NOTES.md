@@ -1,6 +1,27 @@
-# Bo1ZPocket 0.3.33
+# Bo1ZPocket 0.3.34
 
 Smoother on the phone, every touch button does its job, and co-op over Wi-Fi.
+
+**New in 0.3.34**
+
+The guns are checked against Black Ops' own weapon data, field by field from its weapon definition layout.
+- **Already right, now confirmed:** damage and range, fire rate, clip size, reload times, hip spread, aim zoom and speed, and recoil (view and gun kick) were all read correctly.
+- **Gun sway and bob were never loaded, now they are:**
+  - **Sway:** the gun lags a little behind your turns.
+  - **Aim bob:** the gun bobs while you aim and move.
+  - **Movement offsets:** how the gun sits as you move.
+
+  Before, all of these were zero, so the gun felt stiff in your hands.
+- **Bullets go through things again:**
+  - Each gun's Black Ops penetration type (small, medium or large) is now read.
+  - Black Ops Zombies' own penetration table (from the game's single-player data) is loaded.
+  - Before, bullets went through nothing, not even another zombie.
+- **Knife lunge onto zombies:** knife a zombie that's just out of reach (about 100–128 units) and you lunge onto it, as in Black Ops. Before, the lunge only went for players.
+  - Co-op guests lunge onto zombies too.
+- **Checked on PC:** the MP40's numbers read back right, sway reads (max 30°), the penetration table loads, and knifing toward zombies coming in lunges from 100–128 units. Not tried on an iPhone yet.
+- **Not checked yet:** how Black Ops' engine turns recoil numbers into movement (ours is Modern Warfare 2's code reading Black Ops' numbers), and the wonder weapons one by one.
+
+**New in 0.3.33**
 
 **New in 0.3.33**
 

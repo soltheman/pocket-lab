@@ -2520,3 +2520,21 @@ mod hitloc_tests {
         assert_eq!(name("j_hip_ri"), "right_leg_upper");
     }
 }
+
+/// Where every living zombie stands, for the players' melee lunge (BO1 lunges a knife
+/// onto an AI just out of reach as it does onto a player); the client picks from these.
+pub(crate) fn publish_melee_targets(world: &mut World) {
+    let at: Vec<[f32; 3]> = {
+        let runtime = world.resource::<Runtime>();
+        runtime
+            .actors
+            .iter()
+            .filter(|(_, actor)| !actor.is_dead())
+            .filter_map(|(object, _)| match runtime.peek_field(*object, "origin") {
+                Some(Value::Vector(v)) => Some(*v),
+                _ => None,
+            })
+            .collect()
+    };
+    FrameWorld::from_world(world).set_actor_melee_targets(at);
+}

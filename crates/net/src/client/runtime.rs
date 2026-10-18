@@ -1165,19 +1165,23 @@ fn melee_charge_target(
     let (forward, right, up) = math_iw4::angle_vectors(ps.viewangles);
     let dot = |a: [f32; 3], b: [f32; 3]| a[0] * b[0] + a[1] * b[1] + a[2] * b[2];
     let mut best: Option<(f32, [f32; 3])> = None;
-    for (id, other) in &snapshot.players {
-        if *id == local || other.pm_type > 1 {
-            continue;
-        }
-        let Some(meta) = snapshot.meta.for_client(*id) else {
-            continue;
-        };
-        if meta.lifecycle != sim::ClientLifecycle::Alive
-            || meta.client_state_team == 3
-            || (local_team != 0 && meta.client_state_team == local_team)
-        {
-            continue;
-        }
+    // Enemy players, and (BO1 zombies) the living AI: BO1 lunges onto either.
+    let enemies = snapshot
+        .players
+        .iter()
+        .filter(|(id, other)| {
+            *id != local
+                && other.pm_type <= 1
+                && snapshot.meta.for_client(*id).is_some_and(|meta| {
+                    meta.lifecycle == sim::ClientLifecycle::Alive
+                        && meta.client_state_team != 3
+                        && (local_team == 0 || meta.client_state_team != local_team)
+                })
+        })
+        .map(|(_, other)| other.origin)
+        .chain(snapshot.meta.actor_targets.iter().copied());
+    for origin in enemies {
+        let other = OriginOnly { origin };
         let delta = [
             other.origin[0] - ps.origin[0],
             other.origin[1] - ps.origin[1],
@@ -1213,6 +1217,9 @@ fn melee_charge_target(
     let dist = dot(delta, delta).sqrt();
     if dist <= movement_iw4::MELEE_CHARGE_PLAYER_MELEE_RANGE_DEFAULT {
         return None;
+    }
+    if std::env::var_os("IW4L_LUNGE_DEBUG").is_some() {
+        diag::info!(Net, "lunge: onto a target {dist:.0} units away");
     }
     Some((math_iw4::vec_to_yaw(delta[0], delta[1]), dist as u8))
 }
@@ -2101,4 +2108,9 @@ pub fn register_client_runtime(app: &mut App) {
 
 pub fn register_listen_prediction_arm(app: &mut App) {
     app.add_systems(Update, arm_listen_prediction.in_set(ClientSet::Load));
+}
+
+/// A melee lunge target's feet (a player's or a zombie's).
+struct OriginOnly {
+    origin: [f32; 3],
 }

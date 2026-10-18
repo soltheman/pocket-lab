@@ -665,6 +665,8 @@ pub struct SimState {
     anim_event_seed: u32,
 
     corpses: crate::PlayerCorpsePool,
+    /// Where the living AI (zombies) stand this tick: what a player's melee lunges at.
+    actor_melee_targets: Vec<[f32; 3]>,
 
     entity_kernel: crate::gentity::EntityKernel,
 
@@ -757,6 +759,7 @@ impl Default for SimState {
             anim_command_buttons: HashMap::new(),
             anim_event_seed: 1,
             corpses: crate::PlayerCorpsePool::default(),
+            actor_melee_targets: Vec::new(),
             entity_kernel: crate::gentity::EntityKernel::default(),
             dobj_anim_mats: HashMap::new(),
             kernel_phases: Vec::new(),
@@ -3026,6 +3029,10 @@ impl SimState {
         &mut self.corpses
     }
 
+    pub(crate) fn set_actor_melee_targets(&mut self, at: Vec<[f32; 3]>) {
+        self.actor_melee_targets = at;
+    }
+
     pub(crate) fn script_model_anim(&self, name: &str) -> Option<crate::ScriptModelPlayAnim> {
         self.content
             .data
@@ -3256,6 +3263,7 @@ impl SimState {
                 script_movers,
                 entity_kernel: self.entity_kernel.to_snapshot(),
                 corpses: self.corpses,
+                actor_targets: self.actor_melee_targets.clone(),
                 item_ammo,
                 item_pickups: self.item_pickups.clone(),
             },
