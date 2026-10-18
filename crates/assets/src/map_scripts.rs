@@ -43,6 +43,8 @@ pub(crate) const ZOMBIES_HUD: (&str, &str) = (
         level thread log_player_volumes();
     if (getdvar("iw4l_zm_watch") == "revive")
         level thread revive_test();
+    if (getdvar("iw4l_zm_watch") == "powerup")
+        level thread drop_powerup();
 }
 
 // The map's room tone, which BO1 plays from its client scripts (`<map>_amb.csc`:
@@ -549,6 +551,24 @@ aim_at_zombies()
             target = z gettagorigin("j_head");
         p setplayerangles(vectortoangles(target - (p.origin + (0, 0, 60))));
     }
+}
+
+// Debug (IW4L_ZM_WATCH=powerup): a Max Ammo drops in front of the first player, who walks
+// onto it a few seconds later (to see the glow go with the pick-up).
+drop_powerup()
+{
+    wait 10;
+    players = getplayers();
+    if (!players.size)
+        return;
+    p = players[0];
+    forward = anglestoforward((0, p.angles[1], 0));
+    spot = p.origin + (forward[0] * 120, forward[1] * 120, 0);
+    level thread maps\_zombiemode_powerups::specific_powerup_drop("full_ammo", spot);
+    logprint("powerup debug: dropped at " + spot);
+    wait 4;
+    p setorigin(spot);
+    logprint("powerup debug: grabbed");
 }
 
 // Co-op joiners: BO1 places every player on its own start point once, when all of

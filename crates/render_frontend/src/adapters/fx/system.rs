@@ -158,6 +158,7 @@ pub(crate) fn register_combat_fx_systems(app: &mut App) {
         .add_observer(explosion)
         .add_observer(stop_killcam_explosion_fx)
         .init_resource::<PendingTagFx>()
+        .init_resource::<UnboltedTagFx>()
         .add_observer(play_fx)
         .add_observer(play_fx_bullet_hit)
         .add_observer(melee_blood);
@@ -2902,7 +2903,11 @@ struct TagFxRequest {
 
 const TAG_FX_POSE_WAIT: u8 = 8;
 
-#[allow(clippy::too_many_arguments)]
+/// Tag effects that had to play where the entity stood (no pose for its bone came): they
+/// stop with it, as a bolted one would. A power-up's glow kept glowing after the pick-up.
+#[derive(Resource, Default)]
+struct UnboltedTagFx(Vec<(u16, u16, String, u16)>);
+
 /// `fx_play <effect> [distance]` (tests): plays an effect in front of the camera, facing
 /// it as a hit's effect faces the shooter.
 fn play_requested_fx(
@@ -2935,6 +2940,7 @@ fn play_requested_fx(
     diag::info!(World, "fx_play {name} at {origin:?}: {result:?}");
 }
 
+#[allow(clippy::too_many_arguments)]
 fn drain_tag_fx(
     mut pending: ResMut<PendingTagFx>,
     catalog: Option<Res<PreparedFxCatalog>>,
@@ -2943,7 +2949,16 @@ fn drain_tag_fx(
     poses: Option<Res<crate::adapters::anim::dobj_pose::HostDObjPoseFrame>>,
     mut demand: ResMut<render_anim::ScriptModelBoltDemand>,
     fx_world: FxSceneAccess,
+    (slots, mut unbolted): (Res<CEntitySlots>, ResMut<UnboltedTagFx>),
 ) {
+    // Unbolted tag effects end with their entity.
+    unbolted.0.retain(|&(entnum, _, _, handle)| {
+        let alive = slots.entity_for_number(entnum).is_some();
+        if !alive {
+            host.0.stop_handle(handle);
+        }
+        alive
+    });
     let Some(catalog) = catalog else {
         return;
     };
@@ -2961,6 +2976,15 @@ fn drain_tag_fx(
                 queued.def_name != request.def_name
                     || queued.entnum != request.entnum
                     || queued.bone != request.bone
+            });
+            unbolted.0.retain(|(entnum, bone, def, handle)| {
+                let same = *entnum == request.entnum
+                    && *bone == request.bone
+                    && *def == request.def_name;
+                if same {
+                    host.0.stop_handle(*handle);
+                }
+                !same
             });
             if let Some(effect) = name.resolve(&catalog.0) {
                 host.0.stop_bolted(
@@ -3000,7 +3024,7 @@ fn drain_tag_fx(
                 waiting.push(request);
             }
             None => {
-                play_named_oriented_in_world(
+                let played = play_named_oriented_in_world(
                     &mut host.0,
                     &catalog.0,
                     &elem_infos.0,
@@ -3009,6 +3033,14 @@ fn drain_tag_fx(
                     axis_from_hit_normal(request.direction),
                     scene,
                 );
+                if let Some(handle) = played.and_then(PlayResult::handle) {
+                    unbolted.0.push((
+                        request.entnum,
+                        request.bone,
+                        request.def_name.clone(),
+                        handle,
+                    ));
+                }
             }
         }
     }

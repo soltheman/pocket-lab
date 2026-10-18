@@ -1,6 +1,19 @@
-# Bo1ZPocket 0.3.31
+# Bo1ZPocket 0.3.32
 
 Smoother on the phone, every touch button does its job, and co-op over Wi-Fi.
+
+**New in 0.3.32**
+- **Zombies stop cutting over stair rails.** This one was checked against Black Ops itself: I read its AI code from the game's executable on your PC.
+  - **The cause:** before cutting a corner, Black Ops checks the way is clear using "monster clip", invisible walls along banisters and ledges that only zombies collide with. Our check ignored those walls, so zombies cut across the railings.
+  - **Now:** the check uses Black Ops' exact collision settings.
+  - **Test, 3 min standing in the foyer:** no zombie stuck (19 of 27 reached you).
+  - **Test, with every door open and the power on:** no zombie stuck, and more of them reached you than before (14 of 20, before 10–12).
+- **Power-up glow goes away when you grab the power-up.** Its glow sometimes started before the power-up had a position to attach to, and was then left floating where it dropped.
+- **No white patch backstage.** Four Black Ops images (two light beams, a sun flare, a CoD5 logo) use an old format this can't read yet. They drew as solid white; now they're left out.
+- **Checked on PC:** the two zombie tests above, and a Max Ammo dropped, grabbed and gone with its glow. Not tried on an iPhone yet.
+- **Next, from Black Ops' own code:** how zombies turn and slow down on corners. It keeps them from snapping round and smooths their heading over a few frames.
+
+**New in 0.3.31**
 
 **New in 0.3.31**
 - **New icon:** the Call of Duty: Black Ops Zombies logo you sent, on black.

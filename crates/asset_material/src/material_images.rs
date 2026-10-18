@@ -1001,9 +1001,21 @@ fn prepare_payload(
     }
     match index.decode(name) {
         Some(Ok(mips)) => Ok(PreparedPayload::mips(mips)),
-        Some(Err(error)) => Err(ImageOutcome::Unsupported {
-            gap: format!("{}: {error}", source.name),
-        }),
+        // A format this can't read (BO1's few light beam / ray images): clear, so what
+        // uses it draws nothing rather than a white slab across the floor backstage.
+        Some(Err(error)) => {
+            diag::warn!(
+                World,
+                "image {} unreadable ({error}): drawn transparent",
+                source.name
+            );
+            Ok(PreparedPayload::mips(DecodedMips::from_levels(
+                1,
+                1,
+                MipStorage::Rgba8,
+                vec![vec![0, 0, 0, 0]],
+            )))
+        }
         None => Err(ImageOutcome::Missing {
             gap: format!("{} is absent from IWD", source.name),
         }),

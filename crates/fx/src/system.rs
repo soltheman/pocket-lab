@@ -704,6 +704,13 @@ impl FxSystemHost {
         }
     }
 
+    /// Stops the effect played as `handle`, if it is still running.
+    pub fn stop_handle(&mut self, handle: u16) {
+        if let Some(slot) = self.slot_index_for_handle(handle) {
+            crate::spawn::stop_effect_non_recursive(self, slot);
+        }
+    }
+
     pub fn live_elems(&self) -> impl Iterator<Item = &crate::FxElemSlot> {
         self.elems.iter().filter(|e| e.occupied)
     }

@@ -354,16 +354,20 @@ const HOP_REACH: f32 = 260.0;
 const FELL_OUT: f32 = 1500.0;
 
 /// Nothing solid between two points (the actor itself aside), by what stops an actor's
-/// walk: player clip (rails, ledge edges kept from players) doesn't.
+/// walk: BO1's AI mask (0x2820011, as its path look-ahead checks a point with). Monster
+/// clip (the AI-only walls along Kino's banisters and ledges) stops it; player clip
+/// doesn't. Without monster clip, zombies cut over stair rails to the next flight.
 fn clear_between(world: &mut World, object: u64, a: [f32; 3], b: [f32; 3]) -> bool {
     const CONTENTS_PLAYERCLIP: u32 = 0x0001_0000;
+    const CONTENTS_MONSTERCLIP: u32 = 0x0002_0000;
     let ignore = super::natives::engine::trace_ignore(world, Some(&Value::Object(object)));
     matches!(
         super::natives::engine::entity_trace(
             world,
             a,
             b,
-            crate::bullet_collision::MASK_PLAYER_SOLID & !CONTENTS_PLAYERCLIP,
+            (crate::bullet_collision::MASK_PLAYER_SOLID & !CONTENTS_PLAYERCLIP)
+                | CONTENTS_MONSTERCLIP,
             ignore,
         ),
         crate::bullet_collision::TraceOutcome::Miss { .. }
