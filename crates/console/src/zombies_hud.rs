@@ -109,6 +109,20 @@ pub(crate) fn spawn_zombies_hud(commands: &mut Commands) {
             Visibility::Hidden,
         ))
         .with_children(|root| {
+            // Behind everything: BO1's blood at the screen's edges while hurt.
+            root.spawn((
+                ZombiesHurtOverlay,
+                Node {
+                    position_type: PositionType::Absolute,
+                    left: px(0),
+                    top: px(0),
+                    width: percent(100),
+                    height: percent(100),
+                    ..default()
+                },
+                bevy::ui::FocusPolicy::Pass,
+                Visibility::Hidden,
+            ));
             // The round is BO1's own chalk HUD element now (bottom left). Points, then the
             // ammo, on the right; `place_zombies_hud` puts them where the screen has room.
             root.spawn((
@@ -427,4 +441,70 @@ pub(crate) fn update_zombies_hint(
     text.set_text(&line);
     let color = text.color.with_alpha(alpha);
     text.set_color(color);
+}
+
+/// The full-screen hurt overlay under the zombies HUD.
+#[derive(Component)]
+pub(crate) struct ZombiesHurtOverlay;
+
+/// How fast the hurt overlay fades once health comes back (per second), as the engine's
+/// blood overlay (`HUD_BLOOD_OVERLAY_LERP_RATE_DEFAULT`).
+const HURT_FADE_PER_SECOND: f32 = 0.3;
+
+/// The engine's damage overlay, in BO1's own art: as red as the player is near death
+/// (1 - health / max health), straight away when hit, fading out as health comes back.
+/// One zombie hit leaves it plainly red, the warning that the next one downs you.
+pub(crate) fn update_hurt_overlay(
+    mut commands: Commands,
+    time: Res<Time>,
+    fonts: Option<Res<crate::game_text::GameFonts>>,
+    presented: Option<Res<PresentedSnapshot>>,
+    local: Option<Res<LocalPresentClient>>,
+    mut node: Query<(Entity, Option<&mut ImageNode>, &mut Visibility), With<ZombiesHurtOverlay>>,
+    mut intensity: Local<f32>,
+) {
+    let Ok((entity, image, mut visibility)) = node.single_mut() else {
+        return;
+    };
+    let target = presented
+        .as_deref()
+        .zip(local.as_deref())
+        .and_then(|(presented, local)| presented.player(local.0))
+        .filter(|ps| ps.max_health > 0 && ps.health > 0 && ps.pm_type == 0)
+        .map_or(0.0, |ps| {
+            1.0 - (ps.health as f32 / ps.max_health as f32).clamp(0.0, 1.0)
+        });
+    *intensity = if target >= *intensity {
+        target
+    } else {
+        (*intensity - time.delta_secs() * HURT_FADE_PER_SECOND).max(target)
+    };
+    let Some(handle) = fonts.as_deref().and_then(|fonts| fonts.hurt_overlay.clone()) else {
+        visibility.set_if_neq(Visibility::Hidden);
+        return;
+    };
+    if *intensity <= 0.01 {
+        visibility.set_if_neq(Visibility::Hidden);
+        return;
+    }
+    visibility.set_if_neq(Visibility::Inherited);
+    let color = Color::srgba(1.0, 1.0, 1.0, intensity.min(1.0));
+    match image {
+        Some(mut image) => {
+            if image.image != handle {
+                image.image = handle;
+            }
+            if image.color != color {
+                image.color = color;
+            }
+        }
+        None => {
+            commands
+                .entity(entity)
+                .insert(ImageNode {
+                    image_mode: bevy::ui::widget::NodeImageMode::Stretch,
+                    ..ImageNode::new(handle).with_color(color)
+                });
+        }
+    }
 }

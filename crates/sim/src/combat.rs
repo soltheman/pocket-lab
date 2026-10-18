@@ -1349,6 +1349,31 @@ pub(crate) fn phase_trace(
             };
             let scaled =
                 ((bullet_damage_at_distance(&facts, dist) as f32) * segment.damage_mult) as i32;
+            // A zombie takes the weapon's damage for where it was hit, as the engine scales
+            // a hit on an AI: head shots by the weapon's head multiplier.
+            let actor_hit = match segment.collider {
+                Some(ColliderId::EntityDObjBone { owner, bone, .. }) if !exit => owner
+                    .script_model()
+                    .and_then(|model| {
+                        crate::script::host::entity_damage::actor_flesh_hit(
+                            world.ecs(),
+                            model,
+                            Some(usize::from(bone)),
+                        )
+                    }),
+                _ => None,
+            };
+            let scaled = actor_hit.map_or(scaled, |(hitloc, _)| {
+                let scale = facts.location_scale(hitloc);
+                if std::env::var_os("IW4L_ACTOR_DEBUG").is_some() {
+                    diag::info!(
+                        Sim,
+                        "actor debug: shot hits {} for {scaled} x {scale}",
+                        weapon_iw4::HITLOC_NAMES[usize::from(hitloc)]
+                    );
+                }
+                (scaled as f32 * scale).round() as i32
+            });
             if !exit && world.publishes_snapshot() {
                 let means = crate::script_player::means(
                     world,
@@ -1409,17 +1434,9 @@ pub(crate) fn phase_trace(
             // (head and fatal variants), not the default dust and sparks.
             let (mut surf_type, mut surface_flags) = (segment.surf_type, segment.surface_flags);
             let mut direction = segment.normal;
-            if !exit
-                && let Some(ColliderId::EntityDObjBone { owner, bone, .. }) = segment.collider
-                && let Some(model) = owner.script_model()
-                && let Some((head, fatal)) = crate::script::host::entity_damage::actor_flesh_hit(
-                    world.ecs(),
-                    model,
-                    Some(usize::from(bone)),
-                    scaled,
-                )
-            {
-                flesh_flags = fx_iw4::flesh_hit_flags(head, fatal) as u8;
+            if let Some((hitloc, health)) = actor_hit {
+                let head = matches!(hitloc, 1..=3);
+                flesh_flags = fx_iw4::flesh_hit_flags(head, scaled >= health) as u8;
                 surf_type = weapon_iw4::SURF_TYPE_FLESH as u8;
                 surface_flags = weapon_iw4::SURF_TYPE_FLESH << 20;
                 // Blood sprays back along the shot, toward the shooter, as Black Ops plays

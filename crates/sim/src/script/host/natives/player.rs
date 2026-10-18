@@ -1146,7 +1146,13 @@ fn register_body(registry: &mut NativeRegistry) {
     registry.register(Method, "setnormalhealth", |world, receiver, args| {
         let id = client_of(world, receiver)?;
         let fraction = float(args, 0)?.clamp(0.0, 1.0);
-        if let Some(ps) = FrameWorld::from_world(world).player_mut(id) {
+        // Before the player has spawned there is no health to scale: BO1's regen loop
+        // (`playerHealthRegen`) sets full health then, and a 1 left behind made every
+        // spawn start at death's door, the screen red, while health crept back.
+        if let Some(ps) = FrameWorld::from_world(world)
+            .player_mut(id)
+            .filter(|ps| ps.max_health > 0)
+        {
             ps.health = ((ps.max_health as f32 * fraction) as i32).max(1);
         }
         Ok(Value::Undefined)

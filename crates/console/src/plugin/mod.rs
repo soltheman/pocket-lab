@@ -143,12 +143,14 @@ impl Plugin for ConsolePlugin {
                     crate::zombies_hud::update_zombies_hint,
                     crate::zombies_hud::place_zombies_hud,
                     crate::zombies_hud::stain_zombies_score,
+                    crate::zombies_hud::update_hurt_overlay,
                     crate::zombies_menu::spawn_zombies_menu,
                     crate::zombies_menu::animate_zombies_menu,
                     crate::zombies_menu::zombies_menu_buttons,
                     crate::zombies_menu::show_zombies_options,
                     crate::zombies_menu::zombies_options_input,
                     crate::zombies_menu::zombies_options_pages,
+                    crate::zombies_menu::pause_solo_match,
                     crate::zombies_menu::handle_zombies_menu_commands
                         .after(ConsoleDispatchSet)
                         .before(crate::zombies_menu::zombies_menu_buttons),
@@ -379,9 +381,10 @@ fn publish_client_action_input(
         Res<PresentedSnapshot>,
         Res<net::LocalPresentClient>,
     ),
-    (touch, mut touch_held): (
+    (touch, mut touch_held, options): (
         Res<crate::touch_controls::TouchFrame>,
         Local<std::collections::BTreeSet<(u32, i32)>>,
+        Option<Res<crate::zombies_menu::ZombiesOptionsOpen>>,
     ),
 ) {
     if time.elapsed_secs() - physical.mouse_activity_start > 0.3 {
@@ -425,6 +428,8 @@ fn publish_client_action_input(
     }
     let modal_captured = console.open
         || script_menus.is_some_and(|menus| menus.captures_input())
+        // The zombies pause / options panel: its taps are clicks, not shots.
+        || options.is_some_and(|options| options.0)
         || keys.just_pressed(KeyCode::Escape)
         || pad.is_some_and(|pad| pad.just_pressed(bevy::input::gamepad::GamepadButton::Start));
     let captured = !devices.focused || modal_captured;

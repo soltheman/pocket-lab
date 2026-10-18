@@ -1286,6 +1286,7 @@ fn preflight_match_install(
             ("IW4L_ZM_Z", "iw4l_zm_z"),
             ("IW4L_ZM_YAW", "iw4l_zm_yaw"),
             ("IW4L_ZM_PITCH", "iw4l_zm_pitch"),
+            ("IW4L_ZM_AIM", "iw4l_zm_aim"),
         ] {
             if let Ok(value) = std::env::var(env) {
                 script_dvars.push((dvar.into(), value));

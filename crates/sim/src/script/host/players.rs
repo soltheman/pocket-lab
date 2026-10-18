@@ -1459,8 +1459,15 @@ pub(crate) fn store_field(
             }
         }
         "maxhealth" => {
-            let n = int(value)?.max(1);
+            let n = int(value)?;
             let mut frame = FrameWorld::from_world(world);
+            // BO1 copies a spectator's health (0) into maxhealth before the spawn: that
+            // is no maximum, and the spawn gives the usual 100. Clamped to 1 it spawned the
+            // player with 1 health, at death's door and the screen red.
+            if n <= 0 {
+                frame.client_meta_mut(id).max_health = 0;
+                return Ok(true);
+            }
             frame.client_meta_mut(id).max_health = n;
             if let Some(ps) = frame.player_mut(id) {
                 ps.max_health = n;

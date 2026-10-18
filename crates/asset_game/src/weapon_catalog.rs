@@ -3004,6 +3004,24 @@ fn f32_at_t5(stream: &fastfile_t5::ZoneStream<'_>, body: fastfile_t5::Ptr, off: 
     stream.f32_at(body, off).unwrap_or(0.0)
 }
 
+/// BO1's per-hit-location damage multipliers (19, in IW4's `HITLOC_NAMES` order; the
+/// 20th, shield, stays 1): head shots on zombies do the weapon's head damage.
+fn read_location_damage_t5(
+    stream: &fastfile_t5::ZoneStream<'_>,
+    body: fastfile_t5::Ptr,
+) -> Option<[f32; 20]> {
+    use fastfile_t5::size as sz;
+    let arr = match stream.ptr_at(body, sz::WEAPON_DEF_LOCATION_DAMAGE_OFF) {
+        Ok(fastfile_t5::ZonePtr::Offset(q)) => stream.resolve_alias(q),
+        _ => return None,
+    };
+    let mut values = [1.0; 20];
+    for (i, value) in values.iter_mut().take(sz::WEAPON_LOCATION_DAMAGE_COUNT).enumerate() {
+        *value = stream.f32_at(arr, i * 4).ok()?;
+    }
+    values.iter().all(|v| v.is_finite() && *v >= 0.0).then_some(values)
+}
+
 fn read_bounce_array_t5(
     stream: &fastfile_t5::ZoneStream<'_>,
     body: fastfile_t5::Ptr,
@@ -3414,6 +3432,7 @@ fn capture_t5_body_facts(
     );
     facts.damage = i32_at_t5(stream, body, sz::WEAPON_DEF_DAMAGE_OFF);
     facts.min_damage = i32_at_t5(stream, body, sz::WEAPON_DEF_MIN_DAMAGE_OFF);
+    facts.location_damage_mult = read_location_damage_t5(stream, body);
     facts.max_damage_range = f32_at_t5(stream, body, sz::WEAPON_DEF_MAX_DAMAGE_RANGE_OFF);
     facts.min_damage_range = f32_at_t5(stream, body, sz::WEAPON_DEF_MIN_DAMAGE_RANGE_OFF);
     facts.explosion_radius = i32_at_t5(stream, body, sz::WEAPON_DEF_EXPLOSION_RADIUS_OFF);

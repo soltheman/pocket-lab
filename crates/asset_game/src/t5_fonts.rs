@@ -57,6 +57,8 @@ impl T5Font {
 pub struct T5FontSet {
     pub fonts: BTreeMap<String, T5Font>,
     pub atlas: Option<(u32, u32, Vec<u8>)>,
+    /// BO1's hurt overlay (`overlay_low_health`), drawn by the same HUD.
+    pub hurt_overlay: Option<(u32, u32, Vec<u8>)>,
 }
 
 #[derive(Default)]
@@ -169,12 +171,16 @@ pub fn load_t5_fonts(games: &GamesRoot) -> Result<T5FontSet, String> {
     let fonts = load_t5_zone_fonts(&zone.path)?;
     let main = asset_transport::game_root_for_zone(&anchor)?.join("main");
     let atlas = asset_material::decode_ui_image_from_main(&main, "gamefonts_pc")?;
+    let hurt_overlay = asset_material::decode_ui_image_from_main(&main, "overlay_low_health")
+        .ok()
+        .flatten();
     Ok(T5FontSet {
         fonts: fonts
             .into_iter()
             .map(|font| (font.name.clone(), font))
             .collect(),
         atlas,
+        hurt_overlay,
     })
 }
 
@@ -221,5 +227,32 @@ mod tests {
         }
         eprintln!("atlas {w}x{h}");
         assert!(set.fonts.contains_key("fonts/bigfont"));
+    }
+}
+
+#[cfg(test)]
+mod image_dump {
+    /// IW4L_IMAGE_DUMP=<image> IW4L_IMAGE_OUT=<png>: one BO1 UI image as decoded.
+    #[test]
+    #[ignore]
+    fn dump_install_image() {
+        let games = asset_transport::games_root_from_env().expect("IW4L_GAMES");
+        let name = std::env::var("IW4L_IMAGE_DUMP").expect("IW4L_IMAGE_DUMP");
+        let out = std::env::var("IW4L_IMAGE_OUT").expect("IW4L_IMAGE_OUT");
+        let anchor = asset_transport::find_zone_file(&games, "t5:code_post_gfx")
+            .expect("zone")
+            .path;
+        let main = asset_transport::game_root_for_zone(&anchor).expect("root").join("main");
+        let (w, h, rgba) = asset_material::decode_ui_image_from_main(&main, &name)
+            .expect("decode")
+            .expect("found");
+        eprintln!("{name}: {w}x{h}");
+        let alpha: Vec<u8> = rgba.chunks_exact(4).map(|p| p[3]).collect();
+        eprintln!("alpha min {:?} max {:?}", alpha.iter().min(), alpha.iter().max());
+        let file = std::fs::File::create(out).expect("out");
+        let mut encoder = png::Encoder::new(std::io::BufWriter::new(file), w, h);
+        encoder.set_color(png::ColorType::Rgba);
+        encoder.set_depth(png::BitDepth::Eight);
+        encoder.write_header().unwrap().write_image_data(&rgba).unwrap();
     }
 }

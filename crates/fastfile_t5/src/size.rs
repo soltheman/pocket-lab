@@ -714,6 +714,8 @@ pub const WEAPON_DEF_SEGMENTED_RELOAD_OFF: usize = 0x582;
 pub const WEAPON_DEF_RELOAD_AMMO_ADD_OFF: usize = 0x584;
 pub const WEAPON_DEF_RELOAD_START_ADD_OFF: usize = 0x588;
 pub const WEAPON_DEF_MIN_DAMAGE_OFF: usize = 0x7a0;
+/// `float *locationDamageMultipliers` (`WEAPON_LOCATION_DAMAGE_COUNT` hit locations).
+pub const WEAPON_DEF_LOCATION_DAMAGE_OFF: usize = 0x7bc;
 pub const WEAPON_DEF_MAX_DAMAGE_RANGE_OFF: usize = 0x7a8;
 pub const WEAPON_DEF_MIN_DAMAGE_RANGE_OFF: usize = 0x7ac;
 pub const WEAPON_DEF_ADS_GUN_KICK_REDUCED_BULLETS_OFF: usize = 0x688;

@@ -494,14 +494,19 @@ fn steer_point(
     };
     // Near and in plain sight: straight at it. Near behind a wall (a window's attack spot
     // round the corner of its frame), still by the route, or it walks into the wall.
+    // In sight at the knee as well as the chest: a low wall between (the one along Kino's
+    // foyer window, outside) is clear at chest height, and walking straight at the spot
+    // over it kept zombies against it until BO1's failsafe killed them.
     let close = flat_distance(origin, target) < 96.0
         && (origin[2] - target[2]).abs() < 40.0
-        && clear_between(
-            world,
-            object,
-            [origin[0], origin[1], origin[2] + 40.0],
-            [target[0], target[1], target[2] + 40.0],
-        );
+        && [20.0, 40.0].into_iter().all(|height| {
+            clear_between(
+                world,
+                object,
+                [origin[0], origin[1], origin[2] + height],
+                [target[0], target[1], target[2] + height],
+            )
+        });
     if close || nav.is_empty() {
         state.route.clear();
         state.route_traverse.clear();
@@ -565,31 +570,52 @@ fn steer_point(
         // (passed it), unless a traversal starts there: it has to get onto it first.
         // Nearer on the map is not nearer by the way when the next node is out of sight:
         // at the top of a flight of stairs, the node at its foot is behind the rail.
-        let keep_entry = inside
-            && state.route.len() > 1
-            && (state.route_traverse.get(1).copied().unwrap_or(false)
-                || flat_distance(origin, state.route[1])
-                    >= flat_distance(state.route[0], state.route[1])
-                || !clear_between(
-                    world,
-                    object,
-                    [origin[0], origin[1], origin[2] + 40.0],
-                    [
-                        state.route[1][0],
-                        state.route[1][1],
-                        state.route[1][2] + 40.0,
-                    ],
-                ));
+        // Outside, keep it too when the next node is round a wall from here: the nearest
+        // node can be the corner a zombie has to go by (Kino's foyer window), and heading
+        // past it took it straight into the wall.
+        let keep_entry = state.route.len() > 1
+            && if inside {
+                state.route_traverse.get(1).copied().unwrap_or(false)
+                    || flat_distance(origin, state.route[1])
+                        >= flat_distance(state.route[0], state.route[1])
+                    || !clear_between(
+                        world,
+                        object,
+                        [origin[0], origin[1], origin[2] + 40.0],
+                        [
+                            state.route[1][0],
+                            state.route[1][1],
+                            state.route[1][2] + 40.0,
+                        ],
+                    )
+            } else {
+                let next = state.route[1];
+                !line_clear(world, object, origin, next)
+            };
         if state.route.len() > 1 && !keep_entry {
             state.route.remove(0);
             state.route_traverse.remove(0);
         }
     }
+    let outside = !truthy(
+        &world
+            .resource_mut::<Runtime>()
+            .object_field(object, "completed_emerging_into_playable_area"),
+    );
     while let Some(next) = state.route.first() {
         // Nodes sit about 32 above the floor, more over the clip ramp on a flight of
         // stairs (Kino's back stairwell: 62), so one up to the goal height counts.
         let rise = next[2] - origin[2];
-        if flat_distance(origin, *next) < NODE_REACHED && rise < GOAL_HEIGHT && rise > -48.0 {
+        let near = flat_distance(origin, *next);
+        // Near enough, unless (on the way to its window) the way on is round a corner from
+        // here: then right up to it first, or it cuts the corner into the wall (Kino's
+        // foyer window).
+        let reached = near < NODE_REACHED
+            && (near < NODE_REACHED_CORNER || !outside || {
+                let on = state.route.get(1).copied().unwrap_or(target);
+                body_clear(world, object, origin, on, 0.0)
+            });
+        if reached && rise < GOAL_HEIGHT && rise > -48.0 {
             let begin = *next;
             state.route.remove(0);
             if !state.route_traverse.is_empty() {
@@ -669,25 +695,7 @@ fn look_ahead(world: &mut World, object: u64, state: &mut Actor, origin: [f32; 3
         {
             break;
         }
-        // The width of its body, not just a line through its middle: a line clear of a
-        // window frame's corner can still take its shoulder into it.
-        let along = [node[0] - origin[0], node[1] - origin[1]];
-        let length = (along[0] * along[0] + along[1] * along[1])
-            .sqrt()
-            .max(0.001);
-        let side = [-along[1] / length * RADIUS, along[0] / length * RADIUS];
-        let clear = [20.0, 40.0].into_iter().all(|height| {
-            [-1.0, 0.0, 1.0].into_iter().all(|offset: f32| {
-                let (dx, dy) = (side[0] * offset, side[1] * offset);
-                clear_between(
-                    world,
-                    object,
-                    [origin[0] + dx, origin[1] + dy, origin[2] + height],
-                    [node[0] + dx, node[1] + dy, origin[2] + height + rise],
-                )
-            })
-        });
-        if !clear {
+        if !body_clear(world, object, origin, node, rise) {
             break;
         }
         skip = k;
@@ -699,6 +707,45 @@ fn look_ahead(world: &mut World, object: u64, state: &mut Actor, origin: [f32; 3
             .drain(..skip.min(state.route_traverse.len()));
     }
 }
+
+/// Whether an actor could walk straight from `origin` to `to` (rising `rise` on the way):
+/// clear at knee and chest across the width of its body, not just a line through its
+/// middle, since a line clear of a window frame's corner can still take its shoulder.
+fn body_clear(world: &mut World, object: u64, origin: [f32; 3], to: [f32; 3], rise: f32) -> bool {
+    let along = [to[0] - origin[0], to[1] - origin[1]];
+    let length = (along[0] * along[0] + along[1] * along[1])
+        .sqrt()
+        .max(0.001);
+    let side = [-along[1] / length * RADIUS, along[0] / length * RADIUS];
+    [20.0, 40.0].into_iter().all(|height| {
+        [-1.0, 0.0, 1.0].into_iter().all(|offset: f32| {
+            let (dx, dy) = (side[0] * offset, side[1] * offset);
+            clear_between(
+                world,
+                object,
+                [origin[0] + dx, origin[1] + dy, origin[2] + height],
+                [to[0] + dx, to[1] + dy, origin[2] + height + rise],
+            )
+        })
+    })
+}
+
+/// Whether the way from `origin` to `to` is open at knee and chest height (a low wall
+/// shows at the knee only).
+fn line_clear(world: &mut World, object: u64, origin: [f32; 3], to: [f32; 3]) -> bool {
+    [20.0, 40.0].into_iter().all(|height| {
+        clear_between(
+            world,
+            object,
+            [origin[0], origin[1], origin[2] + height],
+            [to[0], to[1], origin[2] + height],
+        )
+    })
+}
+
+/// How near a route node an actor has to come before leaving it for the next, when the
+/// way on from where it stands is round a corner.
+const NODE_REACHED_CORNER: f32 = 8.0;
 
 fn actor_id(world: &mut World, receiver: &Value) -> Result<u64, String> {
     let object = super::natives::engine::entity_id(world, receiver)?;
@@ -1275,6 +1322,9 @@ pub(crate) fn spawn_from_spawner(
     runtime.set_object_field(id, "ignoreall", Value::Int(0));
     runtime.set_object_field(id, "ignoreme", Value::Int(0));
     runtime.set_object_field(id, "damagelocation", Value::string("none"));
+    // The engine's dog flag: `zombie_behind_vox` (the growl of a zombie close behind you)
+    // and others test it on every AI, so an unset one made them skip every zombie.
+    runtime.set_object_field(id, "isdog", Value::Int(i32::from(kind == "dog")));
     if let Some(Value::String(targetname)) = args.get(1) {
         runtime.set_object_field(id, "targetname", Value::String(targetname.clone()));
     }
@@ -1394,11 +1444,7 @@ pub(crate) fn damage(
             hit.means
         );
     }
-    let hitloc = if part.starts_with("j_head") || part.starts_with("j_neck") {
-        "head"
-    } else {
-        "torso_upper"
-    };
+    let hitloc = weapon_iw4::HITLOC_NAMES[usize::from(hitloc_for_bone(part))];
     let args = vec![
         attacker.clone(),
         attacker,
@@ -2300,4 +2346,62 @@ fn angle_between(from: f32, to: f32) -> f32 {
 fn turn_toward(from: f32, to: f32, max_step: f32) -> f32 {
     let delta = angle_between(from, to);
     from + delta.clamp(-max_step, max_step)
+}
+
+/// BO1's hit location (an index into `HITLOC_NAMES`) for a bone of the zombie skeleton,
+/// as the engine reports it to `actor_damage` and scales a weapon's damage by: the head
+/// and neck for head shots, the limbs for BO1's gibs, the torso for the rest.
+pub(crate) fn hitloc_for_bone(bone: &str) -> u8 {
+    let bone = bone.to_ascii_lowercase();
+    let side = |right: u8, left: u8| {
+        if bone.ends_with("_le") || bone.contains("_le_") {
+            left
+        } else {
+            right
+        }
+    };
+    let has = |part: &str| bone.contains(part);
+    if has("helmet") {
+        1
+    } else if has("head") || has("eye") || has("jaw") || has("brow") || has("cheek") {
+        2
+    } else if has("neck") {
+        3
+    } else if has("shoulder") {
+        side(6, 7)
+    } else if has("elbow") {
+        side(8, 9)
+    } else if has("wrist") || has("finger") || has("thumb") || has("hand") {
+        side(10, 11)
+    } else if has("hip") {
+        side(12, 13)
+    } else if has("knee") {
+        side(14, 15)
+    } else if has("ankle") || has("ball") || has("toe") || has("foot") {
+        side(16, 17)
+    } else if has("spinelower") || has("mainroot") || has("pelvis") || has("spine1") {
+        5
+    } else {
+        4
+    }
+}
+
+#[cfg(test)]
+mod hitloc_tests {
+    use super::hitloc_for_bone;
+
+    #[test]
+    fn zombie_bones_name_bo1_locations() {
+        let name = |bone| weapon_iw4::HITLOC_NAMES[usize::from(hitloc_for_bone(bone))];
+        assert_eq!(name("j_head"), "head");
+        assert_eq!(name("J_Neck"), "neck");
+        assert_eq!(name("j_spineupper"), "torso_upper");
+        assert_eq!(name("j_spinelower"), "torso_lower");
+        assert_eq!(name("j_shoulder_le"), "left_arm_upper");
+        assert_eq!(name("j_elbow_ri"), "right_arm_lower");
+        assert_eq!(name("j_wrist_le"), "left_hand");
+        assert_eq!(name("j_knee_ri"), "right_leg_lower");
+        assert_eq!(name("j_ankle_le"), "left_foot");
+        assert_eq!(name("j_hip_ri"), "right_leg_upper");
+    }
 }

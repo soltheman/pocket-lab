@@ -255,6 +255,11 @@ stand_at()
                     zombies[i].iw4l_gib_logged = true;
                     logprint("shoot debug: zombie lost " + zombies[i].a.gib_ref + " holding " + weapon);
                 }
+                if (isdefined(zombies[i].head_gibbed) && zombies[i].head_gibbed && !isdefined(zombies[i].iw4l_head_logged))
+                {
+                    zombies[i].iw4l_head_logged = true;
+                    logprint("shoot debug: zombie lost its head to " + weapon);
+                }
             }
         }
     }
@@ -538,7 +543,11 @@ aim_at_zombies()
             if (distancesquared(zombies[i].origin, p.origin) < distancesquared(z.origin, p.origin))
                 z = zombies[i];
         }
-        p setplayerangles(vectortoangles(z.origin + (0, 0, 48) - (p.origin + (0, 0, 60))));
+        // IW4L_ZM_AIM=head: at its head, for head shots.
+        target = z.origin + (0, 0, 48);
+        if (getdvar("iw4l_zm_aim") == "head")
+            target = z gettagorigin("j_head");
+        p setplayerangles(vectortoangles(target - (p.origin + (0, 0, 60))));
     }
 }
 

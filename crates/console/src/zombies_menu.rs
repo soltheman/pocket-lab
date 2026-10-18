@@ -117,6 +117,7 @@ pub(crate) enum Setting {
     InvertLook,
     Layout,
     Style,
+    AimMode,
     ButtonSize,
     ButtonOpacity,
 }
@@ -132,13 +133,14 @@ pub(crate) enum OptionsTab {
 const LAYOUT_NAMES: [&str; 5] = ["CLASSIC", "LEFT FIRE", "COMPACT", "SOUTHPAW", "CUSTOM"];
 
 impl Setting {
-    const ALL: [Setting; 8] = [
+    const ALL: [Setting; 9] = [
         Setting::Sensitivity,
         Setting::FieldOfView,
         Setting::Volume,
         Setting::InvertLook,
         Setting::Layout,
         Setting::Style,
+        Setting::AimMode,
         Setting::ButtonSize,
         Setting::ButtonOpacity,
     ];
@@ -148,7 +150,11 @@ impl Setting {
             Setting::Sensitivity | Setting::FieldOfView | Setting::Volume | Setting::InvertLook => {
                 OptionsTab::Gameplay
             }
-            Setting::Layout | Setting::Style | Setting::ButtonSize | Setting::ButtonOpacity => {
+            Setting::Layout
+            | Setting::Style
+            | Setting::AimMode
+            | Setting::ButtonSize
+            | Setting::ButtonOpacity => {
                 OptionsTab::Buttons
             }
         }
@@ -162,6 +168,7 @@ impl Setting {
             Setting::InvertLook => "INVERT LOOK",
             Setting::Layout => "BUTTON LAYOUT",
             Setting::Style => "BUTTON STYLE",
+            Setting::AimMode => "AIM BUTTON",
             Setting::ButtonSize => "BUTTON SIZE",
             Setting::ButtonOpacity => "BUTTON OPACITY",
         }
@@ -173,7 +180,7 @@ impl Setting {
             Setting::Sensitivity => (0.5, 20.0, 0.5),
             Setting::FieldOfView => (GameSettings::FOV_MIN, 110.0, 1.0),
             Setting::Volume => (0.0, 1.0, 0.05),
-            Setting::InvertLook | Setting::Style => (0.0, 1.0, 1.0),
+            Setting::InvertLook | Setting::Style | Setting::AimMode => (0.0, 1.0, 1.0),
             Setting::Layout => (0.0, f32::from(GameSettings::TOUCH_LAYOUT_CUSTOM), 1.0),
             Setting::ButtonSize => (0.75, 1.35, 0.05),
             Setting::ButtonOpacity => (0.3, 1.0, 0.05),
@@ -182,7 +189,10 @@ impl Setting {
 
     /// Steps that go round (the last layout's + comes back to the first) and toggles.
     fn cycles(self) -> bool {
-        matches!(self, Setting::InvertLook | Setting::Style | Setting::Layout)
+        matches!(
+            self,
+            Setting::InvertLook | Setting::Style | Setting::AimMode | Setting::Layout
+        )
     }
 
     fn get(self, settings: &GameSettings) -> f32 {
@@ -193,6 +203,7 @@ impl Setting {
             Setting::InvertLook => f32::from(u8::from(settings.invert_mouse)),
             Setting::Layout => f32::from(settings.touch_layout),
             Setting::Style => f32::from(u8::from(settings.touch_icons)),
+            Setting::AimMode => f32::from(u8::from(settings.touch_aim_toggle)),
             Setting::ButtonSize => settings.touch_button_scale,
             Setting::ButtonOpacity => settings.touch_opacity,
         }
@@ -208,6 +219,7 @@ impl Setting {
             Setting::InvertLook => settings.invert_mouse = value >= 0.5,
             Setting::Layout => settings.touch_layout = value as u8,
             Setting::Style => settings.touch_icons = value >= 0.5,
+            Setting::AimMode => settings.touch_aim_toggle = value >= 0.5,
             Setting::ButtonSize => settings.touch_button_scale = value,
             Setting::ButtonOpacity => settings.touch_opacity = value,
         }
@@ -219,6 +231,7 @@ impl Setting {
             Setting::FieldOfView => format!("{value:.0}"),
             Setting::InvertLook => if value >= 0.5 { "ON" } else { "OFF" }.to_owned(),
             Setting::Style => if value >= 0.5 { "ICONS" } else { "TEXT" }.to_owned(),
+            Setting::AimMode => if value >= 0.5 { "TOGGLE" } else { "HOLD" }.to_owned(),
             Setting::Layout => LAYOUT_NAMES
                 .get(value.round() as usize)
                 .copied()
@@ -916,4 +929,29 @@ pub(crate) struct ScriptedOptions<'w> {
     tab: ResMut<'w, OptionsTab>,
     editing: ResMut<'w, crate::touch_controls::TouchEditing>,
     settings: ResMut<'w, GameSettings>,
+}
+
+/// Black Ops' solo pause: while the options panel (the pause menu) or the touch buttons'
+/// edit mode is up in a solo match, the game's clock stops, so zombies wait. A hosted
+/// co-op room keeps running, as Black Ops' co-op does.
+pub(crate) fn pause_solo_match(
+    open: Res<ZombiesOptionsOpen>,
+    editing: Res<crate::touch_controls::TouchEditing>,
+    screen: Res<AppScreen>,
+    role: Option<Res<frame::RuntimeRole>>,
+    hub: Option<Res<net::UdpAuthorityHub>>,
+    mut time: ResMut<Time<Virtual>>,
+    mut paused_here: Local<bool>,
+) {
+    let solo = role.is_some_and(|role| *role == frame::RuntimeRole::Listen) && hub.is_none();
+    let want = solo && *screen == AppScreen::InGame && (open.0 || editing.active);
+    if want && !*paused_here {
+        time.pause();
+        *paused_here = true;
+        diag::info!(Ui, "zombies menu: solo match paused");
+    } else if !want && *paused_here {
+        time.unpause();
+        *paused_here = false;
+        diag::info!(Ui, "zombies menu: solo match resumed");
+    }
 }

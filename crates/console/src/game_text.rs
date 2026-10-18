@@ -104,6 +104,8 @@ pub struct GameFonts {
     fonts: HashMap<GameFont, LoadedFont>,
     atlas: Handle<Image>,
     atlas_size: Vec2,
+    /// BO1's hurt overlay, red blood at the screen's edges.
+    pub hurt_overlay: Option<Handle<Image>>,
 }
 
 #[derive(Resource)]
@@ -154,6 +156,9 @@ pub(crate) fn load_game_fonts(
 
 fn fonts_resource(set: T5FontSet, images: &mut Assets<Image>) -> Result<GameFonts, String> {
     let (width, height, rgba) = set.atlas.ok_or("no gamefonts_pc atlas")?;
+    let hurt_overlay = set
+        .hurt_overlay
+        .map(|(w, h, rgba)| images.add(hurt_overlay_image(w, h, rgba)));
     let mut fonts = HashMap::new();
     for kind in [
         GameFont::Big,
@@ -184,7 +189,25 @@ fn fonts_resource(set: T5FontSet, images: &mut Assets<Image>) -> Result<GameFont
         fonts,
         atlas: images.add(atlas_image(width, height, rgba)),
         atlas_size: Vec2::new(width as f32, height as f32),
+        hurt_overlay,
     })
+}
+
+/// BO1's `overlay_low_health`: red, with the blood at the edges in its alpha.
+fn hurt_overlay_image(width: u32, height: u32, rgba: Vec<u8>) -> Image {
+    let mut image = Image::new(
+        Extent3d {
+            width,
+            height,
+            depth_or_array_layers: 1,
+        },
+        TextureDimension::D2,
+        rgba,
+        TextureFormat::Rgba8UnormSrgb,
+        bevy::asset::RenderAssetUsages::default(),
+    );
+    image.sampler = ImageSampler::linear();
+    image
 }
 
 /// The atlas with its mips, so text drawn smaller than the font stays smooth.

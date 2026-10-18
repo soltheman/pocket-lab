@@ -1,6 +1,34 @@
-# Bo1ZPocket 0.3.30
+# Bo1ZPocket 0.3.31
 
 Smoother on the phone, every touch button does its job, and co-op over Wi-Fi.
+
+**New in 0.3.31**
+- **New icon:** the Call of Duty: Black Ops Zombies logo you sent, on black.
+- **No more red screen at spawn.** Just before you spawn, Black Ops sets your max health to 0. That got rounded up to 1, so you spawned with 1 health and the screen stayed blood-red while it crept back up. Now you spawn with full health.
+- **Getting hit turns the screen red.** It uses Black Ops' own blood-edged overlay: one zombie hit leaves it plainly red (one more and you go down), and it fades as you heal. Before, a hit showed nothing, because the overlay used images a Black Ops install doesn't have.
+- **Head shots count:**
+  - Each gun now does its own Black Ops damage for where it hits (for example the M1911 ×3.5 to the head, the MP40 ×4). Before, a head shot did body damage.
+  - Black Ops' scripts now get the real hit location (head, neck, torso, arm, hand, leg, foot). So head-shot kills pay head-shot points, and heads and limbs pop the way Black Ops decides. As in Black Ops, the starting M1911 never pops heads.
+- **Pause actually pauses.** In a solo game, the pause/options menu (and button edit mode) now freezes the game, as in Black Ops. Tapping in the menu no longer fires your gun.
+- **Aim button toggles.** One tap aims, the next tap stops; the button stays lit while you aim. You can still drag on it to look around. To get the old hold-to-aim back, set OPTIONS → BUTTONS → AIM BUTTON to HOLD.
+- **A zombie behind you growls.** Black Ops plays a special growl when a zombie is close behind you, about once every 5 s at most. It never played here, because the script checks whether each zombie is a dog using a value the game itself has to provide, and we didn't. It plays now.
+- **Zombies no longer get stuck at the foyer window** (the one with "Hold USE to Rebuild Barrier" next to the stairs).
+  - **What happened:** they cut a corner towards the window and walked into the wall beside it, until Black Ops' failsafe killed them.
+  - **Now:** they walk round the corner first.
+  - **Test, 3 min standing in the foyer:** 21 of 26 zombies got inside (before: 14 of 21) and none stood stuck (before: 4–6). The rest were still at their windows or just spawned.
+- **The black behind the windows is how the map is.** There's nothing to draw out there: Kino has no scenery behind those boards, only the ground zombies walk on.
+- **Checked on PC:**
+  - spawn and hit screens;
+  - head-shot damage, points and head pops;
+  - pause in solo, and menu taps not firing;
+  - aim toggle on and off;
+  - the behind-you growl playing;
+  - the window test above, and a doors-open run across the whole map with no zombies stuck.
+
+  Not tried on an iPhone yet.
+- **Still need from you:** where zombies walked over a boundary they shouldn't. Tell me the spot and what they crossed, and I'll fix it.
+
+**New in 0.3.30**
 
 **New in 0.3.30**
 - **New name: Bo1ZPocket.** It's the same app: it installs over Pocket Lab and keeps your games folder and settings. In the Files app the folder now shows as Bo1ZPocket.

@@ -308,6 +308,8 @@ pub(crate) struct TouchState {
     looks: BTreeMap<u64, Vec2>,
     /// Button index held by each finger.
     buttons: BTreeMap<u64, usize>,
+    /// AIM in toggle mode: aiming until AIM is pressed again.
+    aim_latched: bool,
 }
 
 impl TouchState {
@@ -317,8 +319,12 @@ impl TouchState {
 
     fn button_held(&self, index: usize) -> bool {
         self.buttons.values().any(|&b| b == index)
+            || (self.aim_latched && BUTTONS[index].key == AIM_KEY)
     }
 }
+
+/// The AIM button's key in `BUTTONS`.
+const AIM_KEY: &str = "aim";
 
 /// Edit mode (EDIT BUTTONS in the options, in a match): the buttons' positions while the
 /// player drags them, as shares of the screen, and the button a finger holds.
@@ -502,6 +508,9 @@ pub(crate) fn read_touch_controls(
                         diag::info!(Console, "touch: finger {id} on {}", BUTTONS[index].label);
                     }
                     state.buttons.insert(id, index);
+                    if BUTTONS[index].key == AIM_KEY && settings.touch_aim_toggle {
+                        state.aim_latched = !state.aim_latched;
+                    }
                     if BUTTONS[index].looks {
                         state.looks.insert(id, touch.position);
                     }
@@ -538,7 +547,21 @@ pub(crate) fn read_touch_controls(
     frame.move_axes = axes;
     frame.look_px = [look.x * LOOK_SCALE, look.y * LOOK_SCALE];
     frame.held.clear();
-    for &index in state.buttons.values() {
+    // AIM in toggle mode holds aim from one press to the next; any other button, and
+    // AIM in hold mode, while a finger is on it.
+    let toggle = settings.touch_aim_toggle;
+    if !toggle {
+        state.aim_latched = false;
+    }
+    for index in 0..BUTTON_COUNT {
+        let held = if toggle && BUTTONS[index].key == AIM_KEY {
+            state.aim_latched
+        } else {
+            state.buttons.values().any(|&b| b == index)
+        };
+        if !held {
+            continue;
+        }
         if let Some(id) = input_iw4::command_id_from_name(BUTTONS[index].command) {
             frame.held.insert((id, FIRST_TOUCH_KEYNUM + index as i32));
         }

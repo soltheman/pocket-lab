@@ -96,6 +96,8 @@ pub struct GameSettings {
     /// button sits in the custom layout ("FIRE:0.82,0.68;AIM:..", shares of the screen).
     pub touch_layout: u8,
     pub touch_icons: bool,
+    /// AIM toggles aiming on and off (true) or aims while held (false).
+    pub touch_aim_toggle: bool,
     pub touch_custom: String,
 
     pub revision: u64,
@@ -135,6 +137,7 @@ impl Default for GameSettings {
             touch_opacity: 1.0,
             touch_layout: Self::TOUCH_LAYOUT_CLASSIC,
             touch_icons: true,
+            touch_aim_toggle: true,
             touch_custom: String::new(),
             revision: 0,
         }

@@ -1612,6 +1612,9 @@ fn register_sound_and_fx(registry: &mut NativeRegistry) {
             entity_id(world, receiver)?;
             let alias = string(args, 0)?;
             let origin = origin_of(world, receiver)?;
+            if std::env::var_os("IW4L_SOUND_TRACE").is_some() {
+                diag::info!(Sim, "sound trace: playsound {alias} at {origin:?}");
+            }
             play_sound_at(world, origin, &alias)?;
             // BO1's `playsound(alias, notify)`: the entity is notified once the sound has
             // played (its voice lines wait on it). The sound's length isn't known here,
