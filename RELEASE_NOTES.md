@@ -29,8 +29,6 @@ Smoother on the phone, every touch button does its job, and co-op over Wi-Fi.
 - **Still need from you:** where zombies walked over a boundary they shouldn't. Tell me the spot and what they crossed, and I'll fix it.
 
 **New in 0.3.30**
-
-**New in 0.3.30**
 - **New name: Bo1ZPocket.** It's the same app: it installs over Pocket Lab and keeps your games folder and settings. In the Files app the folder now shows as Bo1ZPocket.
 - **Black Ops' own font for all the text.** That covers the points, ammo and weapon name, the buy and door hints ("Hold USE to Open Door [Cost: 750]"), game over, the main menu, the options and the touch-button labels.
   - It's read from your Black Ops install (its font sheet and font tables), so nothing is bundled.
