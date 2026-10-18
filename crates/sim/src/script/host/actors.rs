@@ -66,10 +66,11 @@ const RUN_MELEE_CLIPS: [&str; 3] = [
 /// Where it stops walking at a player (from feet to feet, horizontally).
 const REACH: f32 = 52.0;
 /// BO1 swings at a player this close (`anim.meleeRange`), and its hit lands only if the
-/// player is still this close, and in front, when the swing's "fire" note comes.
+/// player is still within it (to the edge of their body) when the swing's "fire" note
+/// comes; BO1's `ai_meleeRange`.
 const MELEE_RANGE: f32 = 64.0;
-/// How far round from where it faces a swing still connects.
-const MELEE_ARC: f32 = 70.0 * std::f32::consts::PI / 180.0;
+/// A player's collision half-width: BO1's melee box stops at the body's edge.
+const PLAYER_RADIUS: f32 = 15.0;
 /// A swing that steps forward stops short of this (it does not walk into the player).
 const MELEE_CLOSEST: f32 = 30.0;
 const HIT_DAMAGE: i32 = 50;
@@ -328,6 +329,11 @@ pub(crate) struct Actor {
     heading: Option<f32>,
     /// When to look ahead along its route again (`LOOKAHEAD`).
     lookahead_ms: i64,
+    /// BO1's look-ahead amount (the area a cut across the path may leave out): 0 until
+    /// first used, then cut down where a cut is blocked and grown back as it walks.
+    lookahead_amount: f32,
+    /// The look-ahead point last worked out, for which next node (kept `LOOKAHEAD_MS`).
+    lookahead_point: Option<([f32; 3], [f32; 3])>,
     /// Route nodes it got stuck heading straight for: never cut to them again.
     blocked_cuts: Vec<[f32; 3]>,
     /// The height it spawned at: far below that it has fallen out of the map.
@@ -368,6 +374,24 @@ fn clear_between(world: &mut World, object: u64, a: [f32; 3], b: [f32; 3]) -> bo
             b,
             (crate::bullet_collision::MASK_PLAYER_SOLID & !CONTENTS_PLAYERCLIP)
                 | CONTENTS_MONSTERCLIP,
+            ignore,
+        ),
+        crate::bullet_collision::TraceOutcome::Miss { .. }
+    )
+}
+
+/// Nothing of the world between two points (bodies aside): what a zombie's swing at a
+/// player has to get past.
+fn no_wall_between(world: &mut World, object: u64, a: [f32; 3], b: [f32; 3]) -> bool {
+    const CONTENTS_PLAYERCLIP: u32 = 0x0001_0000;
+    const CONTENTS_BODY: u32 = 0x0200_0000;
+    let ignore = super::natives::engine::trace_ignore(world, Some(&Value::Object(object)));
+    matches!(
+        super::natives::engine::entity_trace(
+            world,
+            a,
+            b,
+            crate::bullet_collision::MASK_PLAYER_SOLID & !CONTENTS_PLAYERCLIP & !CONTENTS_BODY,
             ignore,
         ),
         crate::bullet_collision::TraceOutcome::Miss { .. }
@@ -653,64 +677,139 @@ fn steer_point(
             break;
         }
     }
-    look_ahead(world, object, state, origin, now);
-    state.route.first().copied().unwrap_or(target)
+    // Worked out again every `LOOKAHEAD_MS`, or when the route moves on; none while it
+    // goes node by node after getting stuck.
+    if now < state.lookahead_ms {
+        match (state.lookahead_point, state.route.first()) {
+            (Some((point, for_node)), Some(&next)) if for_node == next => return point,
+            (None, Some(&next)) => return next,
+            _ => {}
+        }
+    }
+    let point = path_lookahead(world, object, state, origin, target)
+        .or_else(|| state.route.first().copied())
+        .unwrap_or(target);
+    state.lookahead_ms = now + LOOKAHEAD_MS;
+    state.lookahead_point = state.route.first().map(|&next| (point, next));
+    point
 }
 
-/// How many route nodes past the next one an actor may head straight for.
-const LOOKAHEAD: usize = 8;
-const LOOKAHEAD_MS: i64 = 150;
+/// BO1's look-ahead amount: at most this much area may be cut off the path (square
+/// units), never less than the least.
+const LOOKAHEAD_AREA_MAX: f32 = 65536.0;
+const LOOKAHEAD_AREA_MIN: f32 = 1024.0;
 
-/// Heads for the furthest of the next few route nodes it can walk straight to: in sight
-/// at knee and chest, on the floor of the next node, with no traversal on the way. The
-/// map's path nodes lie on a grid, and touching each one in turn zigzags; AI cut along
-/// their path instead.
-fn look_ahead(world: &mut World, object: u64, state: &mut Actor, origin: [f32; 3], now: i64) {
-    if state.route.len() < 2 || now < state.lookahead_ms {
-        return;
-    }
-    state.lookahead_ms = now + LOOKAHEAD_MS;
-    let floor = state.route[0][2];
-    let mut skip = 0;
-    for k in 1..state.route.len().min(LOOKAHEAD + 1) {
-        let node = state.route[k];
-        let rise = node[2] - floor;
-        if state.route_traverse.get(k).copied().unwrap_or(false) || rise.abs() > 64.0 {
-            break;
-        }
-        if state
-            .blocked_cuts
-            .iter()
-            .any(|cut| cut.iter().zip(node).all(|(a, b)| (a - b).abs() < 1.0))
+/// Where to steer, as BO1 follows a path (`Path_CalcLookahead` and its helpers, read
+/// from its executable): a point on the path itself, as far along as the area between
+/// the straight way to it and the path stays under the look-ahead amount, so it cuts a
+/// corner only that much; and only if the straight way there is clear (BO1's AI mask,
+/// monster clip included), else with the amount cut down. Never past a traversal's start.
+/// Passed nodes go first.
+fn path_lookahead(
+    world: &mut World,
+    object: u64,
+    state: &mut Actor,
+    origin: [f32; 3],
+    target: [f32; 3],
+) -> Option<[f32; 3]> {
+    // Passed nodes: it is beyond one, toward the next, and near it.
+    while state.route.len() >= 2
+        && !state.route_traverse.get(1).copied().unwrap_or(false)
+    {
+        let (a, b) = (state.route[0], state.route[1]);
+        let along = (b[0] - a[0]) * (origin[0] - a[0]) + (b[1] - a[1]) * (origin[1] - a[1]);
+        if along > 0.0
+            && flat_distance(origin, a) < 96.0
+            && body_clear(world, object, origin, b, 0.0)
         {
+            state.route.remove(0);
+            state.route_traverse.remove(0);
+            // BO1 grows the amount back as legs are done (by three quarters of their area).
+            state.lookahead_amount = (state.lookahead_amount * 2.0).min(LOOKAHEAD_AREA_MAX);
+        } else {
             break;
         }
-        // Up or down a flight of stairs or a ramp, the floor under the way has to be
-        // where the slope puts it: no cutting over a balcony's edge to the floor below.
-        if rise.abs() > 24.0
-            && ![1.0 / 3.0, 2.0 / 3.0].into_iter().all(|f: f32| {
+    }
+    let first = *state.route.first()?;
+    // The path from here: its nodes up to a traversal's start, then the goal.
+    let mut path = vec![origin];
+    let mut cut_short = false;
+    for (k, node) in state.route.iter().enumerate() {
+        path.push(*node);
+        if state.route_traverse.get(k + 1).copied().unwrap_or(false) {
+            cut_short = true;
+            break;
+        }
+    }
+    if !cut_short {
+        path.push(target);
+    }
+    let floor = first[2];
+    let mut amount = if state.lookahead_amount > 0.0 {
+        state.lookahead_amount
+    } else {
+        LOOKAHEAD_AREA_MAX
+    };
+    while amount >= LOOKAHEAD_AREA_MIN {
+        let point = area_lookahead(&path, origin, amount);
+        // Nodes sit about 32 over the floor; the goal is on it.
+        let rise = if point == target {
+            target[2] - origin[2]
+        } else {
+            point[2] - floor
+        };
+        let on_floor = rise.abs() <= 24.0
+            || [1.0 / 3.0, 2.0 / 3.0].into_iter().all(|f: f32| {
                 let at = [
-                    origin[0] + (node[0] - origin[0]) * f,
-                    origin[1] + (node[1] - origin[1]) * f,
+                    origin[0] + (point[0] - origin[0]) * f,
+                    origin[1] + (point[1] - origin[1]) * f,
                     origin[2] + rise * f,
                 ];
                 floor_near(world, object, at)
-            })
+            });
+        if flat_distance(origin, point) < 1.0
+            || on_floor && body_clear(world, object, origin, point, rise.clamp(-64.0, 64.0))
         {
-            break;
+            state.lookahead_amount = amount;
+            return Some(point);
         }
-        if !body_clear(world, object, origin, node, rise) {
-            break;
-        }
-        skip = k;
+        amount *= 0.5;
     }
-    if skip > 0 {
-        state.route.drain(..skip);
-        state
-            .route_traverse
-            .drain(..skip.min(state.route_traverse.len()));
-    }
+    // Nothing clear to cut to: the next node, as the route has it.
+    state.lookahead_amount = LOOKAHEAD_AREA_MIN;
+    Some(first)
 }
+
+/// The point along `path` (from `origin`) where the area between the path and the
+/// straight way from `origin` reaches `amount`: each leg adds its length times how far
+/// off its line `origin` stands. The path's end when it never does.
+fn area_lookahead(path: &[[f32; 3]], origin: [f32; 3], amount: f32) -> [f32; 3] {
+    let mut area = 0.0f32;
+    for leg in path.windows(2) {
+        let (a, b) = (leg[0], leg[1]);
+        let d = [b[0] - a[0], b[1] - a[1]];
+        let length = (d[0] * d[0] + d[1] * d[1]).sqrt();
+        if length < 0.001 {
+            continue;
+        }
+        let dir = [d[0] / length, d[1] / length];
+        let off = (dir[0] * (a[1] - origin[1]) - dir[1] * (a[0] - origin[0])).abs();
+        area += length * off;
+        if area >= amount && off > 0.001 {
+            let back = ((area - amount) / off).min(length);
+            let t = back / length;
+            return [
+                b[0] - d[0] * t,
+                b[1] - d[1] * t,
+                b[2] - (b[2] - a[2]) * t,
+            ];
+        }
+    }
+    *path.last().unwrap_or(&origin)
+}
+
+const LOOKAHEAD_MS: i64 = 150;
+
 
 /// Whether an actor could walk straight from `origin` to `to` (rising `rise` on the way):
 /// clear at knee and chest across the width of its body, not just a line through its
@@ -1908,21 +2007,18 @@ fn think(
             steering = Some(via);
             let to = [via[0] - origin[0], via[1] - origin[1]];
             let leg = (to[0] * to[0] + to[1] * to[1]).sqrt().max(0.001);
-            // It turns toward where it steers at a walking turn rate and walks the way it
-            // faces, slower while the turn is sharp: arcs, not snaps between directions.
+            // As BO1's actors move along a path (read from its executable): the walk turns
+            // toward the look-ahead at no more than `ai_turnRate` (220 degrees a second)
+            // and keeps its full pace; within 24 units of where it steers it heads there
+            // straight (round a window frame's corner, onto its spot).
             let toward = to[1].atan2(to[0]);
-            // A sharp turn (round a window frame's corner) it makes nearly on the spot,
-            // quickly; an arc that wide would take its shoulder into the corner.
             let was = state.heading.unwrap_or(toward);
-            let sharp = angle_between(was, toward).abs() > SHARP_TURN;
-            let rate = if sharp { TURN_RATE * 3.0 } else { TURN_RATE };
-            let heading = turn_toward(was, toward, rate * dt);
-            state.heading = Some(heading);
-            let along = if sharp {
-                0.1
+            let heading = if leg <= DIRECT_STEER {
+                toward
             } else {
-                angle_between(heading, toward).cos().max(0.25)
+                turn_toward(was, toward, TURN_RATE * dt)
             };
+            state.heading = Some(heading);
             // The clip BO1 picked for it, and the pace its root motion sets at this point
             // of its cycle (each step's surge), so its feet don't slide.
             let clip = chosen
@@ -1932,7 +2028,7 @@ fn think(
             let length = clip_length(world, clip).unwrap_or(1.0).max(0.05);
             let phase = (now - state.clip_start_ms) as f32 / 1000.0 / length;
             let pace = root_speed(world, clip, phase).unwrap_or(speed);
-            let step = (pace * along).min(leg / dt);
+            let step = pace.min(leg / dt);
             walk = [heading.cos() * step, heading.sin() * step];
             yaw = Some(heading.to_degrees());
         } else {
@@ -2070,6 +2166,9 @@ fn think(
             // Node by node for a while: a look-ahead past a step it can't walk up would
             // only steer it back into the step (and too far off to hop to).
             state.lookahead_ms = now + STUCK_DIRECT_MS;
+            // Its next node, with the least look-ahead (as BO1 trims a blocked one).
+            state.lookahead_point = None;
+            state.lookahead_amount = LOOKAHEAD_AREA_MIN;
             if let Some(via) = steering {
                 if state.blocked_cuts.len() >= 8 {
                     state.blocked_cuts.remove(0);
@@ -2174,9 +2273,19 @@ fn think(
         let facing = state.heading.map_or(0.0, |heading| {
             angle_between(heading, (at[1] - moved[1]).atan2(at[0] - moved[0]))
         });
-        let connects = flat_distance(moved, at) <= MELEE_RANGE
+        // As BO1's `melee()` (read from its executable): a box `ai_meleeWidth` 20 wide
+        // swept `ai_meleeRange` (64) from the zombie straight at its enemy, so it reaches
+        // the edge of the player's body, whichever way it faces, unless a wall is between.
+        let distance = flat_distance(moved, at);
+        let short = (distance - PLAYER_RADIUS).max(0.0) / distance.max(0.001);
+        let near_edge = [
+            moved[0] + (at[0] - moved[0]) * short,
+            moved[1] + (at[1] - moved[1]) * short,
+            moved[2] + 40.0,
+        ];
+        let connects = distance <= MELEE_RANGE + PLAYER_RADIUS
             && (at[2] - moved[2]).abs() < 72.0
-            && facing.abs() <= MELEE_ARC;
+            && no_wall_between(world, object, [moved[0], moved[1], moved[2] + 40.0], near_edge);
         if std::env::var_os("IW4L_ACTOR_DEBUG").is_some() {
             diag::info!(
                 Sim,
@@ -2329,11 +2438,13 @@ pub(crate) fn crosshair_targets(world: &mut World) {
     }
 }
 
-/// How fast an actor turns while it walks, and while it swings at a player (radians/s).
-const TURN_RATE: f32 = 300.0 * std::f32::consts::PI / 180.0;
+/// How fast an actor turns while it walks (BO1's `ai_turnRate` default, 220 degrees a
+/// second), and while it swings at a player (radians/s).
+const TURN_RATE: f32 = 220.0 * std::f32::consts::PI / 180.0;
 const ATTACK_TURN_RATE: f32 = 600.0 * std::f32::consts::PI / 180.0;
-/// A turn sharper than this is made nearly on the spot.
-const SHARP_TURN: f32 = 60.0 * std::f32::consts::PI / 180.0;
+/// Within this of where it steers, an actor heads there straight (BO1: a look-ahead of
+/// 24 units or less is followed without the turn rate).
+const DIRECT_STEER: f32 = 24.0;
 
 /// The signed angle from `from` to `to`, in (-pi, pi].
 fn angle_between(from: f32, to: f32) -> f32 {

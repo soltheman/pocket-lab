@@ -1,6 +1,26 @@
-# Bo1ZPocket 0.3.32
+# Bo1ZPocket 0.3.33
 
 Smoother on the phone, every touch button does its job, and co-op over Wi-Fi.
+
+**New in 0.3.33**
+
+Zombie movement and attacks are rebuilt to follow Black Ops' own rules, read from the game's executable on your PC.
+- **How they follow their path:**
+  - **Before:** a zombie looked for the furthest path point it could see and walked straight at it. That made sudden cuts and sharp changes of direction.
+  - **Now, as in Black Ops:** it steers at a point that slides along the path itself, and only cuts a corner by a limited amount. The cut is checked against Black Ops' zombie-only walls first, and made smaller if blocked.
+- **How they turn:** at most 220° a second (Black Ops' setting), at full walking pace. Before, it was 300°, with tripled turning and slowing down on sharp turns. They curve instead of snapping round.
+- **How their swings land:**
+  - **Before:** a hit needed you within 64 units and in front of the zombie.
+  - **Now, as in Black Ops:** the swing reaches 64 units to the edge of your body, aimed at you, whichever way the zombie faces. Walls stop it, and getting out of reach is how you dodge it.
+- **Tests on PC, 3 minutes each:**
+  - **Standing in the foyer:** 18 of 23 zombies reached you, none stuck.
+  - **Every door open, power on:** all 22 got inside, none stuck.
+  - **Direction changes while walking:** down about 10% (66° per 100 units, before 71–77°).
+
+  Not tried on an iPhone yet.
+- **Next:** hellhounds (dog rounds).
+
+**New in 0.3.32**
 
 **New in 0.3.32**
 - **Zombies stop cutting over stair rails.** This one was checked against Black Ops itself: I read its AI code from the game's executable on your PC.
