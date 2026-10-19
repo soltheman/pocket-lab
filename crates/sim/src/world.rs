@@ -3029,6 +3029,10 @@ impl SimState {
         &mut self.corpses
     }
 
+    pub(crate) fn actor_bodies(&self) -> &[[f32; 4]] {
+        &self.actor_melee_targets
+    }
+
     pub(crate) fn set_actor_melee_targets(&mut self, at: Vec<[f32; 4]>) {
         self.actor_melee_targets = at;
     }
@@ -3315,6 +3319,8 @@ impl SimState {
         report.players = adopted_player_count;
 
         self.prediction_remote_bodies.clear();
+        // The AI the snapshot names: solid to the predicted player as to the server's.
+        self.actor_melee_targets = snapshot.meta.actor_targets.clone();
         if let Some(local) = prediction_local {
             self.prediction_remote_bodies.extend(
                 snapshot

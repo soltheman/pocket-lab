@@ -197,7 +197,7 @@ stand_at()
     // IW4L_ZM_LOOK=shoot: bait that also turns to the nearest zombie's chest with its
     // ammo kept full (a test script holds fire), and logs each zombie that loses a limb.
     shoot = getdvar("iw4l_zm_look") == "shoot";
-    bait = getdvar("iw4l_zm_look") == "bait" || shoot;
+    bait = getdvar("iw4l_zm_look") == "bait" || getdvar("iw4l_zm_look") == "lunge" || shoot;
     if (bait)
         p setmaxhealth(100000);
     else
@@ -259,6 +259,26 @@ stand_at()
         }
         level thread aim_at_zombies();
         logprint("shoot debug: weapon " + p getcurrentweapon() + " has m1911_zm " + p hasweapon("m1911_zm"));
+    }
+    // IW4L_ZM_LOOK=lunge: free to move, facing the nearest zombie and logging the gap to
+    // it (feet to feet), to see a knife lunge stop at a zombie's edge.
+    if (getdvar("iw4l_zm_look") == "lunge")
+    {
+        for (;;)
+        {
+            wait 0.1;
+            p.health = 100000;
+            zombies = getaispeciesarray("axis", "all");
+            nearest = undefined;
+            for (i = 0; i < zombies.size; i++)
+                if (!isdefined(nearest) || distance2d(zombies[i].origin, p.origin) < distance2d(nearest.origin, p.origin))
+                    nearest = zombies[i];
+            if (isdefined(nearest))
+            {
+                p setplayerangles(vectortoangles(nearest.origin + (0, 0, 40) - p geteye()));
+                logprint("lunge debug: gap " + distance2d(nearest.origin, p.origin) + " player " + p.origin + " zombie " + nearest getentitynumber() + " " + nearest.origin);
+            }
+        }
     }
     for (;;)
     {

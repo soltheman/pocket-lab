@@ -2016,8 +2016,23 @@ fn alive_body_clips(world: &FrameWorld) -> Vec<PlayerBodyClip> {
                 origin: body.origin,
             }),
     );
+    // BO1's AI are solid to players: a lunge stops at a zombie's edge and nobody walks
+    // through one. Numbered past any client so they never match the mover.
+    bodies.extend(
+        world
+            .actor_bodies()
+            .iter()
+            .enumerate()
+            .map(|(index, at)| PlayerBodyClip {
+                entnum: ACTOR_BODY_ENTNUM_BASE + index as u16,
+                origin: [at[0], at[1], at[2]],
+            }),
+    );
     bodies
 }
+
+/// Body numbers for the AI in player movement's body list: above every client slot.
+const ACTOR_BODY_ENTNUM_BASE: u16 = 1024;
 
 #[derive(Clone, Copy)]
 struct ClipBackend<'a> {

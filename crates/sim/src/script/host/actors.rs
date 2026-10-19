@@ -1998,6 +1998,28 @@ fn push_actors(world: &mut World, object: u64, from: [f32; 3], to: [f32; 3]) -> 
         }
         others
     };
+    // Players are solid to the AI too (BO1 body-blocks zombies): a walker stops at a
+    // player's edge rather than passing through.
+    let frame = FrameWorld::from_world(world);
+    let players: Vec<[f32; 3]> = frame
+        .client_ids_sorted()
+        .into_iter()
+        .filter(|id| {
+            frame
+                .client_meta(*id)
+                .is_some_and(|m| m.lifecycle == crate::ClientLifecycle::Alive)
+        })
+        .filter_map(|id| frame.player(id).map(|ps| ps.origin))
+        .collect();
+    for &at in &players {
+        let apart = flat_distance(to, at);
+        if apart < RADIUS + PLAYER_RADIUS
+            && (at[2] - to[2]).abs() < GOAL_HEIGHT
+            && flat_distance(from, at) >= apart
+        {
+            return from;
+        }
+    }
     let shove = step.max(PUSH_MIN_STEP);
     let motion = [(to[0] - from[0]) / step, (to[1] - from[1]) / step];
     for &(other, at, pushable) in &others {
@@ -2009,7 +2031,8 @@ fn push_actors(world: &mut World, object: u64, from: [f32; 3], to: [f32; 3]) -> 
         if flat_distance(from, at) < apart {
             continue;
         }
-        let crowd: Vec<[f32; 3]> = others_at(&others, other);
+        let mut crowd: Vec<[f32; 3]> = others_at(&others, other);
+        crowd.extend(players.iter().copied());
         if pushable && shove_actor(world, other, at, to, motion, shove, &crowd) {
             continue;
         }
