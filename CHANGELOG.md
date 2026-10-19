@@ -1,4 +1,15 @@
-# Bo1ZPocket 0.3.35
+# Bo1ZPocket 0.3.36
+
+**New in 0.3.36**
+
+Hellhounds, matched to Black Ops' dog scripts and its engine.
+- **They chase:** Black Ops' scripts never give a dog anywhere to go (only its spawn spot); its engine runs a dog at its enemy. Ours now does the same, so dogs stop standing where they spawned.
+- **Their own animations:** run, idle, bite, jumps up and down, and the four deaths picked by where the killing shot came from. Before, dogs played no animation at all.
+- **Root motion:** a dog runs at its run clip's own pace (about 360 units a second).
+- **Bites:** a dog bites a player within 64 units (`meleeAttackDist`) for 40 damage (`meleeDamage`), lasting 1.2 to 1.6 seconds, landing on the clip's `dog_melee` note. Dogs take turns: one starts a bite at most every 200 ms per player.
+- **Fixed:** `GetAISpeciesArray` ignored the species, so Black Ops counted every zombie as a dog (it stops spawning dogs at 9).
+- **Checked on PC:** special dog spawns and a forced dog round on Kino; all bites hit, deaths play by direction. Dogs and zombies still don't keep apart from each other (they can stand on the same spot). Not tried on an iPhone yet.
+
 
 Smoother on the phone, every touch button does its job, and co-op over Wi-Fi.
 

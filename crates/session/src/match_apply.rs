@@ -443,10 +443,12 @@ pub fn apply_prepared_match(
                 )
             })
         }));
-        // BO1 moves a zombie by its clip's root motion: walking, swinging, climbing in and
-        // jumping down. The sim samples each zombie clip's delta (that track alone).
+        // BO1 moves a zombie (and a hellhound) by its clip's root motion: walking,
+        // swinging, climbing in and jumping down. The sim samples each zombie and dog
+        // clip's delta (that track alone).
         content.set_anim_deltas(xanims.0.names().filter_map(|name| {
-            if !name.to_ascii_lowercase().starts_with("ai_zombie") {
+            let lower = name.to_ascii_lowercase();
+            if !(lower.starts_with("ai_zombie") || lower.starts_with("zombie_dog")) {
                 return None;
             }
             let parts = &[

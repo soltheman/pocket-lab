@@ -153,7 +153,15 @@ fn register_implemented(registry: &mut NativeRegistry) {
             Some(Value::String(team)) if team.to_string() != "all" => Some(team.to_string()),
             _ => None,
         };
-        let actors = crate::script::host::actors::living(world, team.as_deref());
+        let mut actors = crate::script::host::actors::living(world, team.as_deref());
+        // The species: "all", a hellhound's ("zombie_dog"), or a zombie's.
+        if let Some(Value::String(species)) = args.get(1) {
+            let species = species.to_string();
+            if species != "all" {
+                let dogs = species.contains("dog");
+                actors.retain(|actor| crate::script::host::actors::is_dog_value(world, actor) == dogs);
+            }
+        }
         new_array(world, actors)
     });
     for name in ["codespawnerspawn", "codespawnerforcespawn"] {

@@ -45,6 +45,8 @@ pub(crate) const ZOMBIES_HUD: (&str, &str) = (
         level thread revive_test();
     if (getdvar("iw4l_zm_watch") == "powerup")
         level thread drop_powerup();
+    if (getdvar("iw4l_zm_watch") == "dogs")
+        level thread spawn_dogs();
 }
 
 // The map's room tone, which BO1 plays from its client scripts (`<map>_amb.csc`:
@@ -569,6 +571,62 @@ drop_powerup()
     wait 4;
     p setorigin(spot);
     logprint("powerup debug: grabbed");
+}
+
+// Debug (IW4L_ZM_WATCH=dogs): four hellhounds through Black Ops' own special_dog_spawn
+// (as its power-ups and teleporters do). The first player faces the nearest one, its
+// health topped up, and each dog's position is logged every 2 seconds.
+spawn_dogs()
+{
+    wait 10;
+    players = getplayers();
+    if (!players.size)
+        return;
+    p = players[0];
+    // IW4L_ZM_LOOK=round: a real dog round instead, next round, with round 1's zombies
+    // killed off.
+    if (getdvar("iw4l_zm_look") == "round")
+    {
+        level.next_dog_round = level.round_number + 1;
+        logprint("dog debug: dog round next (round " + level.next_dog_round + ")");
+        while (!isdefined(level.flag) || !isdefined(level.flag["dog_round"]) || !level.flag["dog_round"])
+        {
+            zombies = getaispeciesarray("axis", "zombie");
+            for (i = 0; i < zombies.size; i++)
+                zombies[i] dodamage(zombies[i].health + 10, zombies[i].origin);
+            wait 1;
+        }
+        logprint("dog debug: spawning (dog round " + level.round_number + ")");
+    }
+    else
+    {
+        level thread maps\_zombiemode_ai_dogs::special_dog_spawn(undefined, 4);
+        logprint("dog debug: spawning 4");
+    }
+    for (tick = 0;; tick++)
+    {
+        wait 0.1;
+        p.health = 100;
+        dogs = getaispeciesarray("all", "zombie_dog");
+        nearest = undefined;
+        for (i = 0; i < dogs.size; i++)
+        {
+            if (!isdefined(dogs[i].isdog) || !dogs[i].isdog)
+                continue;
+            if (!isdefined(nearest) || distance(dogs[i].origin, p.origin) < distance(nearest.origin, p.origin))
+                nearest = dogs[i];
+            if (tick % 20 == 0)
+                logprint("dog debug: " + dogs[i] getentitynumber() + " at " + dogs[i].origin + " player " + distance(dogs[i].origin, p.origin));
+        }
+        if (isdefined(nearest))
+            p setplayerangles(vectortoangles(nearest.origin + (0, 0, 20) - p geteye()));
+        // IW4L_ZM_LOOK=kill: after 15 seconds the player kills the nearest dog each second.
+        if (getdvar("iw4l_zm_look") == "kill" && tick >= 150 && tick % 10 == 0 && isdefined(nearest))
+        {
+            logprint("dog debug: killing " + nearest getentitynumber());
+            nearest dodamage(nearest.health + 10, p.origin, p);
+        }
+    }
 }
 
 // Co-op joiners: BO1 places every player on its own start point once, when all of

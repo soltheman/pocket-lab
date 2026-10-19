@@ -63,6 +63,31 @@ const RUN_MELEE_CLIPS: [&str; 3] = [
     "ai_zombie_run_attack_v2",
     "ai_zombie_run_attack_v3",
 ];
+/// BO1's hellhound clips (`anim.dogAnims["zombie"]` in animscripts/zombie_dog_init).
+const DOG_RUN_CLIPS: [&str; 1] = ["zombie_dog_run"];
+const DOG_IDLE: &str = "zombie_dog_idle";
+const DOG_BITE: &str = "zombie_dog_run_attack";
+/// By BO1's `getAnimDirection(damageyaw)`: front, right, back, left.
+const DOG_DEATH_CLIPS: [&str; 4] = [
+    "zombie_dog_death_front",
+    "zombie_dog_death_hit_right",
+    "zombie_dog_death_hit_back",
+    "zombie_dog_death_hit_left",
+];
+const DOG_JUMP_DOWN_CLIPS: [(f32, &str); 3] = [
+    (40.0, "zombie_dog_traverse_down_40"),
+    (126.0, "zombie_dog_traverse_down_126"),
+    (190.0, "zombie_dog_traverse_down_190"),
+];
+const DOG_JUMP_UP_CLIPS: [(f32, &str); 2] = [
+    (40.0, "zombie_dog_traverse_up_40"),
+    (80.0, "zombie_dog_traverse_up_80"),
+];
+const DOG_MANTLE_CLIPS: [&str; 1] = ["zombie_dog_run_jump_window_40"];
+/// A hellhound bites a player within its `meleeAttackDist` (BO1 sets 64, and
+/// `meleeDamage` 40, on its dogs); its bite clip stays in place.
+const DOG_MELEE_ATTACK_DIST: f32 = 64.0;
+const DOG_BITE_DAMAGE: i32 = 40;
 /// Where it stops walking at a player (from feet to feet, horizontally).
 const REACH: f32 = 52.0;
 /// BO1 swings at a player this close (`anim.meleeRange`), and its hit lands only if the
@@ -309,7 +334,7 @@ pub(crate) struct Actor {
     clip_start_ms: i64,
     fall: f32,
     died_ms: Option<i64>,
-    /// The clip the body plays now (dogs play none yet).
+    /// The clip the body plays now.
     clip: Option<&'static str>,
     goal: Option<Goal>,
     goal_yaw: Option<f32>,
@@ -959,11 +984,7 @@ pub(crate) fn anim_scripted(
         );
     }
     let mut runtime = world.resource_mut::<Runtime>();
-    let dog = runtime
-        .entities
-        .get(&object)
-        .is_some_and(|entity| entity.classname.contains("dog"));
-    if let Some(entity) = runtime.entities.get_mut(&object).filter(|_| !dog) {
+    if let Some(entity) = runtime.entities.get_mut(&object) {
         entity.anim_op = Some(Some(clip.as_str().into()));
     }
     if let Some(actor) = runtime.actors.get_mut(&object) {
@@ -1124,6 +1145,17 @@ fn traverse_clip(
     };
     let drop = from[2] - to[2];
     let script = script.unwrap_or("");
+    // A hellhound has its own (`anim.dogAnims["zombie"].traverse`): up, down, or over.
+    if is_dog(&mut world.resource_mut::<Runtime>(), object) {
+        let sets: &[(f32, &'static str)] = if drop < -20.0 {
+            &DOG_JUMP_UP_CLIPS
+        } else if drop > 20.0 {
+            &DOG_JUMP_DOWN_CLIPS
+        } else {
+            &[]
+        };
+        return nearest_clip(world, &[sets], drop.abs()).unwrap_or(DOG_MANTLE_CLIPS[0]);
+    }
     let crawl_first = |crawl: &'static [(f32, &'static str)],
                        walk: &'static [(f32, &'static str)]| {
         if legs { vec![walk] } else { vec![crawl, walk] }
@@ -1289,6 +1321,9 @@ fn gait(
     runtime: &mut Runtime,
     object: u64,
 ) -> (f32, &'static [&'static str], Option<&'static str>) {
+    if is_dog(runtime, object) {
+        return (SPRINT_SPEED, &DOG_RUN_CLIPS, None);
+    }
     let speed = match runtime.object_field(object, "zombie_move_speed") {
         Value::String(speed) => speed.to_string(),
         _ => String::new(),
@@ -1336,9 +1371,6 @@ fn play(world: &mut World, object: u64, state: &mut Actor, clip: &'static str) {
     let Some(entity) = runtime.entities.get_mut(&object) else {
         return;
     };
-    if entity.classname.contains("dog") {
-        return;
-    }
     state.clip = Some(clip);
     entity.anim_op = Some(Some(clip.into()));
     state.clip_start_ms = super::players::now_ms(world);
@@ -1635,6 +1667,30 @@ fn finish(world: &mut World, object: u64, args: &[Value]) {
     }
 }
 
+/// BO1's dog death by where the killing hit came from (`getAnimDirection(damageyaw)`):
+/// the hit's direction (`direction`, else from `point`) against the dog's facing.
+fn dog_death_clip(world: &mut World, object: u64, args: &[Value]) -> &'static str {
+    let mut runtime = world.resource_mut::<Runtime>();
+    let at = vec_field(&mut runtime, object, "origin");
+    let facing = vec_field(&mut runtime, object, "angles")[1];
+    let direction = match (args.get(7), args.get(6)) {
+        (Some(Value::Vector(d)), _) if d[0] != 0.0 || d[1] != 0.0 => *d,
+        (_, Some(Value::Vector(point))) => [at[0] - point[0], at[1] - point[1], 0.0],
+        _ => return DOG_DEATH_CLIPS[0],
+    };
+    let along = direction[1].atan2(direction[0]).to_degrees();
+    let yaw = (along - facing + 540.0).rem_euclid(360.0) - 180.0;
+    if !(-135.0..=135.0).contains(&yaw) {
+        DOG_DEATH_CLIPS[0]
+    } else if yaw > 45.0 {
+        DOG_DEATH_CLIPS[1]
+    } else if yaw > -45.0 {
+        DOG_DEATH_CLIPS[2]
+    } else {
+        DOG_DEATH_CLIPS[3]
+    }
+}
+
 fn kill(world: &mut World, object: u64, args: &[Value], attacker: Value) {
     let now = super::players::now_ms(world);
     if let Some(actor) = world.resource_mut::<Runtime>().actors.get_mut(&object) {
@@ -1648,7 +1704,12 @@ fn kill(world: &mut World, object: u64, args: &[Value], attacker: Value) {
         .resource_mut::<Runtime>()
         .set_object_field(object, "attacker", attacker.clone());
     if let Some(mut state) = world.resource::<Runtime>().actors.get(&object).cloned() {
-        play(world, object, &mut state, pick(&DEATH_CLIPS, object));
+        let clip = if is_dog(&mut world.resource_mut::<Runtime>(), object) {
+            dog_death_clip(world, object, args)
+        } else {
+            pick(&DEATH_CLIPS, object)
+        };
+        play(world, object, &mut state, clip);
         if let Some(slot) = world.resource_mut::<Runtime>().actors.get_mut(&object) {
             *slot = state;
         }
@@ -1678,6 +1739,28 @@ fn kill(world: &mut World, object: u64, args: &[Value], attacker: Value) {
         "animscripts/zombie_death::main"
     };
     let _ = run_now(world, death, Value::Object(object), Vec::new(), now);
+}
+
+/// The engine's dog flag, which the spawn sets from the aitype.
+fn is_dog(runtime: &mut Runtime, object: u64) -> bool {
+    truthy(&runtime.object_field(object, "isdog"))
+}
+
+/// Whether a script value is a hellhound.
+pub(crate) fn is_dog_value(world: &mut World, value: &Value) -> bool {
+    match value {
+        Value::Object(object) => is_dog(&mut world.resource_mut::<Runtime>(), *object),
+        _ => false,
+    }
+}
+
+/// A float field, or `default` when the scripts have not set it.
+fn float_field(runtime: &mut Runtime, object: u64, name: &str, default: f32) -> f32 {
+    match runtime.object_field(object, name) {
+        Value::Int(n) => n as f32,
+        Value::Float(f) => f,
+        _ => default,
+    }
 }
 
 /// GSC truth: a defined, non-zero value.
@@ -1711,6 +1794,44 @@ fn window_climb(runtime: &mut Runtime, object: u64) -> Option<([f32; 3], f32)> {
         at[2],
     ];
     Some((to, yaw))
+}
+
+/// Hellhounds take turns on a player: one starts a bite at most every 200 ms
+/// (`shouldWaitInCombatIdle` / `setNextDogAttackAllowTime(200)`). True claims the turn.
+fn dog_may_bite(world: &mut World, client: crate::ClientId, now: i64) -> bool {
+    let mut runtime = world.resource_mut::<Runtime>();
+    let Some(player) = runtime.players.get(&client.0).map(|slot| slot.object) else {
+        return true;
+    };
+    if let Value::Int(allow) = runtime.object_field(player, "dogattackallowtime")
+        && now < i64::from(allow)
+    {
+        return false;
+    }
+    runtime.set_object_field(player, "dogattackallowtime", Value::Int((now + 200) as i32));
+    true
+}
+
+/// The player BO1's scripts set as this actor's `favoriteenemy`, when it is one it can go
+/// for now.
+fn favorite_enemy(
+    world: &mut World,
+    object: u64,
+    targets: &[(crate::ClientId, [f32; 3])],
+) -> Option<(crate::ClientId, [f32; 3])> {
+    let mut runtime = world.resource_mut::<Runtime>();
+    let Value::Object(enemy) = runtime.object_field(object, "favoriteenemy") else {
+        return None;
+    };
+    let client = runtime
+        .players
+        .iter()
+        .find(|(_, slot)| slot.object == enemy)
+        .map(|(client, _)| *client)?;
+    targets
+        .iter()
+        .find(|(id, _)| id.0 == client)
+        .copied()
 }
 
 /// Each tick: play out scripted clips and window climbs, walk every other living actor at
@@ -1926,7 +2047,24 @@ fn think(
         .iter()
         .min_by(|a, b| flat_distance(origin, a.1).total_cmp(&flat_distance(origin, b.1)))
         .copied();
+    // A hellhound in play runs at its enemy (`favoriteenemy`, else the nearest player)
+    // whatever its goal: BO1's scripts only ever give a dog its spawn spot as a goal, and
+    // the engine's dog chases its enemy.
+    let (dog, in_play) = {
+        let mut runtime = world.resource_mut::<Runtime>();
+        (
+            is_dog(&mut runtime, object),
+            !truthy(&runtime.object_field(object, "ignoreall")),
+        )
+    };
+    let nearest = if dog {
+        favorite_enemy(world, object, &targets).or(nearest)
+    } else {
+        nearest
+    };
+    let chasing = dog && in_play;
     let goal = match &state.goal {
+        _ if chasing => None,
         Some(Goal::Pos(at)) => Some(*at),
         Some(Goal::Entity(target)) => {
             let target = *target;
@@ -1949,18 +2087,25 @@ fn think(
     .max(1.0);
 
     // In the playable area (`ignoreall` cleared), a player in reach gets swung at.
-    let in_play = !truthy(
-        &world
-            .resource_mut::<Runtime>()
-            .object_field(object, "ignoreall"),
-    );
     // A player within BO1's melee range starts a swing (`MeleeCombat`); the hit lands, or
-    // misses, at the swing's "fire" notes (after the move, below).
+    // misses, at the swing's "fire" notes (after the move, below). A dog bites from its
+    // `meleeAttackDist`.
+    let reach = if dog {
+        float_field(
+            &mut world.resource_mut::<Runtime>(),
+            object,
+            "meleeattackdist",
+            DOG_MELEE_ATTACK_DIST,
+        )
+    } else {
+        MELEE_RANGE
+    };
     if state.swing.is_none()
         && in_play
         && let Some((client, _)) = nearest.filter(|(_, at)| {
-            flat_distance(origin, *at) <= MELEE_RANGE && (at[2] - origin[2]).abs() < 72.0
+            flat_distance(origin, *at) <= reach && (at[2] - origin[2]).abs() < 72.0
         })
+        && (!dog || dog_may_bite(world, client, now))
     {
         start_swing(world, object, state, client, now);
     }
@@ -2032,7 +2177,7 @@ fn think(
             walk = [heading.cos() * step, heading.sin() * step];
             yaw = Some(heading.to_degrees());
         } else {
-            play(world, object, state, "ai_zombie_idle_v1");
+            play(world, object, state, if dog { DOG_IDLE } else { "ai_zombie_idle_v1" });
             if goal.is_some() && !state.goal_reached {
                 state.goal_reached = true;
                 raise(world, Value::Object(object), "goal", Vec::new());
@@ -2303,8 +2448,18 @@ fn think(
     if now - swing.start_ms >= swing.length_ms {
         state.swing = None;
     }
+    let damage = if is_dog(&mut world.resource_mut::<Runtime>(), object) {
+        float_field(
+            &mut world.resource_mut::<Runtime>(),
+            object,
+            "meleedamage",
+            DOG_BITE_DAMAGE as f32,
+        ) as i32
+    } else {
+        HIT_DAMAGE
+    };
     for client in hits {
-        super::players::actor_hit_player(world, client, object, HIT_DAMAGE, moved);
+        super::players::actor_hit_player(world, client, object, damage, moved);
     }
 }
 
@@ -2317,13 +2472,17 @@ fn start_swing(
     target: crate::ClientId,
     now: i64,
 ) {
+    let dog = is_dog(&mut world.resource_mut::<Runtime>(), object);
     let walker = walks(&mut world.resource_mut::<Runtime>(), object);
-    let moving: &[&'static str] = if walker {
+    let moving: &[&'static str] = if dog {
+        &[]
+    } else if walker {
         &WALK_MELEE_CLIPS
     } else {
         &RUN_MELEE_CLIPS
     };
-    let choices: Vec<&'static str> = MELEE_CLIPS
+    let swings: &[&'static str] = if dog { &[DOG_BITE] } else { &MELEE_CLIPS };
+    let choices: Vec<&'static str> = swings
         .iter()
         .chain(moving)
         .copied()
@@ -2339,12 +2498,26 @@ fn start_swing(
     roll = (roll ^ (roll >> 27)).wrapping_mul(0x94D0_49BB_1331_11EB);
     roll ^= roll >> 31;
     let clip = choices[(roll % choices.len() as u64) as usize];
-    let length_ms = clip_length(world, clip).map_or(1200, |seconds| (seconds * 1000.0) as i64);
+    // A dog's bite runs 1.2 to 1.6 seconds (`attack_time = 1.2 + randomfloat(0.4)`) and
+    // lands at its "dog_melee" note.
+    let length_ms = if dog {
+        1200 + (roll >> 8) as i64 % 400
+    } else {
+        clip_length(world, clip).map_or(1200, |seconds| (seconds * 1000.0) as i64)
+    };
+    let note = if dog { "dog_melee" } else { "fire" };
     let mut fires: Vec<f32> = clip_notes(world, clip)
         .iter()
-        .filter(|note| note.name.eq_ignore_ascii_case("fire"))
+        .filter(|n| n.name.eq_ignore_ascii_case(note))
         .map(|note| note.time)
         .collect();
+    if dog {
+        // Its notes are shares of the clip; the bite's own length runs on from them.
+        let clip_ms = clip_length(world, clip).map_or(length_ms as f32, |s| s * 1000.0);
+        for share in &mut fires {
+            *share *= clip_ms / length_ms as f32;
+        }
+    }
     if fires.is_empty() {
         fires.push(0.45);
     }
