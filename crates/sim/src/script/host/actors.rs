@@ -98,6 +98,10 @@ const QUAD_IDLE_CLIPS: [&str; 2] = ["ai_zombie_quad_idle", "ai_zombie_quad_idle_
 const QUAD_JUMP_DOWN_120: &str = "ai_zombie_quad_jump_down_128";
 const QUAD_MANTLE: &str = "ai_zombie_traverse_v3";
 const QUAD_WALL_CRAWL: &str = "ai_zombie_quad_crawl_sprint_wall_intro";
+/// How tall each kind stands, for touch aim assist's target boxes.
+const ZOMBIE_HEIGHT: f32 = 64.0;
+const DOG_HEIGHT: f32 = 32.0;
+const QUAD_HEIGHT: f32 = 28.0;
 /// BO1's least push, a frame (`ai` push: 1.5 units each 50 ms frame).
 const PUSH_MIN_STEP: f32 = 1.5;
 /// Where it stops walking at a player (from feet to feet, horizontally).
@@ -2993,14 +2997,29 @@ mod hitloc_tests {
 /// Where every living zombie stands, for the players' melee lunge (BO1 lunges a knife
 /// onto an AI just out of reach as it does onto a player); the client picks from these.
 pub(crate) fn publish_melee_targets(world: &mut World) {
-    let at: Vec<[f32; 3]> = {
+    let at: Vec<[f32; 4]> = {
         let runtime = world.resource::<Runtime>();
+        let truthy_field = |object: u64, name: &str| runtime.peek_field(object, name).is_some_and(truthy);
         runtime
             .actors
             .iter()
             .filter(|(_, actor)| !actor.is_dead())
             .filter_map(|(object, _)| match runtime.peek_field(*object, "origin") {
-                Some(Value::Vector(v)) => Some(*v),
+                Some(Value::Vector(v)) => {
+                    // How tall it stands: a hellhound and a Nova crawler are low.
+                    let quad = matches!(
+                        runtime.peek_field(*object, "animname"),
+                        Some(Value::String(name)) if &**name == "quad_zombie"
+                    );
+                    let height = if truthy_field(*object, "isdog") {
+                        DOG_HEIGHT
+                    } else if quad {
+                        QUAD_HEIGHT
+                    } else {
+                        ZOMBIE_HEIGHT
+                    };
+                    Some([v[0], v[1], v[2], height])
+                }
                 _ => None,
             })
             .collect()

@@ -3551,6 +3551,11 @@ fn capture_t5_body_facts(
     facts.penetrate_type = i32_at_t5(stream, body, T5_WEAPON_DEF_PENETRATE_TYPE_OFF);
     // BO1 has no multiplier (IW4 added it): the type alone sets how deep a bullet goes.
     facts.penetrate_multiplier = 1.0;
+    // Console aim assist reach: `autoAimRange` (the ADS snap) and `aimAssistRange` (the
+    // slowdown); BO1 keeps one assist range for hip and ADS alike.
+    facts.auto_aim_range = f(0x490);
+    facts.aim_assist_range = f(0x494);
+    facts.aim_assist_range_ads = facts.aim_assist_range;
     facts.movement = WeaponMovementOfsInputs {
         stand_move: v3(0x1b8),
         stand_rot: v3(0x1c4),

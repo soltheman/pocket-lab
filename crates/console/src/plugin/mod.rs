@@ -116,6 +116,7 @@ impl Plugin for ConsolePlugin {
             .init_resource::<crate::touch_controls::TouchFrame>()
             .init_resource::<crate::touch_controls::TouchState>()
             .init_resource::<crate::touch_controls::TouchEditing>()
+            .init_resource::<crate::touch_controls::WeaponTapZone>()
             .init_resource::<crate::zombies_menu::ZombiesOptionsOpen>()
             .init_resource::<crate::zombies_menu::OptionsTab>()
             .init_resource::<crate::zombies_menu::MenuCommand>()
@@ -405,6 +406,7 @@ fn publish_client_action_input(
         devices.aiming_with_pad = false;
     }
     out.pad_aim_assist = 0;
+    out.touch_aim_assist = settings.touch_aim_assist;
     out.pad_move = [0.0; 2];
     out.pad_look = [0.0; 2];
     out.pad_look_delta = [0.0; 2];

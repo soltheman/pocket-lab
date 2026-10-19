@@ -1,4 +1,12 @@
-# Bo1ZPocket 0.3.37
+# Bo1ZPocket 0.3.38
+
+**New in 0.3.38**
+
+- **Aim assist (BO1's console defaults, read from its executable):** `aim_slowdown_enabled` 1 (the look slows to 0.4 from the hip, 0.5 aiming, while the crosshair is within 90x90 of a target), `aim_autoaim_enabled` 1 (raising the sights onto a target inside 160x120 pulls the view onto it at lerp 40), `aim_lockon_enabled` 0 (left off). Reach from each gun's `autoAimRange` and `aimAssistRange`. Zombies, hellhounds and crawlers are targets (aimed at three quarters of their height). New option: AIM ASSIST (on by default).
+- **SWAP button removed:** a tap on the weapon name and ammo switches guns.
+- **USE shows only while BO1's use prompt is up.**
+- **Checked:** zombie damage (60 a hit) and health regen (full again about 3.3 seconds after a hit) come from BO1's own scripts and match. Aim assist unit-tested; USE and the weapon tap checked on PC at iPhone size. Not tried on an iPhone yet.
+
 
 **New in 0.3.37**
 

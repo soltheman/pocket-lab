@@ -103,7 +103,7 @@ const CLASSIC: [Option<Seat>; BUTTON_COUNT] = [
     seat(40.0, 110.0, 28.0),  // CROUCH
     seat(325.0, 60.0, 26.0),  // KNIFE
     seat(330.0, 150.0, 26.0), // NADE
-    seat(40.0, 290.0, 26.0),  // SWAP
+    None,                     // SWAP: a tap on the weapon readout instead
     None,                     // second FIRE
 ];
 
@@ -146,12 +146,17 @@ struct Placed {
 
 /// The buttons' size as set (BUTTON SIZE), held down so a layout's highest button still
 /// fits under the top of the screen.
+/// How tall the layouts are fitted as (logical points up from the bottom): where the
+/// SWAP button's top was, so the buttons keep their size now that SWAP is a tap on the
+/// weapon readout.
+const LAYOUT_TOP: f32 = 316.0;
+
 fn button_scale(wanted: f32, size: Vec2, seats: &[Option<Seat>]) -> f32 {
     let tallest = seats
         .iter()
         .flatten()
         .map(|seat| seat.bottom + seat.radius)
-        .fold(1.0, f32::max);
+        .fold(LAYOUT_TOP, f32::max);
     wanted.min((size.y - 8.0) / tallest).max(0.5)
 }
 
@@ -310,6 +315,8 @@ pub(crate) struct TouchState {
     buttons: BTreeMap<u64, usize>,
     /// AIM in toggle mode: aiming until AIM is pressed again.
     aim_latched: bool,
+    /// BO1's use prompt is up: the USE button shows.
+    use_available: bool,
 }
 
 impl TouchState {
@@ -325,6 +332,22 @@ impl TouchState {
 
 /// The AIM button's key in `BUTTONS`.
 const AIM_KEY: &str = "aim";
+const USE_KEY: &str = "use";
+const SWAP_KEY: &str = "swap";
+
+/// Where the weapon name and ammo are drawn (logical pixels): a tap there switches guns
+/// (SWAP has no button of its own). Set by the zombies HUD as it places the readout.
+#[derive(Resource, Default, Clone, Copy)]
+pub(crate) struct WeaponTapZone(pub Option<Rect>);
+
+/// USE shows only while there is something to use (BO1's use prompt is up).
+fn use_available(hint: Option<&hud::UseHintText>) -> bool {
+    hint.is_some_and(|hint| hint.text.is_some() && hint.alpha > 0.0)
+}
+
+fn index_of(key: &str) -> usize {
+    BUTTONS.iter().position(|b| b.key == key).expect("a touch button key")
+}
 
 /// Edit mode (EDIT BUTTONS in the options, in a match): the buttons' positions while the
 /// player drags them, as shares of the screen, and the button a finger holds.
@@ -467,6 +490,8 @@ pub(crate) fn read_touch_controls(
     mut editing: ResMut<TouchEditing>,
     mut state: ResMut<TouchState>,
     mut frame: ResMut<TouchFrame>,
+    hint: Option<Res<hud::UseHintText>>,
+    weapon_tap: Res<WeaponTapZone>,
 ) {
     frame.look_px = [0.0; 2];
     if !gameplay.owns_touches {
@@ -488,7 +513,11 @@ pub(crate) fn read_touch_controls(
         read_touch_edit(&mut touches, size, &mut settings, &mut editing);
         return;
     }
-    let placed = placements(&settings, size, None);
+    let mut placed = placements(&settings, size, None);
+    state.use_available = use_available(hint.as_deref());
+    if !state.use_available {
+        placed[index_of(USE_KEY)] = None;
+    }
     let stick_right = stick_on_right(&settings);
     let mut look = Vec2::ZERO;
     for touch in touches.read() {
@@ -503,7 +532,10 @@ pub(crate) fn read_touch_controls(
                     frame.held.clear();
                     return;
                 }
-                if let Some(index) = button_at(touch.position, &placed) {
+                let on_weapon = weapon_tap.0.is_some_and(|zone| zone.contains(touch.position));
+                if let Some(index) = button_at(touch.position, &placed)
+                    .or(on_weapon.then(|| index_of(SWAP_KEY)))
+                {
                     if std::env::var_os("IW4L_TOUCH_DEBUG").is_some() {
                         diag::info!(Console, "touch: finger {id} on {}", BUTTONS[index].label);
                     }
@@ -932,7 +964,10 @@ pub(crate) fn update_touch_overlay(
         .single()
         .map_or(Vec2::new(844.0, 390.0), |w| Vec2::new(w.width(), w.height()));
     let edit = editing.active.then_some(editing.at.as_ref()).flatten();
-    let placed = placements(&settings, size, edit);
+    let mut placed = placements(&settings, size, edit);
+    if !editing.active && !state.use_available {
+        placed[index_of(USE_KEY)] = None;
+    }
     let opacity = if editing.active {
         1.0
     } else {

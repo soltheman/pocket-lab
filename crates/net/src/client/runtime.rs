@@ -821,7 +821,7 @@ pub fn sample_client_input(
             d[0] * forward[0] + d[1] * forward[1] + d[2] * forward[2] + radius >= 0.0
         };
         let mut targets: Vec<crate::client::pad_aim::AimTarget> = Vec::new();
-        if actions.pad_aim_assist > 0 {
+        if actions.pad_aim_assist > 0 || actions.touch_aim_assist {
             const RADIUS: f32 = 10.0;
             let snapshot = presented.snapshot();
             let team = |id: sim::ClientId| {
@@ -855,6 +855,27 @@ pub fn sample_client_input(
                     velocity: other.velocity,
                 });
             }
+            // The zombies, hellhounds and crawlers (BO1 assists onto its AI the same way).
+            const AI_RADIUS: f32 = 15.0;
+            for (index, at) in snapshot
+                .into_iter()
+                .flat_map(|s| s.meta.actor_targets.iter())
+                .enumerate()
+            {
+                let o = [at[0], at[1], at[2]];
+                let top = at[3];
+                let aim = [o[0], o[1], o[2] + top * 0.75];
+                if !in_front(o, AI_RADIUS) || !visible(aim) {
+                    continue;
+                }
+                targets.push(crate::client::pad_aim::AimTarget {
+                    key: (1u64 << 32) | index as u64,
+                    mins: [o[0] - AI_RADIUS, o[1] - AI_RADIUS, o[2]],
+                    maxs: [o[0] + AI_RADIUS, o[1] + AI_RADIUS, o[2] + top],
+                    aim,
+                    velocity: [0.0; 3],
+                });
+            }
         }
         let ranges = world
             .weapon_combat_row(playerstate_iw4::get_viewmodel_weapon_index(ps))
@@ -870,6 +891,9 @@ pub fn sample_client_input(
         };
         let ads = actions.client.using_ads || actions.client.kb.speed.active;
         crate::client::pad_aim::pad_look_frame(&mut actions, &view, &targets, ads);
+        if actions.touch_aim_assist && actions.pad_aim_assist == 0 {
+            crate::client::pad_aim::touch_look_frame(&mut actions, &view, &targets, ads);
+        }
     } else {
         actions.pad_look_delta = [0.0; 2];
     }
@@ -1187,7 +1211,7 @@ fn melee_charge_target(
                 .meta
                 .actor_targets
                 .iter()
-                .map(|at| (*at, AIM_AUTOMELEE_RANGE_AI)),
+                .map(|at| ([at[0], at[1], at[2]], AIM_AUTOMELEE_RANGE_AI)),
         );
     for (origin, range) in enemies {
         let other = OriginOnly { origin };

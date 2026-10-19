@@ -156,6 +156,71 @@ fn best(screen: &[OnScreen], range: f32, region: [f32; 2], scale: f32) -> Option
     })
 }
 
+/// Touch looking (dragged like a mouse) with BO1's console aim assist (read from its
+/// executable: `aim_slowdown_enabled` and `aim_autoaim_enabled` on, `aim_lockon_enabled`
+/// off): the drag slows over a target, and raising the sights onto one pulls the view
+/// to it.
+pub fn touch_look_frame(
+    input: &mut ClientActionInput,
+    view: &AimView,
+    targets: &[AimTarget],
+    ads: bool,
+) {
+    let dt = view.dt;
+    let ads_lerp = view.ads_lerp.clamp(0.0, 1.0);
+    let zoom = view.fov_scale.clamp(0.02, 2.0);
+    let screen = project(view, targets);
+    let hip = if view.ranges.hip > 0.0 {
+        view.ranges.hip
+    } else {
+        FALLBACK_RANGE
+    };
+    let ads_range = if view.ranges.ads > 0.0 { view.ranges.ads } else { hip };
+    let assist_range = lerp(hip, ads_range, ads_lerp);
+    if best(&screen, assist_range, SLOWDOWN_REGION, 1.0).is_some() {
+        let slow = lerp(SLOWDOWN_HIP, SLOWDOWN_ADS, ads_lerp);
+        input.mouse_x *= slow;
+        input.mouse_y *= slow;
+    }
+    let mut delta = [0.0f32; 2];
+    if ads && !input.touch_was_ads {
+        let auto_range = if view.ranges.auto_aim > 0.0 {
+            view.ranges.auto_aim
+        } else {
+            FALLBACK_RANGE
+        };
+        input.touch_autoaim = best(&screen, auto_range, AUTOAIM_REGION, (1.0 / zoom).max(1.0))
+            .map(|s| (s.target.key, AUTOAIM_TIME));
+    }
+    if !ads {
+        input.touch_autoaim = None;
+    }
+    if let Some((key, left)) = input.touch_autoaim {
+        match screen
+            .iter()
+            .find(|s| s.target.key == key)
+            .filter(|_| left > 0.0)
+        {
+            Some(s) => {
+                let goal = angles_to(view.eye, s.target.aim);
+                let pitch = angle_delta(goal[0], view.angles[0]);
+                let yaw = angle_delta(goal[1], view.angles[1]);
+                let length = pitch.hypot(yaw);
+                let step = (AUTOAIM_LERP * dt).min(length);
+                if length > 1e-4 {
+                    delta[0] += pitch / length * step;
+                    delta[1] += yaw / length * step;
+                }
+                input.touch_autoaim = (length > 0.25).then_some((key, left - dt));
+            }
+            None => input.touch_autoaim = None,
+        }
+    }
+    input.touch_was_ads = ads;
+    input.pad_look_delta[0] += delta[0];
+    input.pad_look_delta[1] += delta[1];
+}
+
 pub fn pad_look_frame(
     input: &mut ClientActionInput,
     view: &AimView,
@@ -259,4 +324,59 @@ pub fn pad_look_frame(
     }
     input.pad_was_ads = ads;
     input.pad_look_delta = delta;
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn zombie(at: [f32; 3]) -> AimTarget {
+        AimTarget {
+            key: 7,
+            mins: [at[0] - 15.0, at[1] - 15.0, at[2]],
+            maxs: [at[0] + 15.0, at[1] + 15.0, at[2] + 64.0],
+            aim: [at[0], at[1], at[2] + 48.0],
+            velocity: [0.0; 3],
+        }
+    }
+
+    fn view(dt: f32) -> AimView {
+        AimView {
+            eye: [0.0, 0.0, 60.0],
+            angles: [0.0, 0.0],
+            velocity: [0.0; 3],
+            ads_lerp: 0.0,
+            fov_scale: 1.0,
+            ranges: weapon_iw4::AimAssistRanges::NONE,
+            dt,
+        }
+    }
+
+    #[test]
+    fn touch_drag_slows_over_a_zombie() {
+        let mut input = ClientActionInput {
+            mouse_x: 10.0,
+            ..Default::default()
+        };
+        touch_look_frame(&mut input, &view(0.016), &[zombie([300.0, 0.0, 0.0])], false);
+        assert!((input.mouse_x - 4.0).abs() < 1e-4, "hip slowdown 0.4: {}", input.mouse_x);
+
+        let mut clear = ClientActionInput {
+            mouse_x: 10.0,
+            ..Default::default()
+        };
+        touch_look_frame(&mut clear, &view(0.016), &[zombie([300.0, 300.0, 0.0])], false);
+        assert_eq!(clear.mouse_x, 10.0);
+    }
+
+    #[test]
+    fn raising_the_sights_pulls_onto_a_zombie() {
+        // A zombie a little left of the crosshair (yaw +), inside BO1's 160x120 region.
+        let target = [zombie([400.0, 40.0, 0.0])];
+        let mut input = ClientActionInput::default();
+        touch_look_frame(&mut input, &view(0.05), &target, true);
+        assert!(input.pad_look_delta[1] > 0.0, "pulled toward it: {:?}", input.pad_look_delta);
+        // Held: no new snap starts once it is through.
+        assert!(input.touch_was_ads);
+    }
 }

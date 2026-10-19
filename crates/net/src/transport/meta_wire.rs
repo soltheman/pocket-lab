@@ -2890,7 +2890,7 @@ fn decode_item_ammo(input: &mut WireReader<'_>) -> Result<Vec<DroppedItemAmmo>, 
 }
 
 /// Where the living zombies stand: the targets of a player's knife lunge.
-fn encode_actor_targets(out: &mut WireWriter, rows: &[[f32; 3]]) {
+fn encode_actor_targets(out: &mut WireWriter, rows: &[[f32; 4]]) {
     let rows = &rows[..rows.len().min(u16::MAX as usize)];
     out.put_u16(rows.len() as u16);
     for at in rows {
@@ -2900,11 +2900,16 @@ fn encode_actor_targets(out: &mut WireWriter, rows: &[[f32; 3]]) {
     }
 }
 
-fn decode_actor_targets(input: &mut WireReader<'_>) -> Result<Vec<[f32; 3]>, WireError> {
+fn decode_actor_targets(input: &mut WireReader<'_>) -> Result<Vec<[f32; 4]>, WireError> {
     let count = input.get_u16()? as usize;
     let mut rows = Vec::with_capacity(count.min(64));
     for _ in 0..count {
-        rows.push([input.get_f32()?, input.get_f32()?, input.get_f32()?]);
+        rows.push([
+            input.get_f32()?,
+            input.get_f32()?,
+            input.get_f32()?,
+            input.get_f32()?,
+        ]);
     }
     Ok(rows)
 }

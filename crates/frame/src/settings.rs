@@ -98,6 +98,8 @@ pub struct GameSettings {
     pub touch_icons: bool,
     /// AIM toggles aiming on and off (true) or aims while held (false).
     pub touch_aim_toggle: bool,
+    /// BO1's console aim assist (slowdown, ADS snap) on touch looking.
+    pub touch_aim_assist: bool,
     pub touch_custom: String,
 
     pub revision: u64,
@@ -138,6 +140,7 @@ impl Default for GameSettings {
             touch_layout: Self::TOUCH_LAYOUT_CLASSIC,
             touch_icons: true,
             touch_aim_toggle: true,
+            touch_aim_assist: true,
             touch_custom: String::new(),
             revision: 0,
         }

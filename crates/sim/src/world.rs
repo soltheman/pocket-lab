@@ -666,7 +666,7 @@ pub struct SimState {
 
     corpses: crate::PlayerCorpsePool,
     /// Where the living AI (zombies) stand this tick: what a player's melee lunges at.
-    actor_melee_targets: Vec<[f32; 3]>,
+    actor_melee_targets: Vec<[f32; 4]>,
 
     entity_kernel: crate::gentity::EntityKernel,
 
@@ -3029,7 +3029,7 @@ impl SimState {
         &mut self.corpses
     }
 
-    pub(crate) fn set_actor_melee_targets(&mut self, at: Vec<[f32; 3]>) {
+    pub(crate) fn set_actor_melee_targets(&mut self, at: Vec<[f32; 4]>) {
         self.actor_melee_targets = at;
     }
 

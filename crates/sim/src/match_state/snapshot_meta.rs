@@ -132,8 +132,9 @@ pub struct SnapshotMeta {
 
     pub corpses: crate::PlayerCorpsePool,
 
-    /// Where the living AI stand (feet): the targets of a player's melee lunge.
-    pub actor_targets: Vec<[f32; 3]>,
+    /// Where the living AI stand (feet) and how tall each is: the targets of a player's
+    /// melee lunge and of touch aim assist.
+    pub actor_targets: Vec<[f32; 4]>,
 
     pub item_ammo: Vec<DroppedItemAmmo>,
 

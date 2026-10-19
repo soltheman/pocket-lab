@@ -288,6 +288,7 @@ pub(crate) fn update_zombies_hud(
 pub(crate) fn place_zombies_hud(
     touch: Option<Res<crate::touch_controls::TouchGameplay>>,
     readout: Option<Res<hud::AmmoReadout>>,
+    mut weapon_tap: ResMut<crate::touch_controls::WeaponTapZone>,
     window: Query<&Window, With<bevy::window::PrimaryWindow>>,
     mut score: Query<&mut Node, (With<ZombiesScoreBlock>, Without<ZombiesAmmoBlock>)>,
     mut ammo: Query<
@@ -308,6 +309,11 @@ pub(crate) fn place_zombies_hud(
     let scale = (height / REFERENCE_HEIGHT).clamp(0.8, 2.5);
     let buttons = touch.as_deref().is_some_and(|touch| touch.enabled);
     let size = |px: f32| (px * scale).round();
+    // The readout's box, a little generous for a finger: a tap there switches guns.
+    weapon_tap.0 = buttons.then(|| {
+        let right = window.width() - (EDGE + 170.0 * scale) + 12.0;
+        Rect::new(right - 170.0 * scale, 0.0, right, (8.0 + 70.0) * scale)
+    });
     let (score_at, ammo_at) = if buttons {
         // Top right, clear of the Dynamic Island: points in the corner and the ammo left
         // of them, both above the touch buttons (SWAP rises to 74 points from the top).

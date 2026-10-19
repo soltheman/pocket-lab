@@ -64,6 +64,10 @@ pub struct ClientActionInput {
     /// Pitch and yaw, degrees.
     pub pad_look_delta: [f32; 2],
     pub pad_aim_assist: u8,
+    /// BO1's console aim assist on touch looking (slowdown and the ADS snap).
+    pub touch_aim_assist: bool,
+    pub touch_autoaim: Option<(u64, f32)>,
+    pub touch_was_ads: bool,
     pub pad_lockon: Option<u64>,
     pub pad_autoaim: Option<(u64, f32)>,
     pub pad_was_ads: bool,
@@ -99,6 +103,9 @@ impl Default for ClientActionInput {
             pad_turn_rate: [0.0; 2],
             pad_look_delta: [0.0; 2],
             pad_aim_assist: 0,
+            touch_aim_assist: false,
+            touch_autoaim: None,
+            touch_was_ads: false,
             pad_lockon: None,
             pad_autoaim: None,
             pad_was_ads: false,

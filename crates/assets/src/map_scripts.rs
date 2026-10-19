@@ -670,6 +670,23 @@ audit_rounds()
     logprint("audit debug: opened " + all.size + " doors and debris, power on");
     level thread audit_round_starts();
     last = -1;
+    // IW4L_ZM_LOOK=hurt: after the first hit every zombie dies, and the player's health
+    // is logged as BO1's regen brings it back.
+    if (getdvar("iw4l_zm_look") == "hurt")
+    {
+        while (p.health >= p.maxhealth)
+            wait 0.05;
+        hit = gettime();
+        ai = getaispeciesarray("axis", "all");
+        for (i = 0; i < ai.size; i++)
+            ai[i] dodamage(ai[i].health + 10, ai[i].origin);
+        for (t = 0; t < 120; t++)
+        {
+            logprint("audit debug: hurt " + (gettime() - hit) + " ms health " + p.health + " / " + p.maxhealth);
+            wait 0.1;
+        }
+        return;
+    }
     for (;;)
     {
         p.health = 100;
