@@ -583,3 +583,20 @@ pub fn load_mp_localized_strings(
     }
     Ok(catalog)
 }
+
+#[cfg(test)]
+mod install_tests {
+    /// IW4L_LOCALIZE_ZONE=<zone path>: how many strings a T5 language zone holds.
+    #[test]
+    #[ignore]
+    fn reads_t5_language_zone() {
+        let path = std::env::var("IW4L_LOCALIZE_ZONE").expect("IW4L_LOCALIZE_ZONE");
+        let catalog = super::load_localize_catalog_t5(std::path::Path::new(&path)).expect("zone");
+        eprintln!("{path}: {} strings", catalog.len());
+        for (key, value) in catalog.iter().take(8) {
+            eprintln!("  {key} = {value}");
+        }
+        let cached = super::load_localize_catalog_in_lane(std::path::Path::new(&path)).expect("lane");
+        eprintln!("through the cache: {} strings", cached.len());
+    }
+}

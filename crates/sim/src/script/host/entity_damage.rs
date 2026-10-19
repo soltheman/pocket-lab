@@ -18,7 +18,7 @@ pub(crate) struct EntityHit {
     pub flags: i32,
 }
 
-const MEANS: &[&str] = &[
+pub(crate) const MEANS: &[&str] = &[
     "MOD_UNKNOWN",
     "MOD_PISTOL_BULLET",
     "MOD_RIFLE_BULLET",
@@ -98,15 +98,18 @@ pub(crate) fn apply_script_blasts(world: &mut World, tick: crate::Tick) {
                 crate::damage::apply_script_hit(&mut FrameWorld::from_world(world), tick, &hit);
             }
             HitTarget::Entity(target) => {
-                if let Some(piece) = hit.piece {
-                    crate::t5_destructible::apply_piece_hit(
+                // A piece index only means something to a destructible (BO1 uses it only
+                // then): zombies' grenade damage passes 0.
+                if let Some(piece) = hit.piece
+                    && crate::t5_destructible::apply_piece_hit(
                         &mut FrameWorld::from_world(world),
                         tick,
                         crate::AuthorityModelOwner::ScriptModel(target),
                         piece,
                         hit.amount,
                         hit.attacker,
-                    );
+                    )
+                {
                     continue;
                 }
                 let mut runtime = world.resource_mut::<Runtime>();

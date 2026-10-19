@@ -319,6 +319,36 @@ fn do_damage(world: &mut World, receiver: &Value, args: &[Value]) -> Result<Valu
         .get(2)
         .and_then(|value| runtime.player_client_of(value))
         .map(ClientId);
+    // BO1's singleplayer levels (zombies among them) take `doDamage(health, source,
+    // attacker, destructible_piece_index, means_of_death, hit_location)`: the means as its
+    // name without "MOD_" ("pistolbullet", "impact"), the hit location by name. Insta-Kill
+    // passes both; read as multiplayer's order it failed, so the zombie lived.
+    if let Some(Value::String(means)) = args.get(4) {
+        let piece = optional(args, 3, int).ok().flatten();
+        let means = sp_means_named(means);
+        let hitloc = optional(args, 5, string)?.map_or(0, |name| {
+            weapon_iw4::HITLOC_NAMES
+                .iter()
+                .position(|&known| known.eq_ignore_ascii_case(&name))
+                .map_or(0, |i| i as u8)
+        });
+        world
+            .resource_mut::<Runtime>()
+            .hits
+            .push(crate::script::ScriptHit {
+                piece,
+                target,
+                amount,
+                origin,
+                attacker,
+                inflictor: None,
+                means,
+                weapon: 0,
+                flags: 0,
+                hitloc,
+            });
+        return Ok(Value::Undefined);
+    }
     let inflictor = args.get(3).and_then(|value| runtime.presence_of(value));
     let on_head = optional(args, 4, int)?.unwrap_or(0) != 0;
     let means = optional(args, 5, string)?
@@ -356,6 +386,28 @@ fn do_damage(world: &mut World, receiver: &Value, args: &[Value]) -> Result<Valu
             hitloc,
         });
     Ok(Value::Undefined)
+}
+
+/// A singleplayer means of death by its script name, "MOD_" and underscores left out
+/// ("pistolbullet" is MOD_PISTOL_BULLET); a name it doesn't know is MOD_UNKNOWN, as BO1's.
+fn sp_means_named(name: &str) -> &'static str {
+    let wanted: String = name
+        .trim_start_matches("MOD_")
+        .chars()
+        .filter(|c| *c != '_')
+        .collect();
+    super::super::entity_damage::MEANS
+        .iter()
+        .copied()
+        .find(|means| {
+            means
+                .trim_start_matches("MOD_")
+                .chars()
+                .filter(|c| *c != '_')
+                .collect::<String>()
+                .eq_ignore_ascii_case(&wanted)
+        })
+        .unwrap_or("MOD_UNKNOWN")
 }
 
 fn player_id(world: &World, receiver: &Value) -> Result<u32, String> {

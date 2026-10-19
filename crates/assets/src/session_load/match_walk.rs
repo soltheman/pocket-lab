@@ -2,6 +2,35 @@ use super::*;
 
 static NEXT_PRODUCTS_ID: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(1);
 
+/// A T5 map's language archive's strings (`en_<map>`), over the common ones.
+fn absorb_map_language_strings(
+    map_path: &std::path::Path,
+    strings: &mut LocalizeCatalog,
+    report: &mut Vec<String>,
+) {
+    if asset_transport::zone_game_for_path(map_path) != Some(asset_core::ZoneGame::T5) {
+        return;
+    }
+    let Some(stem) = map_path.file_stem().and_then(|stem| stem.to_str()) else {
+        return;
+    };
+    match asset_transport::discover::find_t5_localized_zone(map_path, None, stem) {
+        Ok(Some(found)) => match load_localize_catalog_in_lane(&found.path) {
+            Ok(part) => {
+                report.push(format!(
+                    "localize: t5 {} {} strings (the map's)",
+                    found.zone_name,
+                    part.len()
+                ));
+                strings.absorb_in_namespace(asset_core::AssetNamespace::T5, part);
+            }
+            Err(error) => report.push(format!("localize gap: {}: {error}", found.zone_name)),
+        },
+        Ok(None) => {}
+        Err(error) => report.push(format!("localize gap: {stem}: {error}")),
+    }
+}
+
 /// BO1 keeps some of a zombies map's character materials and models in the map's language
 /// archive (en_zombie_theater holds the zombie body materials and the low walls under Kino's
 /// windows, which the map zone names only as references), so that archive's materials join
@@ -939,6 +968,12 @@ pub(super) async fn walk_prepared_match(
             row.clip.edge_kind(),
             row.husk.edge_kind()
         ));
+    }
+    // The map's own language strings (Kino's teleporter and film reel hints live in
+    // en_zombie_theater): the common walk only reads the shared language archives.
+    let mut strings = strings;
+    if let Ok(map_path) = zone_ff.as_ref() {
+        absorb_map_language_strings(map_path, &mut strings, &mut report);
     }
     let prepared = PreparedMatch {
         scripts,

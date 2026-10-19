@@ -43,6 +43,8 @@ pub(crate) const ZOMBIES_HUD: (&str, &str) = (
         level thread log_player_volumes();
     if (getdvar("iw4l_zm_watch") == "revive")
         level thread revive_test();
+    if (getdvar("iw4l_zm_watch") == "link")
+        level thread link_teleporter();
     if (getdvar("iw4l_zm_watch") == "powerup")
         level thread drop_powerup();
     if (getdvar("iw4l_zm_watch") == "dogs")
@@ -288,6 +290,14 @@ stand_at()
             p setplayerangles(look);
         if (bait)
             p.health = 100000;
+        // IW4L_ZM_INSTA=1: Insta-Kill stays on.
+        if (getdvar("iw4l_zm_insta") == "1")
+        {
+            level.zombie_vars["zombie_insta_kill"] = 1;
+            if (!isdefined(p.iw4l_last_score) || p.iw4l_last_score != p.score)
+                logprint("insta debug: score " + p.score);
+            p.iw4l_last_score = p.score;
+        }
         if (shoot)
         {
             weapon = p getcurrentweapon();
@@ -599,6 +609,47 @@ aim_at_zombies()
 
 // Debug (IW4L_ZM_WATCH=powerup): a Max Ammo drops in front of the first player, who walks
 // onto it a few seconds later (to see the glow go with the pick-up).
+// Debug (IW4L_ZM_WATCH=link, Kino): the power goes on and the first player (10000
+// points) stands at the teleporter's core, then its pad, then on the pad, each time
+// logging where it is so a test can press USE; the flags show what each use did.
+link_teleporter()
+{
+    wait 8;
+    players = getplayers();
+    if (!players.size)
+        return;
+    p = players[0];
+    p.ignoreme = true;
+    p.score = 10000;
+    switch_trigger = getent("use_elec_switch", "targetname");
+    if (isdefined(switch_trigger))
+        switch_trigger notify("trigger", p);
+    wait 6;
+    core = getent("trigger_teleport_pad_0", "targetname");
+    if (!isdefined(core))
+    {
+        logprint("link debug: no core");
+        return;
+    }
+    pad = getent(core.target, "targetname");
+    logprint("link debug: core at " + core.origin + " pad at " + pad.origin + " power " + level.flag["power_on"]);
+    p setorigin(core.origin + (0, 0, -40));
+    wait 1;
+    logprint("link debug: at core, touching " + p istouching(core));
+    wait 4;
+    logprint("link debug: core_linked " + level.flag["core_linked"]);
+    p setorigin(pad.origin + (0, 0, -40));
+    wait 1;
+    logprint("link debug: at pad, touching " + p istouching(pad));
+    wait 4;
+    logprint("link debug: teleporter_linked " + level.flag["teleporter_linked"]);
+    p setorigin(core.origin + (0, 0, -40));
+    wait 1;
+    logprint("link debug: on the pad again " + p.origin);
+    wait 12;
+    logprint("link debug: after teleport use, player at " + p.origin + " score " + p.score);
+}
+
 drop_powerup()
 {
     wait 10;
