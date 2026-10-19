@@ -360,7 +360,8 @@ fn sync_hud_visibility(
     mut visible: ResMut<HudRootVisible>,
 ) {
     let ui_on = ui_draw.is_some_and(|d| d.0);
-    let show = hud_root_should_show(*screen, ui_on);
+    // Recording the menu's flybys (`IW4L_CINEMATIC=1`): none of the HUD.
+    let show = hud_root_should_show(*screen, ui_on) && !diag::cinematic();
     visible.0 = Some(i32::from(show));
     for mut vis in &mut roots {
         let want = if show {

@@ -1,4 +1,9 @@
-# Bo1ZPocket 0.3.40
+# Bo1ZPocket 0.3.41
+
+**New in 0.3.41**
+
+- **The flyby re-recorded without the crosshair:** cinematic mode now hides the game HUD's whole root (crosshair, round chalk, blood) as well as the gun and the menu HUD. The side-aisle shot rises over the broken seats.
+
 
 **New in 0.3.40**
 

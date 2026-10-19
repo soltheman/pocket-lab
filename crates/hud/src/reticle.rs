@@ -176,7 +176,8 @@ pub(crate) fn update_reticle(
                 .shellshock(local.0)
                 .map_or(SCREEN_BLEND_BLURRED, |shock| shock.screen_type),
         ) != 0,
-        draw_hud: true,
+        // Recording the menu's flybys (`IW4L_CINEMATIC=1`): no HUD at all.
+        draw_hud: !diag::cinematic(),
         dvars_allow: true,
         f_weapon_pos_frac: ps.f_weapon_pos_frac,
         cg_draw_gun: true,

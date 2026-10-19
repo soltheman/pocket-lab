@@ -798,7 +798,7 @@ camera_reel()
     // From the stage, out over the seats toward the balcony.
     from[2] = (120, 640, 190); to[2] = (-120, 520, 210); a[2] = (4, -110, 0); b[2] = (6, -70, 0); secs[2] = 10;
     // The stage from the side aisle, the screen and curtains past the seats.
-    from[3] = (-520, 160, 150); to[3] = (-420, 360, 150); a[3] = (3, 40, 0); b[3] = (3, 55, 0); secs[3] = 9;
+    from[3] = (-520, 160, 215); to[3] = (-420, 360, 215); a[3] = (9, 40, 0); b[3] = (9, 55, 0); secs[3] = 9;
     only = getdvar("iw4l_zm_shot");
     if (only != "")
     {
