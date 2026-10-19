@@ -1,3 +1,14 @@
+# Bo1ZPocket 0.3.43
+
+**New in 0.3.43**
+
+- **Zombies walk again:** since 0.3.42's solid bodies, every zombie collided with its own body and only moved by an old "unstick hop", node to node in straight lines over banisters and stair rails. Their walk now collides only with players, the hop is gone (they leave the floor only at the map's traversals and window climbs), and steering checks the body's whole width against door jambs, newel posts and wall ends.
+- **Button icons from BO1's art**, cut at load from your install: the Perk-a-Cola seals off the perk bottles (Double Tap fires, Deadshot aims, Speed Cola reloads, Stamin-Up jumps, Quick Revive crouches, Juggernog knifes, PhD Flopper throws, Mule Kick uses), the wall-buy chalk, power-up icons, the skull medal, Kino's film reel and BO1's HUD pictures. Sets: PERK-A-COLA (default), CHALK, BO1 HUD, CLASSIC, TEXT. Settings → Buttons → CHANGE ICON OF / ICON gives any button any picture.
+- **Kino's loading voice:** Richtofen from BO1's loading video plays while the map loads (copy `main/video/zombie_theater_load.wav` into the phone's game folder; `scripts/stage-bo1-for-iphone.ps1` makes it with ffmpeg).
+- **Points pop-ups** as BO1's `score_highlight`: yellow "+N" and dark red "-N" drifting off the points.
+- **Power-up glow** now ends with the power-up (tag effects stop when their entity goes).
+- **Grey patch backstage:** the skybox drew over Kino's floor decals because the renderer's merge key ignored the sort order; it now keeps BO1's order.
+
 # Bo1ZPocket 0.3.42
 
 **New in 0.3.42**

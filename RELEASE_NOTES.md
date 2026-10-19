@@ -1,7 +1,7 @@
-**Bo1ZPocket 0.3.42:** download **Bo1ZPocket.ipa** below and install it over the app you have.
+**Bo1ZPocket 0.3.43:** download **Bo1ZPocket.ipa** below and install it over the app you have.
 
-- New buttons: perk-style icons on weathered metal badges, with a bullet for FIRE. Settings → Buttons → BUTTON ICONS switches between PERK, BO1, CLASSIC and TEXT.
-- BO1's menu sounds, a Group 935 terminal look for the options, and a BO1 loading screen (map art, name, location and the 935 emblem) with no flash of the map.
-- Zombies are solid now: the knife lunge stops at them instead of going inside them.
+- Zombies walk their routes again (up and down stairs) instead of hopping over railings.
+- New button icons from BO1's own art: Perk-a-Cola seals by default, plus Chalk, BO1 HUD and Classic sets, and you can pick any icon for any button (Settings → Buttons).
+- Richtofen on Kino's loading screen, "+10 / -950" points pop-ups, power-up glow gone after pickup, and the grey patch backstage is fixed.
 
 Full history: [CHANGELOG.md](https://github.com/soltheman/pocket-lab/blob/main/CHANGELOG.md)
