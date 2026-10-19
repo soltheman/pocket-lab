@@ -47,6 +47,25 @@ pub(crate) const ZOMBIES_HUD: (&str, &str) = (
         level thread drop_powerup();
     if (getdvar("iw4l_zm_watch") == "dogs")
         level thread spawn_dogs();
+    if (getdvar("iw4l_zm_watch") == "audit")
+        level thread audit_rounds();
+}
+
+// `animScripted` on a script model (Kino's stage curtains): the engine plays the clip,
+// and when it is through the model is notified as BO1's engine does.
+model_anim_scripted(note, seconds)
+{
+    self endon("death");
+    wait seconds;
+    self notify(note, "end");
+}
+
+// A notify the engine sends a little later (a death clip's "end" note).
+notify_after(note, value, seconds)
+{
+    wait seconds;
+    if (isdefined(self))
+        self notify(note, value);
 }
 
 // The map's room tone, which BO1 plays from its client scripts (`<map>_amb.csc`:
@@ -625,6 +644,102 @@ spawn_dogs()
         {
             logprint("dog debug: killing " + nearest getentitynumber());
             nearest dodamage(nearest.health + 10, p.origin, p);
+        }
+    }
+}
+
+// Debug (IW4L_ZM_WATCH=audit): every door, debris pile and the power open, the first
+// player kept alive, and each round's zombies killed by the player a few seconds after
+// they come, so a run walks through rounds (dog rounds too) and logs what breaks.
+audit_rounds()
+{
+    wait 8;
+    players = getplayers();
+    if (!players.size)
+        return;
+    p = players[0];
+    all = getentarray("zombie_door", "targetname");
+    debris = getentarray("zombie_debris", "targetname");
+    for (i = 0; i < debris.size; i++)
+        all[all.size] = debris[i];
+    for (i = 0; i < all.size; i++)
+        all[i] notify("trigger", p, true);
+    switch_trigger = getent("use_elec_switch", "targetname");
+    if (isdefined(switch_trigger))
+        switch_trigger notify("trigger", p);
+    logprint("audit debug: opened " + all.size + " doors and debris, power on");
+    level thread audit_round_starts();
+    last = -1;
+    for (;;)
+    {
+        p.health = 100;
+        if (level.round_number != last)
+        {
+            last = level.round_number;
+            logprint("audit debug: round " + last + " points " + p.score);
+        }
+        ai = getaispeciesarray("axis", "all");
+        // IW4L_ZM_LOOK=quad: no killing; the player faces the nearest Nova crawler.
+        if (getdvar("iw4l_zm_look") == "quad")
+        {
+            nearest = undefined;
+            for (i = 0; i < ai.size; i++)
+                if (ai[i].classname == "actor_zombie_quad" && (!isdefined(nearest) || distance(ai[i].origin, p.origin) < distance(nearest.origin, p.origin)))
+                    nearest = ai[i];
+            // Other zombies die as they come, so the rounds reach the crawler waves.
+            if (!isdefined(level.audit_cull) || gettime() - level.audit_cull > 3000)
+            {
+                level.audit_cull = gettime();
+                for (i = 0; i < ai.size; i++)
+                    if (ai[i].classname != "actor_zombie_quad" && isalive(ai[i]) && distance(ai[i].origin, p.origin) < 2000)
+                        ai[i] dodamage(ai[i].health + 10, ai[i].origin, p);
+            }
+            if (isdefined(nearest))
+            {
+                p setplayerangles(vectortoangles(nearest.origin + (0, 0, 20) - p geteye()));
+                // After a while, one crawler killed every 3 seconds (its death and gas).
+                if (!isdefined(level.audit_quad_seen))
+                    level.audit_quad_seen = gettime();
+                if (gettime() - level.audit_quad_seen > 20000 && (!isdefined(level.audit_quad_kill) || gettime() - level.audit_quad_kill > 3000))
+                {
+                    level.audit_quad_kill = gettime();
+                    logprint("audit debug: killing crawler " + nearest getentitynumber() + " at " + nearest.origin);
+                    nearest dodamage(nearest.health + 10, p.origin, p, p, 0, "MOD_PISTOL_BULLET");
+                }
+            }
+            wait 0.1;
+            continue;
+        }
+        for (i = 0; i < ai.size; i++)
+            if (isalive(ai[i]) && distance(ai[i].origin, p.origin) < 2000)
+                ai[i] dodamage(ai[i].health + 10, ai[i].origin, p);
+        wait 3;
+    }
+}
+
+audit_round_starts()
+{
+    a = 27;
+    logprint("audit debug: math " + int(a * 0.5) + " " + (a * 0.5) + " " + int(13.5) + " " + int(a * 0.3) + " " + int(a * 0.7) + " " + (a * 0.25));
+    level.round_number = 3;
+    logprint("audit debug: branch r3 " + maps\_zombiemode::default_max_zombie_func(27) + " first " + level.first_round);
+    level.round_number = 1;
+    for (;;)
+    {
+        level waittill("start_of_round");
+        zkeys = getarraykeys(level.zones);
+        line = "";
+        for (z = 0; z < zkeys.size; z++)
+        {
+            zone = level.zones[zkeys[z]];
+            line = line + zkeys[z] + "=" + zone.is_enabled + zone.is_active + zone.is_occupied + "/" + zone.spawners.size + " ";
+        }
+        players = getplayers();
+        logprint("audit debug: zones " + line + "player " + players[0].origin);
+        for (i = 0; i < 4; i++)
+        {
+            logprint("audit debug: start of round " + level.round_number + " total " + level.zombie_total + " intermission " + level.intermission + " spawns " + level.enemy_spawns.size);
+            wait 0.05;
         }
     }
 }

@@ -1,4 +1,15 @@
-# Bo1ZPocket 0.3.36
+# Bo1ZPocket 0.3.37
+
+**New in 0.3.37**
+
+- **Bodies are solid (BO1's push, read from its executable):** a moving zombie or dog shoves the one in its way straight back at its own pace (at least 1.5 units a frame), else aside at 0.75 the distance, twice. One climbing in or in a scripted animation can't be pushed and blocks.
+- **Kino's stage curtains open:** `animscripted` now plays on script models too, so the curtains run and BO1's `curtains_done` is set, which unlocks the movie screen and the Nova crawlers.
+- **Round 3, 6, 9… fixed:** Kino's every-third-round crawler wave only allows crawler spawners once the curtains are done. With the curtains stuck, no spawner was allowed and the round ended empty.
+- **Kino's own animations load** (177 clips the map zone holds, the crawlers' among them). Before, only the shared zones' clips were read.
+- **Nova crawlers:** their crawl, idle, swings (`level._zombie_melee["quad_zombie"]`), deaths (`scr_anim["quad_zombie"]["death1-4"]`), and their traversals (the 120 drop, wall hops, the wall crawl down from the roof).
+- **Gas:** a crawler killed by a pistol or rifle bullet bursts into BO1's gas cloud. BO1's death script waits for the death animation's "end" note before it runs; that note now comes.
+- **Checked:** zombies still hit 532 of 532 swings in the foyer test, a forced run through round 14, crawlers crawling and gassing. Not done yet: the blur when you stand in the gas, and the crawlers' leap attack. Not tried on an iPhone yet.
+
 
 **New in 0.3.36**
 

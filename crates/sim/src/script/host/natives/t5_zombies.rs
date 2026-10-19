@@ -188,6 +188,8 @@ fn register_implemented(registry: &mut NativeRegistry) {
     registry.register(Method, "stopanimscripted", |world, receiver, _| {
         crate::script::host::actors::stop_anim_scripted(world, receiver)
     });
+    // The anim tree a model's clips come from: ours are looked up by name.
+    registry.register(Method, "useanimtree", |_, _, _| Ok(Value::Undefined));
     registry.register(Method, "forceteleport", |world, receiver, args| {
         crate::script::host::actors::force_teleport(world, receiver, args)
     });

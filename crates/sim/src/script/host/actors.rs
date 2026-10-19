@@ -18,6 +18,8 @@ use crate::script::{Runtime, Value};
 
 const ACTOR_DAMAGE: &str = "maps/_callbacksetup::codecallback_actordamage";
 const ACTOR_KILLED: &str = "maps/_callbacksetup::codecallback_actorkilled";
+const MODEL_ANIM_SCRIPTED: &str = "iw4l_zombies/hud::model_anim_scripted";
+const NOTIFY_AFTER: &str = "iw4l_zombies/hud::notify_after";
 
 /// Ground speeds, units per second, for BO1's `zombie_move_speed` (walk, run, sprint):
 /// about what each gait's clips cover.
@@ -88,6 +90,14 @@ const DOG_MANTLE_CLIPS: [&str; 1] = ["zombie_dog_run_jump_window_40"];
 /// `meleeDamage` 40, on its dogs); its bite clip stays in place.
 const DOG_MELEE_ATTACK_DIST: f32 = 64.0;
 const DOG_BITE_DAMAGE: i32 = 40;
+/// A Nova crawler's idles (`quad_prespawn`'s `idleAnimOverrideArray`).
+const QUAD_IDLE_CLIPS: [&str; 2] = ["ai_zombie_quad_idle", "ai_zombie_quad_idle_2"];
+/// A crawler's traversals (`animscripts/traverse/*`'s `_quad` branches): its own drop
+/// for `zombie_jump_down_120`, a zombie's wall hop for mantles, and the wall crawl's
+/// intro down a wall.
+const QUAD_JUMP_DOWN_120: &str = "ai_zombie_quad_jump_down_128";
+const QUAD_MANTLE: &str = "ai_zombie_traverse_v3";
+const QUAD_WALL_CRAWL: &str = "ai_zombie_quad_crawl_sprint_wall_intro";
 /// BO1's least push, a frame (`ai` push: 1.5 units each 50 ms frame).
 const PUSH_MIN_STEP: f32 = 1.5;
 /// Where it stops walking at a player (from feet to feet, horizontally).
@@ -936,12 +946,51 @@ pub(crate) fn set_goal(
 
 /// `animScripted(notify, origin, angles, anim, ...)`: the clip plays from that spot, its
 /// notetracks go out as `notify` with the notetrack's name, and `end` last.
+/// `animScripted` on a script model (Kino's stage curtains): the clip plays on the model
+/// and, once through, the model gets the notify with "end", as BO1's
+/// `waittill("<notify>")` expects.
+fn model_anim_scripted(
+    world: &mut World,
+    receiver: &Value,
+    args: &[Value],
+) -> Result<Value, String> {
+    let notify = match args.first() {
+        Some(Value::String(name)) => Value::String(name.clone()),
+        _ => return Err("animScripted takes a notify name".into()),
+    };
+    let clip = match args.get(3) {
+        Some(Value::Animation { name, .. }) => name.to_string(),
+        _ => return Err("animScripted takes an animation".into()),
+    };
+    let object = super::natives::engine::entity_id(world, receiver)?;
+    if let Some(entity) = world.resource_mut::<Runtime>().entities.get_mut(&object) {
+        entity.anim_op = Some(Some(clip.as_str().into()));
+    }
+    let seconds = FrameWorld::from_world(world)
+        .script_model_anim(&clip)
+        .filter(|timing| timing.frequency > 0.0)
+        .map_or(1.0, |timing| 1.0 / timing.frequency);
+    let now = super::players::now_ms(world);
+    run_now(
+        world,
+        MODEL_ANIM_SCRIPTED,
+        receiver.clone(),
+        vec![notify, Value::Float(seconds)],
+        now,
+    )
+    .map_err(|error| format!("animScripted on a model: {error:?}"))?;
+    Ok(Value::Undefined)
+}
+
 pub(crate) fn anim_scripted(
     world: &mut World,
     receiver: &Value,
     args: &[Value],
 ) -> Result<Value, String> {
-    let object = actor_id(world, receiver)?;
+    let object = super::natives::engine::entity_id(world, receiver)?;
+    if !is_actor(world, object) {
+        return model_anim_scripted(world, receiver, args);
+    }
     let notify: std::sync::Arc<str> = match args.first() {
         Some(Value::String(name)) => name.to_string().into(),
         _ => return Err("animScripted takes a notify name".into()),
@@ -1147,6 +1196,22 @@ fn traverse_clip(
     };
     let drop = from[2] - to[2];
     let script = script.unwrap_or("");
+    // A crawler's own, where BO1's traversal scripts give it one.
+    if is_quad(&mut world.resource_mut::<Runtime>(), object) {
+        if script == "zombie_jump_down_120" && clip_length(world, QUAD_JUMP_DOWN_120).is_some() {
+            return QUAD_JUMP_DOWN_120;
+        }
+        if script.starts_with("zombie_wall_crawl")
+            && clip_length(world, QUAD_WALL_CRAWL).is_some()
+        {
+            return QUAD_WALL_CRAWL;
+        }
+        if (script.starts_with("zombie_mantle") || (script.is_empty() && drop.abs() <= 30.0))
+            && clip_length(world, QUAD_MANTLE).is_some()
+        {
+            return QUAD_MANTLE;
+        }
+    }
     // A hellhound has its own (`anim.dogAnims["zombie"].traverse`): up, down, or over.
     if is_dog(&mut world.resource_mut::<Runtime>(), object) {
         let sets: &[(f32, &'static str)] = if drop < -20.0 {
@@ -1706,8 +1771,19 @@ fn kill(world: &mut World, object: u64, args: &[Value], attacker: Value) {
         .resource_mut::<Runtime>()
         .set_object_field(object, "attacker", attacker.clone());
     if let Some(mut state) = world.resource::<Runtime>().actors.get(&object).cloned() {
+        let quad_deaths: Vec<&'static str> =
+            if is_quad(&mut world.resource_mut::<Runtime>(), object) {
+                ["death1", "death2", "death3", "death4"]
+                    .iter()
+                    .flat_map(|key| level_clips(world, "scr_anim", "quad_zombie", Some(key)))
+                    .collect()
+            } else {
+                Vec::new()
+            };
         let clip = if is_dog(&mut world.resource_mut::<Runtime>(), object) {
             dog_death_clip(world, object, args)
+        } else if !quad_deaths.is_empty() {
+            pick(&quad_deaths, object)
         } else {
             pick(&DEATH_CLIPS, object)
         };
@@ -1715,6 +1791,24 @@ fn kill(world: &mut World, object: u64, args: &[Value], attacker: Value) {
         if let Some(slot) = world.resource_mut::<Runtime>().actors.get_mut(&object) {
             *slot = state;
         }
+        // BO1's death animscript plays out `deathanim` to its "end" note before it runs
+        // the actor's `deathanimscript` (a Nova crawler's gas): the note comes as the
+        // clip ends, before the body is cleared away.
+        let seconds = clip_length(world, clip)
+            .unwrap_or(1.0)
+            .min((CORPSE_MS - 100) as f32 / 1000.0);
+        let now = super::players::now_ms(world);
+        let _ = run_now(
+            world,
+            NOTIFY_AFTER,
+            Value::Object(object),
+            vec![
+                Value::string("deathanim"),
+                Value::string("end"),
+                Value::Float(seconds),
+            ],
+            now,
+        );
     }
     let get = |i: usize| args.get(i).cloned().unwrap_or(Value::Undefined);
     let killed = vec![
@@ -1746,6 +1840,78 @@ fn kill(world: &mut World, object: u64, args: &[Value], attacker: Value) {
 /// The engine's dog flag, which the spawn sets from the aitype.
 fn is_dog(runtime: &mut Runtime, object: u64) -> bool {
     truthy(&runtime.object_field(object, "isdog"))
+}
+
+/// Its `animname` (BO1's key into its clip tables: "zombie", "quad_zombie", ...).
+fn animname(runtime: &mut Runtime, object: u64) -> Option<String> {
+    match runtime.object_field(object, "animname") {
+        Value::String(name) => Some(name.to_string()),
+        _ => None,
+    }
+}
+
+fn is_quad(runtime: &mut Runtime, object: u64) -> bool {
+    animname(runtime, object).as_deref() == Some("quad_zombie")
+}
+
+/// `array[key]` of a script array.
+fn array_entry(runtime: &Runtime, array: &Value, key: crate::script::ArrayKey) -> Value {
+    match array {
+        Value::Array(id) => runtime
+            .arrays
+            .get(id)
+            .and_then(|entries| entries.get(&key))
+            .cloned()
+            .unwrap_or(Value::Undefined),
+        _ => Value::Undefined,
+    }
+}
+
+/// The clips a BO1 level table lists for an animname: every entry of
+/// `level.<table>[animname]`, or just `level.<table>[animname][key]`. Only clips loaded.
+fn level_clips(
+    world: &mut World,
+    table: &str,
+    animname: &str,
+    key: Option<&str>,
+) -> Vec<&'static str> {
+    let names: Vec<String> = {
+        let mut runtime = world.resource_mut::<Runtime>();
+        let table = runtime.object_field(0, table);
+        let runtime = &*runtime;
+        let set = array_entry(
+            runtime,
+            &table,
+            crate::script::ArrayKey::String(animname.into()),
+        );
+        let values = match key {
+            Some(key) => vec![array_entry(
+                runtime,
+                &set,
+                crate::script::ArrayKey::String(key.into()),
+            )],
+            None => match &set {
+                Value::Array(id) => runtime
+                    .arrays
+                    .get(id)
+                    .map(|entries| entries.values().cloned().collect())
+                    .unwrap_or_default(),
+                _ => Vec::new(),
+            },
+        };
+        values
+            .into_iter()
+            .filter_map(|value| match value {
+                Value::Animation { name, .. } => Some(name.to_string()),
+                _ => None,
+            })
+            .collect()
+    };
+    names
+        .iter()
+        .map(|name| intern(name))
+        .filter(|clip| clip_length(world, clip).is_some())
+        .collect()
 }
 
 /// Whether a script value is a hellhound.
@@ -2286,7 +2452,14 @@ fn think(
             walk = [heading.cos() * step, heading.sin() * step];
             yaw = Some(heading.to_degrees());
         } else {
-            play(world, object, state, if dog { DOG_IDLE } else { "ai_zombie_idle_v1" });
+            let idle = if dog {
+                DOG_IDLE
+            } else if is_quad(&mut world.resource_mut::<Runtime>(), object) {
+                pick(&QUAD_IDLE_CLIPS, object)
+            } else {
+                "ai_zombie_idle_v1"
+            };
+            play(world, object, state, idle);
             if goal.is_some() && !state.goal_reached {
                 state.goal_reached = true;
                 raise(world, Value::Object(object), "goal", Vec::new());
@@ -2591,7 +2764,20 @@ fn start_swing(
     } else {
         &RUN_MELEE_CLIPS
     };
-    let swings: &[&'static str] = if dog { &[DOG_BITE] } else { &MELEE_CLIPS };
+    // A crawler swings from its own set (`level._zombie_melee["quad_zombie"]`).
+    let quad_swings = if is_quad(&mut world.resource_mut::<Runtime>(), object) {
+        level_clips(world, "_zombie_melee", "quad_zombie", None)
+    } else {
+        Vec::new()
+    };
+    let swings: &[&'static str] = if dog {
+        &[DOG_BITE]
+    } else if !quad_swings.is_empty() {
+        &quad_swings
+    } else {
+        &MELEE_CLIPS
+    };
+    let moving: &[&'static str] = if quad_swings.is_empty() { moving } else { &[] };
     let choices: Vec<&'static str> = swings
         .iter()
         .chain(moving)

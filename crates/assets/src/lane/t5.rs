@@ -141,6 +141,14 @@ impl ZoneLane for T5Lane {
             )),
         }
         stage.set_completed(sink.walked as u64);
+        // The map's own clips (Kino's Nova crawlers, its curtains): the session absorbs
+        // them over the common zones' set.
+        let map_xanims = std::mem::take(&mut sink.xanims);
+        report.push(format!(
+            "map XAnim catalog: {} clips captured ({} gaps)",
+            map_xanims.len(),
+            map_xanims.capture_gaps
+        ));
         if donor_count > 0 {
             report.push(format!(
                 "map xmodels from the language archive: {} of {donor_count} used",
@@ -467,6 +475,7 @@ impl ZoneLane for T5Lane {
                     scripts,
                     sound: map_sound,
                     materials: map_materials,
+                    xanims: map_xanims,
                     world: PreparedWorld {
                         draw: Some(draw),
                         dynamic_light: None,
