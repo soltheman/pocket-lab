@@ -641,10 +641,13 @@ pub(crate) struct TouchIcons([Handle<Image>; BUTTON_COUNT]);
 
 /// Dark glass with a light rim, as BO1's console prompts; the fire button tinted red;
 /// a held button lit in BO1's menu orange. Alphas are scaled by BUTTON OPACITY.
-const IDLE_FILL: Color = Color::srgba(0.0, 0.0, 0.0, 0.32);
-const FIRE_FILL: Color = Color::srgba(0.45, 0.04, 0.02, 0.38);
+/// BO1's HUD look: dark warm glass, a worn off-white rim, FIRE in blood red; a held
+/// button glows the menus' amber.
+const IDLE_FILL: Color = Color::srgba(0.04, 0.03, 0.02, 0.46);
+const FIRE_FILL: Color = Color::srgba(0.42, 0.03, 0.02, 0.5);
 const HELD_FILL: Color = Color::srgba(1.0, 0.62, 0.15, 0.5);
-const RIM: Color = Color::srgba(1.0, 1.0, 1.0, 0.45);
+const RIM: Color = Color::srgba(0.92, 0.86, 0.74, 0.4);
+const FIRE_RIM: Color = Color::srgba(0.85, 0.12, 0.06, 0.8);
 const HELD_RIM: Color = Color::srgba(1.0, 0.75, 0.35, 0.9);
 const LABEL: Color = Color::srgba(1.0, 1.0, 1.0, 0.9);
 const SPRINT_KNOB: Color = Color::srgba(1.0, 0.62, 0.15, 0.7);
@@ -677,9 +680,22 @@ fn label_px(radius: f32) -> f32 {
 pub(crate) fn load_touch_icons(
     mut commands: Commands,
     mut images: ResMut<Assets<Image>>,
-    icons: Option<Res<TouchIcons>>,
+    icons: Option<ResMut<TouchIcons>>,
+    fonts: Option<Res<crate::game_text::GameFonts>>,
+    mut from_game: Local<bool>,
 ) {
-    if icons.is_some() {
+    if let Some(mut icons) = icons {
+        // BO1's own HUD pictures, once its fonts are read: the knife, the grenade and a
+        // round for FIRE (both fire buttons) over the drawn icons.
+        if !*from_game && let Some(fonts) = fonts {
+            *from_game = true;
+            for (index, spec) in BUTTONS.iter().enumerate() {
+                let key = if spec.key == "fire2" { "fire" } else { spec.key };
+                if let Some(handle) = fonts.button_icons.get(key) {
+                    icons.0[index] = handle.clone();
+                }
+            }
+        }
         return;
     }
     let handles = BUTTONS.map(|spec| {
@@ -1003,10 +1019,15 @@ pub(crate) fn update_touch_overlay(
         if fill.0 != want_fill {
             fill.0 = want_fill;
         }
+        let rim_color = if BUTTONS[button.0].command == "+attack" {
+            FIRE_RIM
+        } else {
+            RIM
+        };
         let want_rim = BorderColor::all(if held {
             HELD_RIM
         } else {
-            faded(RIM, opacity)
+            faded(rim_color, opacity)
         });
         if *rim != want_rim {
             *rim = want_rim;
@@ -1029,9 +1050,14 @@ pub(crate) fn update_touch_overlay(
         }
         let tint = faded(Color::WHITE, opacity.max(0.6));
         match (image, icons.as_deref()) {
-            (Some(mut image), _) => {
+            (Some(mut image), icons) => {
                 if image.color != tint {
                     image.color = tint;
+                }
+                if let Some(icons) = icons
+                    && image.image != icons.0[glyph.0]
+                {
+                    image.image = icons.0[glyph.0].clone();
                 }
             }
             (None, Some(icons)) => {

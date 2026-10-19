@@ -118,6 +118,7 @@ impl Plugin for ConsolePlugin {
             .init_resource::<crate::touch_controls::TouchEditing>()
             .init_resource::<crate::touch_controls::WeaponTapZone>()
             .init_resource::<crate::zombies_menu::ZombiesOptionsOpen>()
+            .init_resource::<crate::zombies_menu::CoopOpen>()
             .init_resource::<crate::zombies_menu::OptionsTab>()
             .init_resource::<crate::zombies_menu::MenuCommand>()
             .add_systems(Update, crate::game_text::load_game_fonts)
@@ -148,6 +149,9 @@ impl Plugin for ConsolePlugin {
                     crate::zombies_menu::spawn_zombies_menu,
                     crate::zombies_menu::animate_zombies_menu,
                     crate::zombies_menu::zombies_menu_buttons,
+                    crate::zombies_menu::zombies_menu_cards,
+                    crate::zombies_menu::show_coop_page,
+                    crate::zombies_menu::coop_page_input,
                     crate::zombies_menu::show_zombies_options,
                     crate::zombies_menu::zombies_options_input,
                     crate::zombies_menu::zombies_options_pages,

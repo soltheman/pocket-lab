@@ -106,6 +106,8 @@ pub struct GameFonts {
     atlas_size: Vec2,
     /// BO1's hurt overlay, red blood at the screen's edges.
     pub hurt_overlay: Option<Handle<Image>>,
+    /// BO1's HUD pictures for touch buttons, by button key.
+    pub button_icons: HashMap<&'static str, Handle<Image>>,
 }
 
 #[derive(Resource)]
@@ -159,6 +161,11 @@ fn fonts_resource(set: T5FontSet, images: &mut Assets<Image>) -> Result<GameFont
     let hurt_overlay = set
         .hurt_overlay
         .map(|(w, h, rgba)| images.add(hurt_overlay_image(w, h, rgba)));
+    let button_icons = set
+        .button_icons
+        .into_iter()
+        .map(|(button, (w, h, rgba))| (button, images.add(hurt_overlay_image(w, h, rgba))))
+        .collect();
     let mut fonts = HashMap::new();
     for kind in [
         GameFont::Big,
@@ -190,6 +197,7 @@ fn fonts_resource(set: T5FontSet, images: &mut Assets<Image>) -> Result<GameFont
         atlas: images.add(atlas_image(width, height, rgba)),
         atlas_size: Vec2::new(width as f32, height as f32),
         hurt_overlay,
+        button_icons,
     })
 }
 

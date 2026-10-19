@@ -59,6 +59,32 @@ pub struct T5FontSet {
     pub atlas: Option<(u32, u32, Vec<u8>)>,
     /// BO1's hurt overlay (`overlay_low_health`), drawn by the same HUD.
     pub hurt_overlay: Option<(u32, u32, Vec<u8>)>,
+    /// BO1's own HUD pictures for the touch buttons, by button: the knife, the frag
+    /// grenade, and a rifle round standing up for FIRE.
+    pub button_icons: Vec<(&'static str, (u32, u32, Vec<u8>))>,
+}
+
+/// The touch buttons BO1's HUD has a picture for, and that picture's name; `true` stands
+/// a sideways picture upright.
+const BUTTON_ICONS: [(&str, &str, bool); 3] = [
+    ("knife", "hud_knife", false),
+    ("nade", "hud_us_grenade", false),
+    ("fire", "ammo_counter_riflebullet", true),
+];
+
+/// A picture turned a quarter left (a round pointing right then points up).
+fn turn_left((width, height, rgba): (u32, u32, Vec<u8>)) -> (u32, u32, Vec<u8>) {
+    let (w, h) = (width as usize, height as usize);
+    let mut out = vec![0u8; rgba.len()];
+    for y in 0..h {
+        for x in 0..w {
+            let (nx, ny) = (y, w - 1 - x);
+            let from = (y * w + x) * 4;
+            let to = (ny * h + nx) * 4;
+            out[to..to + 4].copy_from_slice(&rgba[from..from + 4]);
+        }
+    }
+    (height, width, out)
 }
 
 #[derive(Default)]
@@ -174,6 +200,13 @@ pub fn load_t5_fonts(games: &GamesRoot) -> Result<T5FontSet, String> {
     let hurt_overlay = asset_material::decode_ui_image_from_main(&main, "overlay_low_health")
         .ok()
         .flatten();
+    let button_icons = BUTTON_ICONS
+        .iter()
+        .filter_map(|&(button, image, upright)| {
+            let picture = asset_material::decode_ui_image_from_main(&main, image).ok().flatten()?;
+            Some((button, if upright { turn_left(picture) } else { picture }))
+        })
+        .collect();
     Ok(T5FontSet {
         fonts: fonts
             .into_iter()
@@ -181,6 +214,7 @@ pub fn load_t5_fonts(games: &GamesRoot) -> Result<T5FontSet, String> {
             .collect(),
         atlas,
         hurt_overlay,
+        button_icons,
     })
 }
 
