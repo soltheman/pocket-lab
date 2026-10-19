@@ -88,6 +88,8 @@ const DOG_MANTLE_CLIPS: [&str; 1] = ["zombie_dog_run_jump_window_40"];
 /// `meleeDamage` 40, on its dogs); its bite clip stays in place.
 const DOG_MELEE_ATTACK_DIST: f32 = 64.0;
 const DOG_BITE_DAMAGE: i32 = 40;
+/// BO1's least push, a frame (`ai` push: 1.5 units each 50 ms frame).
+const PUSH_MIN_STEP: f32 = 1.5;
 /// Where it stops walking at a player (from feet to feet, horizontally).
 const REACH: f32 = 52.0;
 /// BO1 swings at a player this close (`anim.meleeRange`), and its hit lands only if the
@@ -1796,6 +1798,113 @@ fn window_climb(runtime: &mut Runtime, object: u64) -> Option<([f32; 3], f32)> {
     Some((to, yaw))
 }
 
+/// BO1's actors are solid to each other (read from its executable): one that walks into a
+/// `pushable` actor shoves it straight away at its own pace, at least 1.5 units a frame;
+/// where that is blocked it tries aside, 0.75 as far, twice. An actor that is not
+/// pushable (in a scripted clip or a traversal: BO1 clears `pushable` for those) stops
+/// the walker at its edge. Bodies of the dead are not solid.
+fn push_actors(world: &mut World, object: u64, from: [f32; 3], to: [f32; 3]) -> [f32; 3] {
+    let step = flat_distance(from, to);
+    if step < 0.001 {
+        return to;
+    }
+    let others: Vec<(u64, [f32; 3], bool)> = {
+        let mut runtime = world.resource_mut::<Runtime>();
+        let ids: Vec<(u64, bool)> = runtime
+            .actors
+            .iter()
+            .filter(|(id, actor)| **id != object && actor.died_ms.is_none())
+            .map(|(id, actor)| (*id, actor.scripted.is_none() && actor.traverse.is_none()))
+            .collect();
+        let mut others = Vec::with_capacity(ids.len());
+        for (id, free) in ids {
+            if !runtime.live(&id) {
+                continue;
+            }
+            let at = vec_field(&mut runtime, id, "origin");
+            let pushable =
+                free && !matches!(runtime.object_field(id, "pushable"), Value::Int(0));
+            others.push((id, at, pushable));
+        }
+        others
+    };
+    let shove = step.max(PUSH_MIN_STEP);
+    let motion = [(to[0] - from[0]) / step, (to[1] - from[1]) / step];
+    for &(other, at, pushable) in &others {
+        let apart = flat_distance(to, at);
+        if apart >= RADIUS * 2.0 || (at[2] - to[2]).abs() >= GOAL_HEIGHT {
+            continue;
+        }
+        // Moving away from it already: no push, no block.
+        if flat_distance(from, at) < apart {
+            continue;
+        }
+        let crowd: Vec<[f32; 3]> = others_at(&others, other);
+        if pushable && shove_actor(world, other, at, to, motion, shove, &crowd) {
+            continue;
+        }
+        return from;
+    }
+    to
+}
+
+/// Where the living actors other than `skip` stand.
+fn others_at(others: &[(u64, [f32; 3], bool)], skip: u64) -> Vec<[f32; 3]> {
+    others
+        .iter()
+        .filter(|(id, _, _)| *id != skip)
+        .map(|(_, at, _)| *at)
+        .collect()
+}
+
+/// Moves `other` (at `at`) away from a walker now at `by`, as BO1's push: straight away,
+/// else to the side the walker passes it on, 0.75 as far each try. False when all are
+/// blocked.
+fn shove_actor(
+    world: &mut World,
+    other: u64,
+    at: [f32; 3],
+    by: [f32; 3],
+    motion: [f32; 2],
+    shove: f32,
+    crowd: &[[f32; 3]],
+) -> bool {
+    let mut away = [at[0] - by[0], at[1] - by[1]];
+    let length = (away[0] * away[0] + away[1] * away[1]).sqrt();
+    away = if length < 0.001 {
+        // Right on top of it: out ahead of the walker.
+        motion
+    } else {
+        [away[0] / length, away[1] / length]
+    };
+    // The side the walker passes it on (BO1 picks by the sign of the cross product).
+    let side = if motion[0] * away[1] - motion[1] * away[0] >= 0.0 {
+        [-away[1], away[0]]
+    } else {
+        [away[1], -away[0]]
+    };
+    let center = [0.0, 0.0, RADIUS + 1.0];
+    let mut distance = shove;
+    for direction in [away, side, side] {
+        let spot = [
+            at[0] + direction[0] * distance,
+            at[1] + direction[1] * distance,
+            at[2],
+        ];
+        let clear_of_crowd = crowd.iter().all(|c| {
+            flat_distance(spot, *c) >= RADIUS * 2.0 || (c[2] - spot[2]).abs() >= GOAL_HEIGHT
+        });
+        if clear_of_crowd && !crate::step::actor_box_solid(world, other, spot, center, RADIUS) {
+            world
+                .resource_mut::<Runtime>()
+                .set_object_field(other, "origin", Value::Vector(spot));
+            return true;
+        }
+        distance *= 0.75;
+    }
+    false
+}
+
 /// Hellhounds take turns on a player: one starts a bite at most every 200 ms
 /// (`shouldWaitInCombatIdle` / `setNextDogAttackAllowTime(200)`). True claims the turn.
 fn dog_may_bite(world: &mut World, client: crate::ClientId, now: i64) -> bool {
@@ -2193,8 +2302,9 @@ fn think(
         radius: RADIUS,
         velocity: [walk[0], walk[1], state.fall],
     };
-    let moved = crate::step::actor_slide(world, object, origin, &mut slide);
+    let slid = crate::step::actor_slide(world, object, origin, &mut slide);
     state.fall = slide.velocity[2];
+    let moved = push_actors(world, object, origin, slid);
     if moved[2] < state.home_z - FELL_OUT {
         diag::warn!(
             Sim,
@@ -2212,7 +2322,7 @@ fn think(
     // No headway on a walk: hop to where it steers if that is near and in sight (a rail,
     // a ledge, a step too tall), else plan the route again.
     let wanted = (walk[0] * walk[0] + walk[1] * walk[1]).sqrt() * dt;
-    if wanted > 1.0 && flat_distance(origin, moved) < wanted * 0.25 {
+    if wanted > 1.0 && flat_distance(origin, slid) < wanted * 0.25 {
         let since = *state.stuck_since.get_or_insert(now);
         if now - since >= STUCK_MS {
             // IW4L_ACTOR_DEBUG: what stops it, along its walk at knee, waist and chest.
