@@ -332,10 +332,16 @@ fn push_xmodel(
     packed.xmodel_draw_indices.push(draw_index);
 }
 
+// The per-kind lists are merged by this key, so it orders like the draw surf
+// itself: primary sort key, then surface type, scene light and material. Without
+// the sort key every world surface came before every model, so a world decal
+// (Kino's backstage trash piles over the gaps between the floor planks) drew
+// before the skybox, which then painted over it where nothing opaque was behind.
 fn backend_setup_key(key: u64, material_rank: u32) -> u32 {
     let draw = GfxDrawSurf { packed: key };
 
-    (material_rank & 0x7fff)
-        | (u32::from(draw.scene_light_index()) << 16)
-        | (u32::from(draw.surf_type()) << 24)
+    (material_rank & 0x3fff)
+        | (u32::from(draw.scene_light_index()) << 14)
+        | (u32::from(draw.surf_type()) << 22)
+        | (u32::from(draw.primary_sort_key()) << 26)
 }
