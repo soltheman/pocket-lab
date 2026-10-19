@@ -49,6 +49,8 @@ pub(crate) const ZOMBIES_HUD: (&str, &str) = (
         level thread spawn_dogs();
     if (getdvar("iw4l_zm_watch") == "audit")
         level thread audit_rounds();
+    if (getdvar("iw4l_zm_watch") == "reel")
+        level thread camera_reel();
 }
 
 // `animScripted` on a script model (Kino's stage curtains): the engine plays the clip,
@@ -758,6 +760,86 @@ audit_round_starts()
             logprint("audit debug: start of round " + level.round_number + " total " + level.zombie_total + " intermission " + level.intermission + " spawns " + level.enemy_spawns.size);
             wait 0.05;
         }
+    }
+}
+
+// Debug (IW4L_ZM_WATCH=reel, with IW4L_CINEMATIC=1): the camera flies a few slow dolly
+// shots through the map for the menu's background recording: the power on and every
+// door open (the lights up), the player ignored by zombies and kept alive. Each shot
+// eases from its start to its end; "reel debug: shot N" marks each start.
+// IW4L_ZM_SHOT=n holds shot n's start (to frame it).
+camera_reel()
+{
+    wait 8;
+    players = getplayers();
+    if (!players.size)
+        return;
+    p = players[0];
+    p.ignoreme = true;
+    all = getentarray("zombie_door", "targetname");
+    debris = getentarray("zombie_debris", "targetname");
+    for (i = 0; i < debris.size; i++)
+        all[all.size] = debris[i];
+    for (i = 0; i < all.size; i++)
+        all[i] notify("trigger", p, true);
+    switch_trigger = getent("use_elec_switch", "targetname");
+    if (isdefined(switch_trigger))
+        switch_trigger notify("trigger", p);
+    // Shots: from, to (eye positions), from angles, to angles, seconds.
+    from = [];
+    to = [];
+    a = [];
+    b = [];
+    secs = [];
+    // The foyer: drifting past the ticket booth toward the stairs.
+    from[0] = (-300, -1450, 150); to[0] = (100, -1400, 160); a[0] = (2, 60, 0); b[0] = (4, 105, 0); secs[0] = 9;
+    // The auditorium from the back rows, pushing toward the stage.
+    from[1] = (0, -150, 150); to[1] = (0, 250, 110); a[1] = (5, 90, 0); b[1] = (3, 90, 0); secs[1] = 9;
+    // From the stage, out over the seats toward the balcony.
+    from[2] = (120, 640, 190); to[2] = (-120, 520, 210); a[2] = (4, -110, 0); b[2] = (6, -70, 0); secs[2] = 10;
+    // The stage from the side aisle, the screen and curtains past the seats.
+    from[3] = (-520, 160, 150); to[3] = (-420, 360, 150); a[3] = (3, 40, 0); b[3] = (3, 55, 0); secs[3] = 9;
+    only = getdvar("iw4l_zm_shot");
+    if (only != "")
+    {
+        n = int(only);
+        p setorigin(from[n] - (0, 0, 60));
+        p setplayerangles(a[n]);
+        logprint("reel debug: holding shot " + n);
+        for (;;)
+        {
+            p setorigin(from[n] - (0, 0, 60));
+            p setplayerangles(a[n]);
+            wait 0.05;
+        }
+    }
+    for (;;)
+    {
+        for (n = 0; n < from.size; n++)
+        {
+            logprint("reel debug: shot " + n);
+            // Held still a moment first, so the map is drawn in before it rolls.
+            for (i = 0; i < 50; i++)
+            {
+                p setorigin(from[n] - (0, 0, 60));
+                p setplayerangles(a[n]);
+                wait 0.05;
+            }
+            logprint("reel debug: rolling " + n);
+            steps = int(secs[n] * 20);
+            for (i = 0; i <= steps; i++)
+            {
+                // Ease in and out.
+                t = i / steps;
+                t = t * t * (3 - 2 * t);
+                at = from[n] + (to[n] - from[n]) * t;
+                look = a[n] + (b[n] - a[n]) * t;
+                p setorigin(at - (0, 0, 60));
+                p setplayerangles(look);
+                wait 0.05;
+            }
+        }
+        logprint("reel debug: loop done");
     }
 }
 

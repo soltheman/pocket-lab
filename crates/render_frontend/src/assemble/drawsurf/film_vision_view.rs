@@ -400,10 +400,13 @@ fn update_film_vision_view(
             film.script_forced = true;
         }
     }
-    film.current = if view.ready && !film.script_forced && settings.brightness != 0.0 {
+    // Recording the menu's flybys (`IW4L_CINEMATIC=1`): a touch brighter, as the menu
+    // draws them under a dark wash.
+    let brightness = settings.brightness + if diag::cinematic() { 0.08 } else { 0.0 };
+    film.current = if view.ready && !film.script_forced && brightness != 0.0 {
         let mut vision = mixed.unwrap_or(asset_world::FilmVision::default());
         vision.enable = true;
-        vision.brightness += settings.brightness;
+        vision.brightness += brightness;
         Some(vision)
     } else {
         mixed

@@ -491,7 +491,7 @@ fn entry(column: &mut ChildSpawnerCommands, font: &Handle<Font>, s: f32, action:
                 border: UiRect::left(px(3.0 * s)),
                 ..default()
             },
-            BorderColor::all(Color::NONE),
+            BorderColor::all(Color::srgba(0.55, 0.04, 0.02, 0.9)),
             BackgroundColor(Color::NONE),
         ))
         .with_child(text(font, 25.0 * s, WHITE, label));
@@ -563,20 +563,10 @@ pub(crate) fn spawn_zombies_menu(
             GlobalZIndex(16_000),
         ))
         .with_children(|root| {
-            // The picture: a square wider than the screen, cropped top and bottom.
+            // The map's loading-screen picture across the whole screen, stretched as BO1
+            // draws it (its loading screens are stored square for a 16:9 screen).
             root.spawn((
                 MenuBackground,
-                Node {
-                    width: percent(104),
-                    aspect_ratio: Some(1.0),
-                    flex_shrink: 0.0,
-                    ..default()
-                },
-                BackgroundColor(Color::BLACK),
-            ));
-            // BO1's menus sit on a dark wash, darkest under the text on the left and
-            // along the bottom under the cards.
-            root.spawn((
                 Node {
                     position_type: PositionType::Absolute,
                     left: px(0),
@@ -585,18 +575,10 @@ pub(crate) fn spawn_zombies_menu(
                     height: percent(100),
                     ..default()
                 },
-                BackgroundGradient(vec![
-                    Gradient::Linear(LinearGradient::to_right(vec![
-                        ColorStop::percent(Color::srgba(0.0, 0.0, 0.0, 0.95), 0.0),
-                        ColorStop::percent(Color::srgba(0.0, 0.0, 0.0, 0.78), 36.0),
-                        ColorStop::percent(Color::srgba(0.03, 0.0, 0.0, 0.3), 100.0),
-                    ])),
-                    Gradient::Linear(LinearGradient::to_top(vec![
-                        ColorStop::percent(Color::srgba(0.0, 0.0, 0.0, 0.85), 0.0),
-                        ColorStop::percent(Color::srgba(0.0, 0.0, 0.0, 0.0), 45.0),
-                    ])),
-                ]),
+                UiTransform::default(),
+                BackgroundColor(Color::BLACK),
             ));
+            crate::zombies_menu_art::spawn_backdrop(root, s);
             // A thin red line along the top, as BO1's lobby frames have.
             root.spawn((
                 Node {
@@ -624,7 +606,7 @@ pub(crate) fn spawn_zombies_menu(
             ))
             .with_children(|column| {
                 column.spawn(text(&font, 13.0 * s, GREY, "BLACK OPS"));
-                column.spawn((MenuTitle, text(&font, 54.0 * s, RED, "ZOMBIES")));
+                column.spawn((MenuTitle, text(&font, 66.0 * s, RED, "ZOMBIES")));
                 column.spawn((
                     MenuMapName,
                     text(&font, 15.0 * s, WHITE, start.map_title.to_uppercase()),
@@ -680,16 +662,13 @@ pub(crate) fn spawn_zombies_menu(
                                 BackgroundColor(Color::srgb(0.06, 0.05, 0.05)),
                             ))
                             .with_children(|card| {
-                                // The square picture across the card's width, cropped
-                                // top and bottom.
+                                // The picture stretched to the card, as BO1 draws it.
                                 card.spawn((
                                     MapCardImage(index),
                                     Node {
                                         position_type: PositionType::Absolute,
-                                        left: px(0),
-                                        top: px(-(card_w - card_h) * 0.5),
-                                        width: px(card_w),
-                                        height: px(card_w),
+                                        width: percent(100),
+                                        height: percent(100),
                                         ..default()
                                     },
                                     FocusPolicy::Pass,
@@ -736,7 +715,14 @@ pub(crate) fn spawn_zombies_menu(
                         }
                     });
             });
+            crate::zombies_menu_art::spawn_film(root);
         });
+}
+
+fn stretched(handle: Handle<Image>) -> ImageNode {
+    let mut image = ImageNode::new(handle);
+    image.image_mode = bevy::ui::widget::NodeImageMode::Stretch;
+    image
 }
 
 fn image_from_rgba(width: u32, height: u32, pixels: Vec<u8>) -> Image {
@@ -763,13 +749,14 @@ pub(crate) fn animate_zombies_menu(
     time: Res<Time>,
     maps: Option<ResMut<MenuMaps>>,
     mut images: ResMut<Assets<Image>>,
-    mut background: Query<(Entity, &mut Node), With<MenuBackground>>,
+    background: Query<(Entity, &mut Node), With<MenuBackground>>,
     card_images: Query<(Entity, &MapCardImage)>,
     mut title: Query<&mut GameText, (With<MenuTitle>, Without<MenuNotice>)>,
     mut notice: Query<&mut GameText, (With<MenuNotice>, Without<MenuTitle>)>,
     mut column: Query<&mut Visibility, With<MenuColumn>>,
     options: Res<ZombiesOptionsOpen>,
     coop: Res<CoopOpen>,
+    reel: Res<crate::zombies_menu_reel::MenuReel>,
 ) {
     for mut visibility in &mut column {
         visibility.set_if_neq(if options.0 || coop.0 {
@@ -799,27 +786,36 @@ pub(crate) fn animate_zombies_menu(
         let handle = images.add(image_from_rgba(width, height, pixels));
         for (entity, card) in &card_images {
             if card.0 == index {
-                commands.entity(entity).insert(ImageNode::new(handle.clone()));
+                commands.entity(entity).insert(stretched(handle.clone()));
             }
         }
         maps.images[index] = Some(handle);
         diag::info!(Ui, "zombies menu: map card {index} picture {width}x{height}");
+    }
+    // Kino's flyby, once its first frame is in, takes over from its loading screen on
+    // the background and the card.
+    if let Some(flyby) = reel.handle.clone()
+        && maps.images[0].as_ref() != Some(&flyby)
+    {
+        for (entity, card) in &card_images {
+            if card.0 == 0 {
+                commands.entity(entity).insert(stretched(flyby.clone()));
+            }
+        }
+        maps.images[0] = Some(flyby);
+        if maps.selected == 0 {
+            maps.shown_background = None;
+        }
     }
     let selected = maps.selected;
     if maps.shown_background != Some(selected)
         && let Some(handle) = maps.images[selected].clone()
         && let Ok((entity, _)) = background.single()
     {
-        commands.entity(entity).insert(ImageNode::new(handle));
+        commands.entity(entity).insert(stretched(handle));
         maps.shown_background = Some(selected);
     }
     let t = time.elapsed_secs();
-    if let Ok((_, mut node)) = background.single_mut() {
-        let want = percent(106.0 + 4.0 * (t / 9.0).sin());
-        if node.width != want {
-            node.width = want;
-        }
-    }
     if let Ok(mut title) = title.single_mut() {
         // Mostly steady, with the odd quick dip, like old film.
         let dip = ((t * 7.3).sin() * (t * 2.9).sin()).max(0.0).powi(8);

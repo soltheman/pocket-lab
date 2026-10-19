@@ -366,8 +366,8 @@ fn viewweapon_drawgun_admit(
     };
     let iris = get_weap_reticle_zoom(ps.f_weapon_pos_frac, b_position_to_ads, &weap);
     Some((
-        viewweapon_drawgun(false, true, iris),
-        viewweapon_drawgun_skip(false, true, iris),
+        viewweapon_drawgun(false, !diag::cinematic(), iris),
+        viewweapon_drawgun_skip(false, !diag::cinematic(), iris),
     ))
 }
 

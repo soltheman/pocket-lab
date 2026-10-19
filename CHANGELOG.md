@@ -1,4 +1,11 @@
-# Bo1ZPocket 0.3.39
+# Bo1ZPocket 0.3.40
+
+**New in 0.3.40**
+
+- **Kino flyby on the menu:** four slow dolly shots (foyer, the auditorium toward the stage, the stage out over the seats, the stage from the side aisle), recorded in this engine with the new cinematic mode (`IW4L_CINEMATIC=1`, `IW4L_ZM_WATCH=reel`, console `record <name> <seconds>`), crossfaded into a seamless 33 s loop and shipped as 854x480 JPEG frames at 15 fps (about 14 MB). The menu decodes one frame at a time into one texture.
+- **Atmosphere from BO1's own art:** the zombie lobby's blood splash behind ZOMBIES, the Group 935 emblem, rising embers, film scratches and grain, a vignette.
+- **Fixed:** BO1's loading screens are stored square for a 16:9 screen; they're now stretched as BO1 draws them instead of cropped.
+
 
 **New in 0.3.39**
 

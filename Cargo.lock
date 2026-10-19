@@ -2287,6 +2287,7 @@ dependencies = [
  "session",
  "sim",
  "ui",
+ "zune-jpeg",
 ]
 
 [[package]]
@@ -3911,7 +3912,7 @@ version = "0.1.0"
 
 [[package]]
 name = "launcher"
-version = "0.3.39"
+version = "0.3.40"
 dependencies = [
  "asset_transport",
  "bootstrap",
@@ -8056,4 +8057,19 @@ checksum = "91e19ebc2adc8f83e43039e79776e3fda8ca919132d68a1fed6a5faca2683748"
 dependencies = [
  "cc",
  "pkg-config",
+]
+
+[[package]]
+name = "zune-core"
+version = "0.4.12"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "3f423a2c17029964870cfaabb1f13dfab7d092a62a29a89264f4d36990ca414a"
+
+[[package]]
+name = "zune-jpeg"
+version = "0.4.21"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "29ce2c8a9384ad323cf564b67da86e21d3cfdff87908bc1223ed5c99bc792713"
+dependencies = [
+ "zune-core",
 ]

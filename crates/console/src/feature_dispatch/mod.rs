@@ -19,7 +19,7 @@ mod session;
 mod state_dump;
 mod ui;
 
-pub(crate) use capture::route_capture_commands;
+pub(crate) use capture::{FrameRecording, record_frames, route_capture_commands};
 pub(crate) use echo::ConsoleEcho;
 pub(crate) use hitvol::route_hitvol_commands;
 pub(crate) use process::{exit_process, request_exit};
@@ -212,6 +212,7 @@ pub fn register_feature_commands(registry: &mut crate::ConsoleRegistry, maps: &[
         ("help", "help — list registered commands"),
         ("clear", "clear — clear console scrollback"),
         ("screenshot", "screenshot [name] — capture the backbuffer"),
+        ("record", "record <name> <seconds> — capture frames at 20 per second of game time"),
         (
             "record",
             "record [name] — start a demo under iw4l-artifacts",

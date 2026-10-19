@@ -237,6 +237,12 @@ pub fn boot_crumb(message: &str) {
 
 /// A line for the run log on every platform: the iOS boot log on a phone, the
 /// normal log elsewhere (so desktop never creates `Documents/iw4l-boot.log`).
+/// `IW4L_CINEMATIC=1`: no gun and no HUD, for recording the menu's map flybys.
+pub fn cinematic() -> bool {
+    static CINEMATIC: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
+    *CINEMATIC.get_or_init(|| std::env::var_os("IW4L_CINEMATIC").is_some_and(|v| v == "1"))
+}
+
 pub fn boot_note(message: &str) {
     #[cfg(target_os = "ios")]
     boot_crumb(message);

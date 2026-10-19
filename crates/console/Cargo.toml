@@ -31,6 +31,7 @@ bots = { path = "../bots" }
 hud = { path = "../hud" }
 entity_iw4.workspace = true
 perf.workspace = true
+zune-jpeg = "0.4"
 
 [target.'cfg(not(target_os = "ios"))'.dependencies]
 rfd = "0.17"
