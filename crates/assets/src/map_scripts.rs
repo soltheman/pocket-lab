@@ -659,9 +659,25 @@ log_player_volumes()
 // Debug (IW4L_ZM_WATCH=nuke): every three seconds the first player kills every zombie.
 kill_all_zombies()
 {
+    // IW4L_ZM_EVERY=<seconds>: kill that often instead (zombies pile up between, for
+    // many deaths at once); IW4L_ZM_TOTAL=<n>: this round has n zombies, spawned fast.
+    every = 3;
+    if (getdvar("iw4l_zm_every") != "")
+        every = getdvarfloat("iw4l_zm_every");
+    if (getdvar("iw4l_zm_total") != "")
+    {
+        // Once the round has set its own count.
+        while (!isdefined(level.zombie_total) || level.zombie_total <= 0)
+            wait 0.5;
+        level.zombie_total = getdvarint("iw4l_zm_total");
+        level.zombie_vars["zombie_spawn_delay"] = 0.2;
+        players = getplayers();
+        if (players.size)
+            players[0] setmaxhealth(100000);
+    }
     for (;;)
     {
-        wait 3;
+        wait every;
         players = getplayers();
         if (!players.size)
             continue;
@@ -672,10 +688,17 @@ kill_all_zombies()
         // IW4L_ZM_LOOK=gib: zombies that reach the player lose an arm (as a body shot can
         // do), are looked at, and are left alive.
         gib = getdvar("iw4l_zm_look") == "gib";
+        // IW4L_ZM_LOOK=ragdoll: as near, and the player then looks at the first body
+        // until the next round of kills (to record it fall).
+        ragdoll = getdvar("iw4l_zm_look") == "ragdoll";
+        near = near || ragdoll;
+        body = undefined;
         for (i = 0; i < zombies.size; i++)
         {
             if ((near || gib) && distancesquared(zombies[i].origin, players[0].origin) > 200 * 200)
                 continue;
+            if (ragdoll && !isdefined(body))
+                body = zombies[i];
             if (gib)
             {
                 if (!isdefined(zombies[i].iw4l_gibbed))
@@ -703,9 +726,9 @@ kill_all_zombies()
             {
                 dropped = dropped + " " + models[i].powerup_name + "@" + models[i].origin;
                 // Look at it for a screenshot, then (a round of the loop later) step onto it.
-                if (near && isdefined(models[i].iw4l_seen))
+                if (near && !ragdoll && isdefined(models[i].iw4l_seen))
                     players[0] setorigin(models[i].origin - (0, 0, 40));
-                else if (near)
+                else if (near && !ragdoll)
                     players[0] setplayerangles(vectortoangles(models[i].origin - players[0] geteye()));
                 models[i].iw4l_seen = true;
             }
@@ -713,6 +736,18 @@ kill_all_zombies()
         if (near)
             logprint("nuke debug: insta kill " + level.zombie_vars["zombie_insta_kill"] + ", point scalar " + level.zombie_vars["zombie_point_scalar"]);
         logprint("nuke debug: killed " + zombies.size + ", score " + players[0].score + ", drops this round " + level.powerup_drop_count + ", on the ground:" + dropped);
+        if (isdefined(body))
+            level thread look_at_body(players[0], body);
+    }
+}
+
+look_at_body(p, body)
+{
+    logprint("ragdoll debug: watching a body at " + body.origin);
+    for (t = 0; t < 56 && isdefined(body); t++)
+    {
+        p setplayerangles(vectortoangles(body.origin + (0, 0, 8) - p geteye()));
+        wait 0.05;
     }
 }
 
@@ -729,10 +764,25 @@ down_first_player()
 // nearest zombie's chest.
 aim_at_zombies()
 {
+    // IW4L_ZM_AIM=corpse: once the zombie aimed at dies, look at its body for four
+    // seconds (to record it fall), then go on to the next.
+    corpse = getdvar("iw4l_zm_aim") == "corpse";
+    last = undefined;
     for (;;)
     {
         wait 0.05;
         players = getplayers();
+        if (corpse && players.size && isdefined(last) && !isalive(last))
+        {
+            logprint("aim debug: watching a body fall at " + last.origin);
+            for (t = 0; t < 80 && isdefined(last); t++)
+            {
+                players[0] setplayerangles(vectortoangles(last.origin + (0, 0, 10) - (players[0].origin + (0, 0, 60))));
+                wait 0.05;
+            }
+            last = undefined;
+            continue;
+        }
         zombies = getaiarray("axis");
         if (!players.size || !zombies.size)
             continue;
@@ -748,6 +798,7 @@ aim_at_zombies()
         if (getdvar("iw4l_zm_aim") == "head")
             target = z gettagorigin("j_head");
         p setplayerangles(vectortoangles(target - (p.origin + (0, 0, 60))));
+        last = z;
     }
 }
 

@@ -1291,6 +1291,8 @@ fn preflight_match_install(
             ("IW4L_ZM_AIM", "iw4l_zm_aim"),
             ("IW4L_ZM_SHOT", "iw4l_zm_shot"),
             ("IW4L_ZM_INSTA", "iw4l_zm_insta"),
+            ("IW4L_ZM_EVERY", "iw4l_zm_every"),
+            ("IW4L_ZM_TOTAL", "iw4l_zm_total"),
         ] {
             if let Ok(value) = std::env::var(env) {
                 script_dvars.push((dvar.into(), value));

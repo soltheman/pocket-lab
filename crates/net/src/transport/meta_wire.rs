@@ -821,6 +821,7 @@ pub fn encode_snapshot_meta_body(
     encode_item_ammo(out, &meta.item_ammo);
     encode_item_pickups(out, &meta.item_pickups);
     encode_actor_targets(out, &meta.actor_targets);
+    encode_ragdolls(out, &meta.ragdolls);
     sizes.item_tables = section_span(out, mark);
     mark = out.len();
     encode_area_entities(out, meta.area_entities.as_ref());
@@ -894,6 +895,7 @@ pub fn decode_snapshot_meta(
     let item_ammo = decode_item_ammo(input)?;
     let item_pickups = decode_item_pickups(input)?;
     let actor_targets = decode_actor_targets(input)?;
+    let ragdolls = decode_ragdolls(input)?;
     remaining_after[8] = input.remaining();
     let area_entities = decode_area_entities(input)?;
     remaining_after[9] = input.remaining();
@@ -930,6 +932,7 @@ pub fn decode_snapshot_meta(
             entity_kernel,
             corpses,
             actor_targets,
+            ragdolls,
             item_ammo,
             item_pickups,
         },
@@ -2914,6 +2917,70 @@ fn decode_actor_targets(input: &mut WireReader<'_>) -> Result<Vec<[f32; 4]>, Wir
     Ok(rows)
 }
 
+/// The ragdolling bodies (entity, start, launches) and the recent blasts near them.
+fn encode_ragdolls(out: &mut WireWriter, meta: &sim::RagdollMeta) {
+    let bodies = &meta.bodies[..meta.bodies.len().min(u16::MAX as usize)];
+    out.put_u16(bodies.len() as u16);
+    for body in bodies {
+        out.put_u16(body.entnum);
+        out.put_i32(body.start_ms);
+        let launches = &body.launches[..body.launches.len().min(sim::RAGDOLL_MAX_LAUNCHES)];
+        out.put_u8(launches.len() as u8);
+        for launch in launches {
+            for value in launch.force {
+                out.put_f32(value);
+            }
+            out.put_u8(launch.hitloc);
+        }
+    }
+    let blasts = &meta.blasts[..meta.blasts.len().min(u16::MAX as usize)];
+    out.put_u16(blasts.len() as u16);
+    for blast in blasts {
+        for value in blast.origin {
+            out.put_f32(value);
+        }
+        out.put_f32(blast.radius);
+        out.put_i32(blast.at_ms);
+    }
+}
+
+fn decode_ragdolls(input: &mut WireReader<'_>) -> Result<sim::RagdollMeta, WireError> {
+    let count = input.get_u16()? as usize;
+    let mut bodies = Vec::with_capacity(count.min(64));
+    for _ in 0..count {
+        let entnum = input.get_u16()?;
+        let start_ms = input.get_i32()?;
+        let launch_count = input.get_u8()? as usize;
+        if launch_count > sim::RAGDOLL_MAX_LAUNCHES {
+            return Err(WireError::Malformed("too many ragdoll launches"));
+        }
+        let mut launches = Vec::with_capacity(launch_count);
+        for _ in 0..launch_count {
+            let force = [input.get_f32()?, input.get_f32()?, input.get_f32()?];
+            launches.push(sim::RagdollLaunch {
+                force,
+                hitloc: input.get_u8()?,
+            });
+        }
+        bodies.push(sim::RagdollBodyRecord {
+            entnum,
+            start_ms,
+            launches,
+        });
+    }
+    let count = input.get_u16()? as usize;
+    let mut blasts = Vec::with_capacity(count.min(64));
+    for _ in 0..count {
+        let origin = [input.get_f32()?, input.get_f32()?, input.get_f32()?];
+        blasts.push(sim::RagdollBlast {
+            origin,
+            radius: input.get_f32()?,
+            at_ms: input.get_i32()?,
+        });
+    }
+    Ok(sim::RagdollMeta { bodies, blasts })
+}
+
 fn encode_item_pickups(out: &mut WireWriter, rows: &[ItemPickupRecord]) {
     debug_assert!(rows.len() <= u16::MAX as usize);
     out.put_u16(rows.len() as u16);
@@ -3495,4 +3562,35 @@ fn decode_objectives(input: &mut WireReader<'_>) -> Result<sim::ObjectiveMatch, 
         state.vehicle_targets.push(target);
     }
     Ok(state)
+}
+
+#[cfg(test)]
+mod ragdoll_tests {
+    use super::{decode_ragdolls, encode_ragdolls};
+    use crate::transport::wire::{WireReader, WireWriter};
+
+    #[test]
+    fn ragdolls_round_trip() {
+        let meta = sim::RagdollMeta {
+            bodies: vec![sim::RagdollBodyRecord {
+                entnum: 437,
+                start_ms: 12_350,
+                launches: vec![sim::RagdollLaunch {
+                    force: [12.0, -3.5, 4.0],
+                    hitloc: 4,
+                }],
+            }],
+            blasts: vec![sim::RagdollBlast {
+                origin: [30.5, -1295.0, 63.5],
+                radius: 256.0,
+                at_ms: 12_400,
+            }],
+        };
+        let mut out = WireWriter::new();
+        encode_ragdolls(&mut out, &meta);
+        let bytes = out.finish();
+        let mut input = WireReader::new(&bytes);
+        assert_eq!(decode_ragdolls(&mut input).unwrap(), meta);
+        assert_eq!(input.remaining(), 0);
+    }
 }

@@ -23,13 +23,13 @@ use render_scene::{ModelLightingOwner, ModelLightingRequest, ModelLightingReques
 use render_scene::{TessMaterials, WorldPresentFacts, WorldScriptModelInstance};
 
 #[derive(Resource, Default)]
-struct ScriptModelDobjs {
-    by_id: HashMap<u32, PersistentScriptDobj>,
+pub(crate) struct ScriptModelDobjs {
+    pub(crate) by_id: HashMap<u32, PersistentScriptDobj>,
     mover_pose: HashMap<u32, ScriptMoverCentitySample>,
 }
 
-struct PersistentScriptDobj {
-    dobj: std::sync::Arc<xmodel_runtime::DObj>,
+pub(crate) struct PersistentScriptDobj {
+    pub(crate) dobj: std::sync::Arc<xmodel_runtime::DObj>,
     reuse_key: xmodel_runtime::DObjReuseKey,
 }
 
@@ -76,6 +76,7 @@ struct ScriptModelPoseLocals<'w, 's> {
     lod_skinned: Res<'w, render_scene::LodRampSkinnedDvar>,
     gfx_scene: Res<'w, HostGfxScene>,
     skipped: Local<'s, std::collections::HashSet<String>>,
+    ragdolls: Res<'w, crate::occupancy::ragdoll::ScriptModelRagdolls>,
 }
 
 /// One boot note per model and reason, so a script model that never draws
@@ -256,6 +257,7 @@ pub fn register_script_model_systems(app: &mut App) {
         .init_resource::<crate::anim::dobj_pose::ScriptModelDObjFrame>()
         .init_resource::<crate::anim::dobj_pose::ScriptModelBoltDemand>()
         .init_resource::<ScriptModelPoseProduct>()
+        .init_resource::<crate::occupancy::ragdoll::ScriptModelRagdolls>()
         .add_systems(
             Update,
             (
@@ -275,6 +277,7 @@ pub fn register_script_model_systems(app: &mut App) {
             Update,
             (
                 publish_script_model_dobjs,
+                crate::occupancy::ragdoll::step_script_model_ragdolls,
                 publish_script_model_bolt_poses
                     .after(crate::anim::dobj_pose::begin_dobj_pose_frame),
                 pose_script_models,
@@ -719,6 +722,7 @@ fn pose_script_models(
         lod_skinned,
         gfx_scene,
         mut skipped,
+        ragdolls,
     } = locals;
     live_assets.clear();
     live_ids.clear();
@@ -779,7 +783,23 @@ fn pose_script_models(
             note_skip(&mut skipped, &owner.current_model.0, "skeleton_unavailable");
             continue;
         };
-        let origin = transform.translation.to_array();
+        // A ragdoll is drawn in its own pose, from where its body lies; its pose is its
+        // own (a revision no other model's state shares).
+        let ragdoll = owner
+            .gentity_number
+            .and_then(|number| ragdolls.pose(number));
+        let world_from_local = ragdoll.map_or_else(
+            || transform.to_matrix(),
+            |pose| pose.world_from_local(transform),
+        );
+        let ragdoll_state = ragdoll.map(|pose| {
+            let mut state = owner.dobj_state.clone();
+            state.pose_revision = pose.pose_revision;
+            state
+        });
+        let dobj_state = ragdoll_state.as_ref().unwrap_or(&owner.dobj_state);
+        let lighting_origin = ragdoll.map_or(owner.lighting_origin, |pose| pose.root.to_array());
+        let origin = world_from_local.w_axis.truncate().to_array();
 
         if lod_culled(&skels, origin, eye, skinned_ramp) {
             if let Some(id) = focused_owner_id {
@@ -819,7 +839,7 @@ fn pose_script_models(
                 .find_map(|namespace| xanims.clip(namespace, name))
             });
             let index = if let Some(index) =
-                product.asset_index(&owner.current_model, &owner.dobj_state, &camera_lods)
+                product.asset_index(&owner.current_model, dobj_state, &camera_lods)
             {
                 index
             } else {
@@ -831,14 +851,26 @@ fn pose_script_models(
                     continue;
                 };
                 let skin_entries = slot.as_ref().map(|slot| slot.skin_entries).unwrap_or(&[]);
-                let Some((surfaces, surface_materials)) = pose_script_dobj_with_materials(
-                    Some(&assets),
-                    &skels,
-                    &slot_dobj.dobj,
-                    &request,
-                    lod_view,
-                    skin_entries,
-                ) else {
+                let posed = match ragdoll {
+                    Some(pose) => skin_script_dobj_with_materials(
+                        Some(&assets),
+                        &skels,
+                        &slot_dobj.dobj,
+                        &pose.local_bones(world_from_local),
+                        &request.hide_part_bits,
+                        lod_view,
+                        skin_entries,
+                    ),
+                    None => pose_script_dobj_with_materials(
+                        Some(&assets),
+                        &skels,
+                        &slot_dobj.dobj,
+                        &request,
+                        lod_view,
+                        skin_entries,
+                    ),
+                };
+                let Some((surfaces, surface_materials)) = posed else {
                     note_skip(&mut skipped, &owner.current_model.0, "pose_failed");
                     continue;
                 };
@@ -857,7 +889,7 @@ fn pose_script_models(
                     &mut product,
                     &live_assets,
                     owner.current_model.clone(),
-                    owner.dobj_state.clone(),
+                    dobj_state.clone(),
                     camera_lods.clone(),
                     surfaces,
                     surface_materials,
@@ -873,8 +905,7 @@ fn pose_script_models(
             perf::truck(id, None, None, clip, Some("posed"));
             index
         } else {
-            let Some(index) =
-                product.asset_index(&owner.current_model, &owner.dobj_state, &camera_lods)
+            let Some(index) = product.asset_index(&owner.current_model, dobj_state, &camera_lods)
             else {
                 if let Some(id) = focused_owner_id {
                     focus.refuse(id, &owner.current_model.0, "posed_asset_unavailable");
@@ -895,11 +926,11 @@ fn pose_script_models(
             asset_index,
             focused_owner_id,
             model: owner.current_model.clone(),
-            world_from_local: transform.to_matrix(),
+            world_from_local,
             entnum,
             camera_hidden: sphere_behind_frustum(origin, radius, &planes),
-            lighting_origin: owner.lighting_origin,
-            lookup_fallback: atpoint.fallback(owner.lighting_origin, box_half),
+            lighting_origin,
+            lookup_fallback: atpoint.fallback(lighting_origin, box_half),
             caster_bound: render_scene::XModelCasterBound { origin, radius },
         });
     }
@@ -1333,7 +1364,31 @@ pub fn pose_script_dobj_with_materials(
     skin_entries: &[dpvs_iw4::SceneEntSkinEntry],
 ) -> Option<(Vec<PosedModelSurface>, Vec<Option<assets::MaterialIndex>>)> {
     let world = xmodel_runtime::pose_dobj(dobj, request, Mat4::IDENTITY).ok()?;
-    let skin = dobj.skin_matrices(&world);
+    skin_script_dobj_with_materials(
+        catalog,
+        skels,
+        dobj,
+        &world,
+        &request.hide_part_bits,
+        lod_view,
+        skin_entries,
+    )
+}
+
+/// The surfaces of a DObj skinned to bones already posed (model space).
+pub(crate) fn skin_script_dobj_with_materials(
+    catalog: Option<&asset_world::MapXModelSceneCatalog>,
+    skels: &[&asset_model::ModelSkel],
+    dobj: &xmodel_runtime::DObj,
+    world: &[Mat4],
+    hide_part_bits: &xmodel_runtime::HidePartBits,
+    lod_view: Option<DObjLodView>,
+    skin_entries: &[dpvs_iw4::SceneEntSkinEntry],
+) -> Option<(Vec<PosedModelSurface>, Vec<Option<assets::MaterialIndex>>)> {
+    if world.len() != dobj.bones.len() {
+        return None;
+    }
+    let skin = dobj.skin_matrices(world);
     let mut surfaces = Vec::new();
     let mut materials = Vec::new();
     for (model, skel) in skels.iter().enumerate() {
@@ -1352,7 +1407,7 @@ pub fn pose_script_dobj_with_materials(
                 dobj.surface_visible(
                     model,
                     &skel.surface_part_bits[surface_index],
-                    &request.hide_part_bits,
+                    hide_part_bits,
                 ) && dpvs_iw4::SceneEntSkinEntry::stream_draws(
                     skin_entries,
                     model as u16,
@@ -1419,6 +1474,7 @@ fn publish_script_model_bolt_poses(
     xanims: Option<Res<assets::PreparedXAnims>>,
     mut demand: ResMut<crate::anim::dobj_pose::ScriptModelBoltDemand>,
     mut dobj_poses: ResMut<crate::anim::dobj_pose::HostDObjPoseFrame>,
+    ragdolls: Res<crate::occupancy::ragdoll::ScriptModelRagdolls>,
 ) {
     if demand.is_empty() {
         return;
@@ -1429,6 +1485,18 @@ fn publish_script_model_bolt_poses(
             continue;
         };
         live.insert(entnum);
+        // A ragdoll's tags are where its ragdoll pose has them.
+        if let Some(pose) = ragdolls.pose(entnum) {
+            let world_from_local = pose.world_from_local(transform);
+            let _ = dobj_poses.publish(
+                u32::from(entnum),
+                true,
+                0,
+                world_from_local,
+                &pose.local_bones(world_from_local),
+            );
+            continue;
+        }
         let Some(slot) = owner
             .authority_owner
             .and_then(|owner| owner.script_model())

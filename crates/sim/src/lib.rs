@@ -33,6 +33,10 @@ pub use persistent_data::{
 };
 pub use persistent_defaults::PlayerDataDefaults;
 mod presence;
+mod ragdoll;
+pub use ragdoll::{
+    RAGDOLL_MAX_LAUNCHES, RagdollBlast, RagdollBodyRecord, RagdollLaunch, RagdollMeta,
+};
 mod remote_missile;
 pub mod script;
 mod weapon_lock;

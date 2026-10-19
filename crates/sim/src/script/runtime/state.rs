@@ -78,6 +78,11 @@ pub(crate) struct Runtime {
     pub(crate) pending_deletes: Vec<u64>,
     pub(crate) vehicles: BTreeMap<u64, host::vehicles::Heli>,
     pub(crate) actors: BTreeMap<u64, host::actors::Actor>,
+    /// Bodies `startRagdoll` turned into ragdolls (BO1's ragdoll trajectory): since
+    /// when, and the launches sent to them.
+    pub(crate) ragdolls: BTreeMap<u64, host::actors::RagdollMark>,
+    /// The bodies of dead actors kept on the floor (BO1's `ai_corpseCount` slots).
+    pub(crate) actor_corpses: Vec<u64>,
     /// Walk-graph links closed by `disconnectpaths` (closed doors, debris).
     pub(crate) nav_blocks: crate::actor_nav::NavLinkBlocks,
     pub(crate) planes: BTreeMap<u64, host::vehicles::Plane>,

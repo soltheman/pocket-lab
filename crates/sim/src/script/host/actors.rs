@@ -6,8 +6,9 @@
 //! its goal with monster collision (sliding along walls) and, once in the playable area,
 //! swings at players in reach. Damage goes through BO1's `CodeCallback_ActorDamage`, whose
 //! scripts score the hit and call `finishActorDamage`; at zero health it runs
-//! `CodeCallback_ActorKilled`, the `death` notify and the death animscript. The body is
-//! deleted a little later.
+//! `CodeCallback_ActorKilled`, the `death` notify and the death animscript, whose
+//! `startRagdoll` hands the body to the client's ragdoll. The body then stays on the floor
+//! in one of BO1's `ai_corpseCount` corpse slots.
 
 use bevy_ecs::prelude::World;
 
@@ -117,8 +118,12 @@ const MELEE_CLOSEST: f32 = 30.0;
 const HIT_DAMAGE: i32 = 50;
 /// The collision cube's half size; its centre sits this far above the feet.
 const RADIUS: f32 = 15.0;
-/// A killed actor's body stays this long before it is deleted.
+/// A killed actor stays an actor this long (its death animscript), then its body becomes
+/// a corpse.
 const CORPSE_MS: i64 = 1500;
+/// How many bodies of the dead stay on the floor: BO1's `ai_corpseCount` (5, its
+/// default and the menu's "medium").
+const AI_CORPSE_COUNT: usize = 5;
 const DEFAULT_HEALTH: i32 = 150;
 
 /// `animscripts/traverse/zombie_mantle_over_40` (windows, low walls) by
@@ -2238,11 +2243,169 @@ pub(crate) fn advance(world: &mut World) {
     }
     for object in expired {
         world.resource_mut::<Runtime>().actors.remove(&object);
-        let mut runtime = world.resource_mut::<Runtime>();
-        if !runtime.pending_deletes.contains(&object) {
-            runtime.pending_deletes.push(object);
+        become_corpse(world, object);
+    }
+}
+
+/// `startRagdoll`'s mark on a body (BO1 makes its trajectory a ragdoll one): since when,
+/// and the launches (`launchRagdoll`) sent to it.
+#[derive(Clone, Debug, Default)]
+pub(crate) struct RagdollMark {
+    start_ms: i32,
+    launches: Vec<crate::RagdollLaunch>,
+}
+
+/// `self startRagdoll()`: from now the client runs the body as a ragdoll. A second call
+/// changes nothing (BO1 leaves a ragdoll trajectory alone).
+pub(crate) fn start_ragdoll(world: &mut World, object: u64) {
+    let now = super::players::now_ms(world) as i32;
+    world
+        .resource_mut::<Runtime>()
+        .ragdolls
+        .entry(object)
+        .or_insert_with(|| RagdollMark {
+            start_ms: now,
+            launches: Vec::new(),
+        });
+}
+
+pub(crate) fn is_ragdoll(world: &World, object: u64) -> bool {
+    world.resource::<Runtime>().ragdolls.contains_key(&object)
+}
+
+/// `self launchRagdoll(force, hitloc)`: BO1 sends the launch only to a ragdoll and the
+/// client keeps two of them.
+pub(crate) fn launch_ragdoll(world: &mut World, object: u64, force: [f32; 3], hitloc: u8) {
+    if let Some(mark) = world.resource_mut::<Runtime>().ragdolls.get_mut(&object)
+        && mark.launches.len() < crate::RAGDOLL_MAX_LAUNCHES
+    {
+        mark.launches.push(crate::RagdollLaunch { force, hitloc });
+    }
+}
+
+/// BO1's actor becomes a corpse once its death animscript is done (`G_CorpseFromActor`):
+/// the body stays where it fell, no longer solid, in one of `ai_corpseCount` slots. With
+/// every slot taken, the body farthest behind the player goes (else the farthest off to
+/// the side, else the farthest), as `G_GetFreeActorCorpseIndex` picks.
+fn become_corpse(world: &mut World, object: u64) {
+    let view = {
+        let runtime = world.resource::<Runtime>();
+        let clients: Vec<u32> = runtime.players.keys().copied().collect();
+        let frame = FrameWorld::from_world(world);
+        clients.into_iter().find_map(|client| {
+            let ps = frame.player(crate::ClientId(client))?;
+            let mut eye = ps.origin;
+            eye[2] += ps.view_height_current;
+            let (forward, _, _) = math_iw4::angle_vectors(ps.viewangles);
+            Some((eye, forward))
+        })
+    };
+    let mut runtime = world.resource_mut::<Runtime>();
+    let kept: Vec<u64> = runtime
+        .actor_corpses
+        .iter()
+        .copied()
+        .filter(|id| runtime.live(id) && !runtime.pending_deletes.contains(id) && *id != object)
+        .collect();
+    runtime.actor_corpses = kept;
+    if runtime.actor_corpses.len() >= AI_CORPSE_COUNT {
+        let corpses: Vec<(u64, [f32; 3])> = runtime
+            .actor_corpses
+            .iter()
+            .map(|id| {
+                let at = match runtime.peek_field(*id, "origin") {
+                    Some(Value::Vector(at)) => *at,
+                    _ => [0.0; 3],
+                };
+                (*id, at)
+            })
+            .collect();
+        if let Some(freed) = corpse_to_free(&corpses, view) {
+            runtime.actor_corpses.retain(|id| *id != freed);
+            runtime.ragdolls.remove(&freed);
+            if !runtime.pending_deletes.contains(&freed) {
+                runtime.pending_deletes.push(freed);
+            }
         }
     }
+    runtime.actor_corpses.push(object);
+    if let Some(entity) = runtime.entities.get_mut(&object) {
+        entity.solid = false;
+    }
+}
+
+/// Which body `G_GetFreeActorCorpseIndex` frees, seen from the player's eye along their
+/// flat view: the farthest behind, else the farthest more than 45 degrees off the view,
+/// else the farthest. No player: from the origin, looking along +y.
+fn corpse_to_free(corpses: &[(u64, [f32; 3])], view: Option<([f32; 3], [f32; 3])>) -> Option<u64> {
+    let (eye, mut dir, flat) = match view {
+        Some((eye, forward)) => (eye, forward, true),
+        None => ([0.0; 3], [0.0, 1.0, 0.0], true),
+    };
+    let mut flat = flat;
+    dir[2] = 0.0;
+    let len = (dir[0] * dir[0] + dir[1] * dir[1]).sqrt();
+    if len > 0.0 {
+        dir = [dir[0] / len, dir[1] / len, 0.0];
+    } else if let Some((_, forward)) = view {
+        dir = forward;
+        flat = false;
+    }
+    let mut behind: Option<(f32, u64)> = None;
+    let mut aside: Option<(f32, u64)> = None;
+    let mut farthest: Option<(f32, u64)> = None;
+    for &(id, at) in corpses {
+        let mut delta = [at[0] - eye[0], at[1] - eye[1], at[2] - eye[2]];
+        if flat {
+            delta[2] = 0.0;
+        }
+        let dist_sq = delta[0] * delta[0] + delta[1] * delta[1] + delta[2] * delta[2];
+        let dot = delta[0] * dir[0] + delta[1] * dir[1] + delta[2] * dir[2];
+        let better = |best: Option<(f32, u64)>| best.is_none_or(|(d, _)| dist_sq > d);
+        if dot < 0.0 && better(behind) {
+            behind = Some((dist_sq, id));
+        }
+        if 0.5 * dist_sq >= dot * dot && better(aside) {
+            aside = Some((dist_sq, id));
+        }
+        if better(farthest) {
+            farthest = Some((dist_sq, id));
+        }
+    }
+    behind.or(aside).or(farthest).map(|(_, id)| id)
+}
+
+/// The bodies ragdolling, for the clients: by entity number, with when each started and
+/// its launches. Marks on bodies gone are dropped.
+pub(crate) fn publish_ragdolls(world: &mut World) {
+    let now = super::players::now_ms(world) as i32;
+    let bodies = {
+        let mut runtime = world.resource_mut::<Runtime>();
+        let gone: Vec<u64> = runtime
+            .ragdolls
+            .keys()
+            .copied()
+            .filter(|id| !runtime.live(id))
+            .collect();
+        for id in gone {
+            runtime.ragdolls.remove(&id);
+        }
+        runtime
+            .ragdolls
+            .iter()
+            .filter_map(|(object, mark)| {
+                let entity = runtime.entities.get(object)?;
+                Some(crate::RagdollBodyRecord {
+                    entnum: u16::try_from(entity.number).ok()?,
+                    start_ms: mark.start_ms,
+                    launches: mark.launches.clone(),
+                })
+            })
+            .collect()
+    };
+    FrameWorld::from_world(world)
+        .ragdolls_mut()
+        .set_bodies(bodies, now);
 }
 
 fn think(
@@ -3091,6 +3254,28 @@ pub(crate) fn hitloc_for_bone(bone: &str) -> u8 {
         5
     } else {
         4
+    }
+}
+
+#[cfg(test)]
+mod corpse_tests {
+    use super::corpse_to_free;
+
+    #[test]
+    fn frees_the_body_farthest_behind_then_aside_then_farthest() {
+        // The player at the origin looking along +x.
+        let view = Some(([0.0, 0.0, 60.0], [1.0, 0.0, 0.0]));
+        let ahead_far = (1, [900.0, 0.0, 0.0]);
+        let aside = (2, [10.0, 300.0, 0.0]);
+        let behind_near = (3, [-50.0, 0.0, 0.0]);
+        let behind_far = (4, [-400.0, 10.0, 0.0]);
+        assert_eq!(
+            corpse_to_free(&[ahead_far, aside, behind_near, behind_far], view),
+            Some(4)
+        );
+        assert_eq!(corpse_to_free(&[ahead_far, aside], view), Some(2));
+        assert_eq!(corpse_to_free(&[ahead_far], view), Some(1));
+        assert_eq!(corpse_to_free(&[], view), None);
     }
 }
 

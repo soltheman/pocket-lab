@@ -136,6 +136,10 @@ pub struct SnapshotMeta {
     /// melee lunge and of touch aim assist.
     pub actor_targets: Vec<[f32; 4]>,
 
+    /// The bodies ragdolling (BO1's ragdoll trajectories and launch events) and the
+    /// recent blasts that push them.
+    pub ragdolls: crate::RagdollMeta,
+
     pub item_ammo: Vec<DroppedItemAmmo>,
 
     pub item_pickups: Vec<ItemPickupRecord>,

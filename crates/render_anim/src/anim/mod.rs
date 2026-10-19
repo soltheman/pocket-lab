@@ -7,6 +7,7 @@ pub mod fpv_prepared;
 pub mod fpv_rig;
 pub mod model_materials;
 pub mod pose_types;
+pub mod ragdoll;
 pub mod remote_body;
 pub mod scene_submission;
 pub mod view_kick_state;

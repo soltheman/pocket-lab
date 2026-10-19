@@ -592,6 +592,19 @@ fn entity_kind(
         .map(|e| (*id, e.kind.clone()))
 }
 
+/// An AI's body (alive, dying, or a corpse on the floor): what BO1's ragdoll natives
+/// act on in zombies.
+pub(crate) fn actor_body(world: &World, receiver: &Value) -> Option<u64> {
+    let Value::Object(id) = receiver else {
+        return None;
+    };
+    let runtime = world.resource::<Runtime>();
+    (runtime.actors.contains_key(id)
+        || runtime.actor_corpses.contains(id)
+        || runtime.ragdolls.contains_key(id))
+    .then_some(*id)
+}
+
 pub(crate) fn corpse_anim(world: &World, receiver: &Value) -> Result<Option<Arc<str>>, String> {
     match entity_kind(world, receiver) {
         Some((_, super::super::entities::EntityKind::Corpse { anim, .. })) => Ok(anim),
@@ -803,10 +816,19 @@ fn register_death(registry: &mut NativeRegistry) {
         })
     });
     registry.register(Method, "isragdoll", |world, receiver, _| {
+        if let Some(object) = actor_body(world, receiver) {
+            return Ok(Value::Int(
+                super::super::actors::is_ragdoll(world, object).into(),
+            ));
+        }
         corpse_anim(world, receiver)?;
         Ok(Value::Int(0))
     });
     registry.register(Method, "startragdoll", |world, receiver, _| {
+        if let Some(object) = actor_body(world, receiver) {
+            super::super::actors::start_ragdoll(world, object);
+            return Ok(Value::Undefined);
+        }
         corpse_anim(world, receiver)?;
         Ok(Value::Undefined)
     });

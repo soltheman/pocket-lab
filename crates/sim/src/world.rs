@@ -667,6 +667,8 @@ pub struct SimState {
     corpses: crate::PlayerCorpsePool,
     /// Where the living AI (zombies) stand this tick: what a player's melee lunges at.
     actor_melee_targets: Vec<[f32; 4]>,
+    /// The bodies ragdolling and the blasts near them, for the clients' ragdolls.
+    ragdolls: crate::RagdollMeta,
 
     entity_kernel: crate::gentity::EntityKernel,
 
@@ -760,6 +762,7 @@ impl Default for SimState {
             anim_event_seed: 1,
             corpses: crate::PlayerCorpsePool::default(),
             actor_melee_targets: Vec::new(),
+            ragdolls: crate::RagdollMeta::default(),
             entity_kernel: crate::gentity::EntityKernel::default(),
             dobj_anim_mats: HashMap::new(),
             kernel_phases: Vec::new(),
@@ -3037,6 +3040,10 @@ impl SimState {
         self.actor_melee_targets = at;
     }
 
+    pub(crate) fn ragdolls_mut(&mut self) -> &mut crate::RagdollMeta {
+        &mut self.ragdolls
+    }
+
     pub(crate) fn script_model_anim(&self, name: &str) -> Option<crate::ScriptModelPlayAnim> {
         self.content
             .data
@@ -3268,6 +3275,7 @@ impl SimState {
                 entity_kernel: self.entity_kernel.to_snapshot(),
                 corpses: self.corpses,
                 actor_targets: self.actor_melee_targets.clone(),
+                ragdolls: self.ragdolls.clone(),
                 item_ammo,
                 item_pickups: self.item_pickups.clone(),
             },
@@ -3321,6 +3329,7 @@ impl SimState {
         self.prediction_remote_bodies.clear();
         // The AI the snapshot names: solid to the predicted player as to the server's.
         self.actor_melee_targets = snapshot.meta.actor_targets.clone();
+        self.ragdolls = snapshot.meta.ragdolls.clone();
         if let Some(local) = prediction_local {
             self.prediction_remote_bodies.extend(
                 snapshot

@@ -2261,7 +2261,7 @@ fn register_refused(registry: &mut NativeRegistry) {
         => "animation data is not loaded in the simulation");
     refused!(Function: "getweaponmodel", "getweaponhidetags"
         => "weapon models are not loaded in the simulation");
-    refused!(Method: "getcorpseanim", "startragdoll", "isragdoll" => "receiver is not a corpse");
+    refused!(Method: "getcorpseanim" => "receiver is not a corpse");
     refused!(Method: "itemweaponsetammo" => "receiver is not a weapon item");
     refused!(Method: "allowjump", "allowspectateteam", "anyammoforweaponmodes", "attachshieldmodel",
         "attackbuttonpressed", "beginlocationselection", "buttonpressed", "cameralinkto",

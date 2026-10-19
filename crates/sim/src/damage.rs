@@ -98,6 +98,12 @@ pub(crate) fn apply_explosion_blast(world: &mut FrameWorld, tick: Tick, blast: &
     if !world.publishes_snapshot() {
         return;
     }
+    // BO1's explosion events push the client's ragdolls near them
+    // (`Ragdoll_ExplosionEvent`, out to the weapon's explosion radius).
+    let now = crate::level_time_ms(tick);
+    world
+        .ragdolls_mut()
+        .note_blast(blast.origin, blast.radius, now);
     let attempts = radius_player_attempts(world, blast);
     let glass = radius_glass_hits(world, blast);
     for attempt in &attempts {

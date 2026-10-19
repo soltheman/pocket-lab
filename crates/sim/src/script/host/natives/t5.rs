@@ -885,8 +885,21 @@ fn register_script(registry: &mut NativeRegistry) {
         super::engine::entity_id(world, receiver)?;
         Ok(Value::Undefined)
     });
+    // `launchRagdoll(force, hitloc)`: a launch event for a ragdoll, at the hit location
+    // named (none: the whole body).
     registry.register(Method, "launchragdoll", |world, receiver, args| {
-        vector(args, 0)?;
+        let force = vector(args, 0)?;
+        if let Some(object) = super::player::actor_body(world, receiver) {
+            let hitloc = match args.get(1) {
+                Some(Value::String(name)) => weapon_iw4::HITLOC_NAMES
+                    .iter()
+                    .position(|known| known.eq_ignore_ascii_case(name))
+                    .unwrap_or(0) as u8,
+                _ => 0,
+            };
+            super::super::actors::launch_ragdoll(world, object, force, hitloc);
+            return Ok(Value::Undefined);
+        }
         super::player::corpse_anim(world, receiver)?;
         Ok(Value::Undefined)
     });
