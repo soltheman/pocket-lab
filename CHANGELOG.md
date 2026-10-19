@@ -1,3 +1,11 @@
+# Bo1ZPocket 0.3.45
+
+**New in 0.3.45**
+
+- **Ragdolls as BO1's:** BO1's death animscript's `startRagdoll` / `launchRagdoll` now work on a zombie's body. As in BO1 the ragdoll runs on the client: it starts from the drawn pose with its motion (speed capped as BO1's), as a 12-bone chain with BO1's own `ragdoll.cfg` bones, masses, joint limits and self-collision pairs, colliding with the map, and freezes once settled (or after 9 s). At most 16 move at once. Grenade and rocket blasts throw nearby bodies (BO1's force 18000, up-bias 0.8).
+- **Corpses stay:** a dead zombie lies where it fell in one of 5 corpse slots (BO1's `ai_corpseCount`), the one farthest behind you making way for a new body.
+- Hellhounds keep their death animation (they have no ragdoll skeleton in BO1's setup here).
+
 # Bo1ZPocket 0.3.44
 
 **New in 0.3.44**
