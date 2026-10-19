@@ -96,8 +96,13 @@ pub struct GameSettings {
     /// button sits in the custom layout ("FIRE:0.82,0.68;AIM:..", shares of the screen).
     pub touch_layout: u8,
     pub touch_icons: bool,
-    /// Which pictures the touch buttons show: TEXT, PERK (default), BO1, CLASSIC.
+    /// Which pictures the touch buttons show: TEXT, PERK (Perk-a-Cola, the default), BO1
+    /// (its HUD pictures), CLASSIC, CHALK.
     pub touch_icon_style: u8,
+    /// Pictures picked for single buttons over the set's ("fire:doubletap;knife:skull").
+    pub touch_icon_pick: String,
+    /// The button the options' ICON row is choosing for (not saved).
+    pub touch_icon_button: u8,
     /// AIM toggles aiming on and off (true) or aims while held (false).
     pub touch_aim_toggle: bool,
     /// BO1's console aim assist (slowdown, ADS snap) on touch looking.
@@ -145,6 +150,8 @@ impl Default for GameSettings {
             touch_layout: Self::TOUCH_LAYOUT_CLASSIC,
             touch_icons: true,
             touch_icon_style: Self::TOUCH_ICONS_PERK,
+            touch_icon_pick: String::new(),
+            touch_icon_button: 0,
             touch_aim_toggle: true,
             touch_aim_assist: true,
             menu_music: 1,
@@ -159,6 +166,7 @@ impl GameSettings {
     pub const TOUCH_ICONS_PERK: u8 = 1;
     pub const TOUCH_ICONS_BO1: u8 = 2;
     pub const TOUCH_ICONS_CLASSIC: u8 = 3;
+    pub const TOUCH_ICONS_CHALK: u8 = 4;
 
     pub const FOV_DEFAULT: f32 = 65.0;
     pub const FOV_MIN: f32 = 65.0;
@@ -232,6 +240,8 @@ impl GameSettings {
         self.touch_opacity = finite(self.touch_opacity, 0.3, 1.0, 1.0);
         self.touch_layout = self.touch_layout.min(Self::TOUCH_LAYOUT_CUSTOM);
         self.touch_custom.retain(|c| c != '\n' && c != '\r' && c != '=');
+        self.touch_icon_pick.retain(|c| c != '\n' && c != '\r' && c != '=');
+        self.touch_icon_style = self.touch_icon_style.min(Self::TOUCH_ICONS_CHALK);
         self.player_name = self.player_name.trim().chars().take(16).collect();
         if self.player_name.is_empty() {
             self.player_name = "Player".to_owned();

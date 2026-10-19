@@ -635,41 +635,153 @@ pub(crate) struct TouchEditBanner;
 #[derive(Component)]
 pub(crate) struct TouchEditPill(usize);
 
-/// The icon sets, decoded once: PERK (drawn in the style of BO1's perk-machine logos),
-/// BO1 (its own HUD pictures where it has one), CLASSIC (the first drawn set), and the
-/// weathered metal badges the icons sit on.
+/// The buttons' pictures, decoded once: the CLASSIC drawn set, chalk drawings made for
+/// the buttons BO1 has no chalk for, the pictures cut from the install's BO1 art (by
+/// library key, once its fonts are read: `asset_game::t5_touch_icons`), and the weathered
+/// metal badges the icons sit on.
 #[derive(Resource)]
 pub(crate) struct TouchIcons {
-    perk: [Handle<Image>; BUTTON_COUNT],
     classic: [Handle<Image>; BUTTON_COUNT],
-    bo1: [Handle<Image>; BUTTON_COUNT],
+    drawn: Vec<(&'static str, Handle<Image>)>,
+    library: std::collections::HashMap<&'static str, Handle<Image>>,
     badge: Handle<Image>,
     badge_fire: Handle<Image>,
 }
 
 impl TouchIcons {
-    fn set(&self, style: u8) -> &[Handle<Image>; BUTTON_COUNT] {
-        match style {
-            GameSettings::TOUCH_ICONS_BO1 => &self.bo1,
-            GameSettings::TOUCH_ICONS_CLASSIC => &self.classic,
-            _ => &self.perk,
+    /// Button `index`'s picture and whether it is the button's whole face (a perk seal)
+    /// rather than an icon on its badge.
+    fn pick(&self, settings: &GameSettings, index: usize) -> (Handle<Image>, bool) {
+        let key = icon_key(settings, index);
+        if let Some(key) = key
+            && let Some(handle) = self.library.get(key)
+        {
+            let face = asset_game::t5_touch_icons::touch_icon(key).is_some_and(|spec| spec.is_face());
+            return (handle.clone(), face);
         }
+        if let Some(key) = key
+            && let Some((_, handle)) = self.drawn.iter().find(|(k, _)| *k == key)
+        {
+            return (handle.clone(), false);
+        }
+        (self.classic[index].clone(), false)
     }
 }
 
-/// The PERK set's picture for a button.
-fn perk_icon(key: &str) -> Option<&'static [u8]> {
-    Some(match key {
-        "fire" | "fire2" => include_bytes!("../assets/touch/perk_fire.png"),
-        "aim" => include_bytes!("../assets/touch/perk_aim.png"),
-        "reload" => include_bytes!("../assets/touch/perk_reload.png"),
-        "use" => include_bytes!("../assets/touch/perk_use.png"),
-        "jump" => include_bytes!("../assets/touch/perk_jump.png"),
-        "crouch" => include_bytes!("../assets/touch/perk_crouch.png"),
-        "knife" => include_bytes!("../assets/touch/perk_knife.png"),
-        "nade" => include_bytes!("../assets/touch/perk_nade.png"),
-        _ => return None,
-    })
+/// Chalk drawings for the buttons BO1's walls have no chalk for.
+const DRAWN_ICONS: [(&str, &str, &[u8]); 5] = [
+    ("chalk_aim", "CHALK SIGHT", include_bytes!("../assets/touch/chalk_aim.png")),
+    ("chalk_reload", "CHALK RELOAD", include_bytes!("../assets/touch/chalk_reload.png")),
+    ("chalk_use", "CHALK HAND", include_bytes!("../assets/touch/chalk_use.png")),
+    ("chalk_jump", "CHALK UP", include_bytes!("../assets/touch/chalk_jump.png")),
+    ("chalk_crouch", "CHALK DOWN", include_bytes!("../assets/touch/chalk_crouch.png")),
+];
+
+/// The buttons that can be given their own picture, as the options name them (the second
+/// FIRE follows the first).
+pub(crate) const ICON_BUTTONS: [(&str, &str); 8] = [
+    ("fire", "FIRE"),
+    ("aim", "AIM"),
+    ("reload", "RELOAD"),
+    ("use", "USE"),
+    ("jump", "JUMP"),
+    ("crouch", "CROUCH"),
+    ("knife", "KNIFE"),
+    ("nade", "GRENADE"),
+];
+
+/// Every picture a button can be given, as `(key, name)`: its set's own first (key ""),
+/// then BO1's art, the drawn chalk, and the classic icon.
+pub(crate) fn icon_choices() -> Vec<(&'static str, &'static str)> {
+    let mut all = vec![("", "FROM THE SET")];
+    all.extend(
+        asset_game::t5_touch_icons::TOUCH_ICON_LIBRARY
+            .iter()
+            .map(|spec| (spec.key, spec.label)),
+    );
+    all.extend(DRAWN_ICONS.iter().map(|(key, label, _)| (*key, *label)));
+    all.push(("classic", "CLASSIC"));
+    all
+}
+
+/// The picture picked for one button (`ICON_BUTTONS` key), or "" for its set's.
+pub(crate) fn picked_icon<'a>(picks: &'a str, button: &str) -> &'a str {
+    picks
+        .split(';')
+        .filter_map(|entry| entry.split_once(':'))
+        .find(|(key, _)| key.trim() == button)
+        .map_or("", |(_, icon)| icon.trim())
+}
+
+/// `picks` with one button's picture changed ("" back to its set's).
+pub(crate) fn with_icon_picked(picks: &str, button: &str, icon: &str) -> String {
+    let mut entries: Vec<String> = picks
+        .split(';')
+        .filter(|entry| {
+            entry
+                .split_once(':')
+                .is_some_and(|(key, _)| key.trim() != button)
+        })
+        .map(str::to_owned)
+        .collect();
+    if !icon.is_empty() {
+        entries.push(format!("{button}:{icon}"));
+    }
+    entries.join(";")
+}
+
+/// Each set's picture for a button. PERK: the Perk-a-Cola seals (Double Tap fires,
+/// Deadshot aims, Speed Cola reloads, Stamin-Up jumps, Quick Revive's figure gets down,
+/// Juggernog knifes, PhD Flopper's blast throws, Mule Kick takes). CHALK: the wall-buy
+/// chalk. BO1: its HUD's knife, grenade and round. `None`: the classic icon.
+fn set_icon(style: u8, button: &str) -> Option<&'static str> {
+    let button = if button == "fire2" { "fire" } else { button };
+    match style {
+        GameSettings::TOUCH_ICONS_PERK => Some(match button {
+            "fire" => "doubletap",
+            "aim" => "deadshot",
+            "reload" => "speedcola",
+            "use" => "mulekick",
+            "jump" => "staminup",
+            "crouch" => "quickrevive",
+            "knife" => "juggernog",
+            "nade" => "phdflopper",
+            _ => return None,
+        }),
+        GameSettings::TOUCH_ICONS_CHALK => Some(match button {
+            "fire" => "chalk_mp40",
+            "aim" => "chalk_aim",
+            "reload" => "chalk_reload",
+            "use" => "chalk_use",
+            "jump" => "chalk_jump",
+            "crouch" => "chalk_crouch",
+            "knife" => "chalk_knife",
+            "nade" => "chalk_grenades",
+            _ => return None,
+        }),
+        GameSettings::TOUCH_ICONS_BO1 => Some(match button {
+            "fire" => "hud_round",
+            "knife" => "hud_knife",
+            "nade" => "hud_grenade",
+            _ => return None,
+        }),
+        _ => None,
+    }
+}
+
+/// The picture key button `index` wears: its own pick, else its set's (`None`: classic).
+fn icon_key(settings: &GameSettings, index: usize) -> Option<&'static str> {
+    let button = BUTTONS[index].key;
+    let own = if button == "fire2" { "fire" } else { button };
+    let picked = picked_icon(&settings.touch_icon_pick, own);
+    if !picked.is_empty() {
+        return icon_choices()
+            .into_iter()
+            .map(|(key, _)| key)
+            .find(|key| *key == picked)
+            .filter(|key| *key != "classic");
+    }
+    set_icon(settings.touch_icon_style, button)
 }
 
 /// Dark glass with a light rim, as BO1's console prompts; the fire button tinted red;
@@ -718,16 +830,10 @@ pub(crate) fn load_touch_icons(
     mut from_game: Local<bool>,
 ) {
     if let Some(mut icons) = icons {
-        // BO1's own HUD pictures, once its fonts are read: the knife, the grenade and a
-        // round for FIRE (both fire buttons) over the classic icons, for the BO1 set.
+        // The pictures cut from BO1's art, once its fonts are read.
         if !*from_game && let Some(fonts) = fonts {
             *from_game = true;
-            for (index, spec) in BUTTONS.iter().enumerate() {
-                let key = if spec.key == "fire2" { "fire" } else { spec.key };
-                if let Some(handle) = fonts.button_icons.get(key) {
-                    icons.bo1[index] = handle.clone();
-                }
-            }
+            icons.library = fonts.button_icons.clone();
         }
         return;
     }
@@ -744,14 +850,14 @@ pub(crate) fn load_touch_icons(
         images.add(image)
     };
     let classic = BUTTONS.map(|spec| decode(spec.icon));
-    let perk = std::array::from_fn(|index| match perk_icon(BUTTONS[index].key) {
-        Some(png) => decode(png),
-        None => classic[index].clone(),
-    });
+    let drawn = DRAWN_ICONS
+        .iter()
+        .map(|(key, _, png)| (*key, decode(png)))
+        .collect();
     commands.insert_resource(TouchIcons {
-        perk,
-        bo1: classic.clone(),
         classic,
+        drawn,
+        library: Default::default(),
         badge: decode(include_bytes!("../assets/touch/badge.png")),
         badge_fire: decode(include_bytes!("../assets/touch/badge_fire.png")),
     });
@@ -1039,6 +1145,10 @@ pub(crate) fn update_touch_overlay(
     let grabbed = editing.grab.map(|(_, index, _)| index);
     let style = settings.touch_icon_style;
     let badges = style != GameSettings::TOUCH_ICONS_TEXT && icons.is_some();
+    // Each button's picture, and whether it is its whole face (a seal, no badge).
+    let picks: Option<[(Handle<Image>, bool); BUTTON_COUNT]> = icons
+        .as_deref()
+        .map(|icons| std::array::from_fn(|index| icons.pick(&settings, index)));
     for (entity, button, mut node, mut fill, mut rim, mut visibility, badge) in &mut buttons {
         let Some(at) = placed[button.0] else {
             visibility.set_if_neq(Visibility::Hidden);
@@ -1095,23 +1205,34 @@ pub(crate) fn update_touch_overlay(
         } else {
             faded(Color::WHITE, opacity.max(0.45))
         };
-        match (badge, icons.as_deref()) {
-            (Some(mut image), Some(icons)) => {
-                let handle = if fire { &icons.badge_fire } else { &icons.badge };
-                if image.image != *handle {
-                    image.image = handle.clone();
+        // A seal is the button's face itself; any other picture sits on the badge.
+        let face = picks
+            .as_ref()
+            .filter(|_| badges)
+            .and_then(|picks| picks[button.0].1.then(|| picks[button.0].0.clone()));
+        if let Some(icons) = icons.as_deref() {
+            let handle = face.unwrap_or_else(|| {
+                if fire {
+                    icons.badge_fire.clone()
+                } else {
+                    icons.badge.clone()
                 }
-                if image.color != badge_tint {
-                    image.color = badge_tint;
+            });
+            match badge {
+                Some(mut image) => {
+                    if image.image != handle {
+                        image.image = handle;
+                    }
+                    if image.color != badge_tint {
+                        image.color = badge_tint;
+                    }
+                }
+                None => {
+                    commands
+                        .entity(entity)
+                        .insert(ImageNode::new(handle).with_color(badge_tint));
                 }
             }
-            (None, Some(icons)) => {
-                let handle = if fire { &icons.badge_fire } else { &icons.badge };
-                commands
-                    .entity(entity)
-                    .insert(ImageNode::new(handle.clone()).with_color(badge_tint));
-            }
-            _ => {}
         }
     }
     let icons_on = style != GameSettings::TOUCH_ICONS_TEXT && icons.is_some();
@@ -1125,26 +1246,29 @@ pub(crate) fn update_touch_overlay(
         }
     }
     for (entity, glyph, mut node, image) in &mut glyphs {
-        let display = if icons_on { Display::Flex } else { Display::None };
+        let pick = picks.as_ref().map(|picks| &picks[glyph.0]);
+        // Over the badge only: a seal is drawn as the button itself.
+        let on_badge = icons_on && pick.is_some_and(|(_, face)| !face);
+        let display = if on_badge { Display::Flex } else { Display::None };
         if node.display != display {
             node.display = display;
         }
         let tint = faded(Color::WHITE, opacity.max(0.6));
-        match (image, icons.as_deref()) {
-            (Some(mut image), icons) => {
+        match (image, pick) {
+            (Some(mut image), pick) => {
                 if image.color != tint {
                     image.color = tint;
                 }
-                if let Some(icons) = icons
-                    && image.image != icons.set(style)[glyph.0]
+                if let Some((handle, _)) = pick
+                    && image.image != *handle
                 {
-                    image.image = icons.set(style)[glyph.0].clone();
+                    image.image = handle.clone();
                 }
             }
-            (None, Some(icons)) => {
+            (None, Some((handle, _))) => {
                 commands
                     .entity(entity)
-                    .insert(ImageNode::new(icons.set(style)[glyph.0].clone()).with_color(tint));
+                    .insert(ImageNode::new(handle.clone()).with_color(tint));
             }
             (None, None) => {}
         }
@@ -1282,6 +1406,26 @@ pub(crate) fn touch_gameplay_resource() -> TouchGameplay {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_button_keeps_its_own_picture_over_its_set() {
+        let picks = with_icon_picked("", "knife", "skull");
+        let picks = with_icon_picked(&picks, "nade", "chalk_grenades");
+        assert_eq!(picked_icon(&picks, "knife"), "skull");
+        assert_eq!(picked_icon(&picks, "fire"), "");
+        let picks = with_icon_picked(&picks, "knife", "");
+        assert_eq!(picks, "nade:chalk_grenades");
+        let mut settings = GameSettings {
+            touch_icon_pick: picks,
+            ..GameSettings::default()
+        };
+        let nade = BUTTONS.iter().position(|b| b.key == "nade").unwrap();
+        let knife = BUTTONS.iter().position(|b| b.key == "knife").unwrap();
+        assert_eq!(icon_key(&settings, nade), Some("chalk_grenades"));
+        assert_eq!(icon_key(&settings, knife), Some("juggernog"));
+        settings.touch_icon_style = GameSettings::TOUCH_ICONS_CLASSIC;
+        assert_eq!(icon_key(&settings, knife), None);
+    }
 
     const PHONE: Vec2 = Vec2::new(844.0, 390.0);
 

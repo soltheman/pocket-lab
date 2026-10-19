@@ -26,6 +26,7 @@ mod menu_source;
 mod penetration;
 pub mod structured_data;
 pub mod t5_fonts;
+pub mod t5_touch_icons;
 mod tracer_catalog;
 mod weapon_anim_dispatch;
 mod weapon_animations;

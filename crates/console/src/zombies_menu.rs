@@ -130,6 +130,10 @@ pub(crate) enum Setting {
     MenuMusic,
     Layout,
     Style,
+    /// Which button the ICON row picks for.
+    IconButton,
+    /// That button's own picture, over its set's.
+    IconPick,
     AimMode,
     ButtonSize,
     ButtonOpacity,
@@ -234,9 +238,18 @@ impl LaunchGraphics {
 }
 
 const LAYOUT_NAMES: [&str; 5] = ["CLASSIC", "LEFT FIRE", "COMPACT", "SOUTHPAW", "CUSTOM"];
+/// The button picture sets, by `GameSettings::TOUCH_ICONS_*`.
+const ICON_SET_NAMES: [&str; 5] = ["TEXT", "PERK-A-COLA", "BO1 HUD", "CLASSIC", "CHALK"];
+
+/// The button the ICON row is choosing a picture for.
+fn icon_button(settings: &GameSettings) -> &'static str {
+    crate::touch_controls::ICON_BUTTONS
+        .get(usize::from(settings.touch_icon_button))
+        .map_or("fire", |(key, _)| *key)
+}
 
 impl Setting {
-    const ALL: [Setting; 15] = [
+    const ALL: [Setting; 17] = [
         Setting::Brightness,
         Setting::Shadows,
         Setting::FrameRate,
@@ -248,6 +261,8 @@ impl Setting {
         Setting::AimAssist,
         Setting::Layout,
         Setting::Style,
+        Setting::IconButton,
+        Setting::IconPick,
         Setting::AimMode,
         Setting::ButtonSize,
         Setting::ButtonOpacity,
@@ -266,6 +281,8 @@ impl Setting {
             | Setting::AimAssist => OptionsTab::Controls,
             Setting::Layout
             | Setting::Style
+            | Setting::IconButton
+            | Setting::IconPick
             | Setting::AimMode
             | Setting::ButtonSize
             | Setting::ButtonOpacity => {
@@ -286,6 +303,8 @@ impl Setting {
             Setting::InvertLook => "INVERT LOOK",
             Setting::Layout => "BUTTON LAYOUT",
             Setting::Style => "BUTTON ICONS",
+            Setting::IconButton => "CHANGE ICON OF",
+            Setting::IconPick => "ICON",
             Setting::AimMode => "AIM BUTTON",
             Setting::AimAssist => "AIM ASSIST",
             Setting::MenuMusic => "MENU MUSIC",
@@ -305,7 +324,9 @@ impl Setting {
             Setting::FieldOfView => (GameSettings::FOV_MIN, 110.0, 1.0),
             Setting::Volume => (0.0, 1.0, 0.05),
             Setting::InvertLook | Setting::AimMode | Setting::AimAssist => (0.0, 1.0, 1.0),
-            Setting::Style => (0.0, 3.0, 1.0),
+            Setting::Style => (0.0, f32::from(GameSettings::TOUCH_ICONS_CHALK), 1.0),
+            Setting::IconButton => (0.0, (crate::touch_controls::ICON_BUTTONS.len() - 1) as f32, 1.0),
+            Setting::IconPick => (0.0, (crate::touch_controls::icon_choices().len() - 1) as f32, 1.0),
             Setting::Layout => (0.0, f32::from(GameSettings::TOUCH_LAYOUT_CUSTOM), 1.0),
             Setting::ButtonSize => (0.75, 1.35, 0.05),
             Setting::ButtonOpacity => (0.3, 1.0, 0.05),
@@ -318,6 +339,8 @@ impl Setting {
             self,
             Setting::InvertLook
                 | Setting::Style
+                | Setting::IconButton
+                | Setting::IconPick
                 | Setting::AimMode
                 | Setting::AimAssist
                 | Setting::Layout
@@ -341,6 +364,15 @@ impl Setting {
             Setting::InvertLook => f32::from(u8::from(settings.invert_mouse)),
             Setting::Layout => f32::from(settings.touch_layout),
             Setting::Style => f32::from(settings.touch_icon_style),
+            Setting::IconButton => f32::from(settings.touch_icon_button),
+            Setting::IconPick => {
+                let button = icon_button(settings);
+                let picked = crate::touch_controls::picked_icon(&settings.touch_icon_pick, button);
+                crate::touch_controls::icon_choices()
+                    .iter()
+                    .position(|(key, _)| *key == picked)
+                    .unwrap_or(0) as f32
+            }
             Setting::AimMode => f32::from(u8::from(settings.touch_aim_toggle)),
             Setting::AimAssist => f32::from(u8::from(settings.touch_aim_assist)),
             Setting::ButtonSize => settings.touch_button_scale,
@@ -365,6 +397,14 @@ impl Setting {
             Setting::Style => {
                 settings.touch_icon_style = value as u8;
                 settings.touch_icons = value as u8 != GameSettings::TOUCH_ICONS_TEXT;
+            }
+            Setting::IconButton => settings.touch_icon_button = value as u8,
+            Setting::IconPick => {
+                let button = icon_button(settings);
+                let choices = crate::touch_controls::icon_choices();
+                let icon = choices.get(value as usize).map_or("", |(key, _)| *key);
+                settings.touch_icon_pick =
+                    crate::touch_controls::with_icon_picked(&settings.touch_icon_pick, button, icon);
             }
             Setting::AimMode => settings.touch_aim_toggle = value >= 0.5,
             Setting::AimAssist => settings.touch_aim_assist = value >= 0.5,
@@ -395,10 +435,18 @@ impl Setting {
             Setting::Sensitivity => format!("{value:.1}"),
             Setting::FieldOfView => format!("{value:.0}"),
             Setting::InvertLook => if value >= 0.5 { "ON" } else { "OFF" }.to_owned(),
-            Setting::Style => ["TEXT", "PERK", "BO1", "CLASSIC"]
+            Setting::Style => ICON_SET_NAMES
                 .get(value.round() as usize)
                 .copied()
-                .unwrap_or("PERK")
+                .unwrap_or("PERK-A-COLA")
+                .to_owned(),
+            Setting::IconButton => crate::touch_controls::ICON_BUTTONS
+                .get(value.round() as usize)
+                .map_or("FIRE", |(_, name)| *name)
+                .to_owned(),
+            Setting::IconPick => crate::touch_controls::icon_choices()
+                .get(value.round() as usize)
+                .map_or("FROM THE SET", |(_, name)| *name)
                 .to_owned(),
             Setting::AimMode => if value >= 0.5 { "TOGGLE" } else { "HOLD" }.to_owned(),
             Setting::AimAssist => if value >= 0.5 { "ON" } else { "OFF" }.to_owned(),
@@ -961,11 +1009,31 @@ pub(crate) fn zombies_menu_buttons(
             }
             None
         }
+        Some("icon") => {
+            // `icon <button> <picture>`: one button's own picture (the ICON row's choice).
+            if let (Some(button), Some(icon)) = (words.next(), words.next()) {
+                let icon = if icon == "set" { "" } else { icon };
+                if let Some(index) = crate::touch_controls::ICON_BUTTONS
+                    .iter()
+                    .position(|(key, _)| *key == button)
+                {
+                    tests.settings.touch_icon_button = index as u8;
+                }
+                tests.settings.touch_icon_pick = crate::touch_controls::with_icon_picked(
+                    &tests.settings.touch_icon_pick,
+                    button,
+                    icon,
+                );
+                tests.settings.touch();
+            }
+            None
+        }
         Some("style") => {
             tests.settings.touch_icon_style = match words.next() {
                 Some("text") => GameSettings::TOUCH_ICONS_TEXT,
                 Some("bo1") => GameSettings::TOUCH_ICONS_BO1,
                 Some("classic") => GameSettings::TOUCH_ICONS_CLASSIC,
+                Some("chalk") => GameSettings::TOUCH_ICONS_CHALK,
                 _ => GameSettings::TOUCH_ICONS_PERK,
             };
             tests.settings.touch();
@@ -1437,8 +1505,10 @@ pub(crate) fn show_zombies_options(
                                 FocusPolicy::Pass,
                             ));
                             step(row, 1.0, "+");
+                            // Wide enough for the longest name (an icon's: "CHALK GRENADES").
                             row.spawn(Node {
-                                width: px(54.0 * s),
+                                width: px(104.0 * s),
+                                flex_shrink: 0.0,
                                 justify_content: JustifyContent::FlexEnd,
                                 ..default()
                             })
