@@ -64,6 +64,150 @@ model_anim_scripted(note, seconds)
     self notify(note, "end");
 }
 
+// BO1's gib event (clientscripts\_zombiemode::on_gib_event, run by its engine on the
+// client): pieces 1-4 throw the arm or leg the character names (gibSpawn1-4 from its
+// tag), 5 pops the head, 6 the guts, 0 all of it.
+gib_pieces(type, pieces)
+{
+    if (!isdefined(pieces) || isdefined(self.iw4l_gibbed_all))
+        return;
+    for (i = 0; i < pieces.size; i++)
+    {
+        switch (pieces[i])
+        {
+            case 0:
+                self.iw4l_gibbed_all = true;
+                self thread gib_throw(self.gibSpawn1, self.gibSpawnTag1);
+                self thread gib_throw(self.gibSpawn2, self.gibSpawnTag2);
+                self thread gib_throw(self.gibSpawn3, self.gibSpawnTag3);
+                self thread gib_throw(self.gibSpawn4, self.gibSpawnTag4);
+                self thread gib_head_fx();
+                self thread gib_fx("J_SpineLower");
+                break;
+            case 1:
+                self thread gib_throw(self.gibSpawn1, self.gibSpawnTag1);
+                break;
+            case 2:
+                self thread gib_throw(self.gibSpawn2, self.gibSpawnTag2);
+                break;
+            case 3:
+                self thread gib_throw(self.gibSpawn3, self.gibSpawnTag3);
+                break;
+            case 4:
+                self thread gib_throw(self.gibSpawn4, self.gibSpawnTag4);
+                break;
+            case 5:
+                self thread gib_head_fx();
+                break;
+            case 6:
+                self thread gib_fx("J_SpineLower");
+                break;
+        }
+    }
+}
+
+gib_effect(name)
+{
+    if (isdefined(level._effect) && isdefined(level._effect[name]))
+        return level._effect[name];
+    if (isdefined(anim) && isdefined(anim._effect) && isdefined(anim._effect[name]))
+        return anim._effect[name];
+    return undefined;
+}
+
+// The head pop at the neck, then the stump spurting (do_headshot_gib_fx).
+gib_head_fx()
+{
+    tag = "j_neck";
+    at = self gettagorigin(tag);
+    angles = self.angles;
+    if (!isdefined(at))
+        return;
+    fx = gib_effect("headshot");
+    if (isdefined(fx))
+        playfx(fx, at, anglestoforward(angles), anglestoup(angles));
+    fx = gib_effect("headshot_nochunks");
+    if (isdefined(fx))
+        playfx(fx, at, anglestoforward(angles), anglestoup(angles));
+    wait 0.3;
+    fx = gib_effect("bloodspurt");
+    if (isdefined(self) && isdefined(fx))
+        playfxontag(fx, self, tag);
+}
+
+// The gore burst on a tag, with BO1's gib sound (do_gib_fx).
+gib_fx(tag)
+{
+    fx = gib_effect("animscript_gib_fx");
+    if (isdefined(fx))
+        playfxontag(fx, self, tag);
+    at = self gettagorigin(tag);
+    if (isdefined(at))
+        playsoundatposition("zmb_death_gibs", at);
+}
+
+// A severed limb thrown off as BO1's client throws it (do_gib): along the tag's own
+// motion at 600-1000 and 400-700 up, trailing blood, bouncing to rest on the floor.
+gib_throw(model, tag)
+{
+    if (!isdefined(model) || !isdefined(tag))
+        return;
+    start = self gettagorigin(tag);
+    angles = self.angles;
+    if (!isdefined(start))
+        return;
+    wait 0.05;
+    at = start + anglestoforward(angles) * 10;
+    if (isdefined(self))
+    {
+        moved = self gettagorigin(tag);
+        if (isdefined(moved) && distancesquared(moved, start) > 1)
+            at = moved;
+    }
+    away = vectornormalize(at - start);
+    velocity = away * randomintrange(600, 1000) + (0, 0, randomintrange(400, 700));
+    if (isdefined(self))
+        self thread gib_fx(tag);
+    piece = spawn("script_model", at);
+    if (!isdefined(piece))
+        return;
+    piece.angles = angles;
+    piece setmodel(model);
+    trail = gib_effect("animscript_gibtrail_fx");
+    if (isdefined(trail))
+        playfxontag(trail, piece, "tag_origin");
+    spin = (randomintrange(-720, 720), randomintrange(-720, 720), randomintrange(-720, 720));
+    resting = 0;
+    for (t = 0; t < 3; t += 0.05)
+    {
+        if (!isdefined(piece))
+            return;
+        next = piece.origin + velocity * 0.05;
+        hit = bullettrace(piece.origin, next, false, piece);
+        if (isdefined(hit["fraction"]) && hit["fraction"] < 1)
+        {
+            // Off whatever it meets, losing most of its speed; it stays where it lands.
+            next = hit["position"] + hit["normal"] * 2;
+            n = hit["normal"];
+            into = vectordot(velocity, n);
+            velocity = (velocity - n * (2 * into)) * 0.3;
+            spin = spin * 0.4;
+            if (n[2] > 0.7 && length(velocity) < 60)
+                resting++;
+        }
+        piece.origin = next;
+        if (resting < 2)
+            piece.angles = piece.angles + spin * 0.05;
+        velocity = velocity - (0, 0, 800 * 0.05);
+        if (resting >= 2)
+            velocity = (0, 0, 0);
+        wait 0.05;
+    }
+    wait 6;
+    if (isdefined(piece))
+        piece delete();
+}
+
 // A notify the engine sends a little later (a death clip's "end" note).
 notify_after(note, value, seconds)
 {

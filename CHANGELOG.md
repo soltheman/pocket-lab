@@ -1,3 +1,12 @@
+# Bo1ZPocket 0.3.44
+
+**New in 0.3.44**
+
+- **Insta-Kill one-shots:** zombie scripts call `DoDamage` in BO1's singleplayer form (attacker, destructible piece, means of death by short name, hit location by name); it was read in multiplayer's order and failed, so Insta-Kill's kill, grenade damage and a head gib's bleed-out never landed.
+- **Kino's teleporter prompts:** each map's own language archive (en_zombie_theater) now joins the strings, so "Hold USE to initiate link to pad", "...link pad with core" and "...use teleporter" show and the touch USE button appears there.
+- **Gibbing as BO1's client script does it:** severed arms and legs (each zombie's gibSpawn pieces) are thrown from their joint at BO1's speeds with a blood trail and bounce to rest; the gib blood burst and sound play at the joint; a head gib pops the head with BO1's headshot effects and the neck spurts; the guts burst on the spine.
+- Tag names match without case, as BO1's script strings do (`J_Elbow_LE` is j_elbow_le).
+
 # Bo1ZPocket 0.3.43
 
 **New in 0.3.43**

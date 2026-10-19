@@ -793,7 +793,9 @@ impl AuthorityDObjState {
             .pose
             .bone_names
             .iter()
-            .position(|name| name == tag)
+            // Tag names are script strings, which BO1 compares without case
+            // ("J_Elbow_LE" names j_elbow_le).
+            .position(|name| name.eq_ignore_ascii_case(tag))
     }
 
     pub fn tag_world_matrix(&self, tag: &str) -> Option<glam::Mat4> {

@@ -5,6 +5,8 @@
 //! wins; only names still unbound get a stub.
 use bevy_ecs::prelude::World;
 
+const GIB_PIECES: &str = "iw4l_zombies/hud::gib_pieces";
+
 use crate::script::Namespace::{Function, Method};
 use crate::script::host::arrays::new_array;
 use crate::script::host::registry::{NativeRegistry, unavailable};
@@ -93,13 +95,30 @@ fn register_implemented(registry: &mut NativeRegistry) {
     registry.register(Method, "getvisionsetnaked", |_, _, _| Ok(Value::string("")));
     registry.register(Function, "getvisionsetnaked", |_, _, _| Ok(Value::string("")));
     registry.register(Method, "visionsetnaked", |_, _, _| Ok(Value::Undefined));
+    // `gib(type, pieces)`: BO1's engine sends the pieces to its client script
+    // (clientscripts\_zombiemode::on_gib_event), which throws the severed limbs and plays
+    // the blood; here the same is done by the zombies module's `gib_pieces` on the server.
+    registry.register(Method, "gib", |world, receiver, args| {
+        super::engine::entity_id(world, receiver)?;
+        let now = super::super::players::now_ms(world);
+        crate::script::runtime::run_now(
+            world,
+            GIB_PIECES,
+            receiver.clone(),
+            vec![
+                args.first().cloned().unwrap_or(Value::Undefined),
+                args.get(1).cloned().unwrap_or(Value::Undefined),
+            ],
+            now,
+        )
+        .map_err(|error| format!("gib: {error:?}"))?;
+        Ok(Value::Undefined)
+    });
     for name in [
         "settransported",
         "useweaponhidetags",
         "addaieventlistener",
         "setexploderid",
-        // A zombie's head popping off: not shown yet.
-        "gib",
         // The game-over "fake death" makes players untouchable; nothing hurts them then.
         "enableinvulnerability",
         "disableinvulnerability",
