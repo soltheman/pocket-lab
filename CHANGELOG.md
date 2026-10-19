@@ -1,4 +1,13 @@
-# Bo1ZPocket 0.3.41
+# Bo1ZPocket 0.3.42
+
+**New in 0.3.42**
+
+- **Touch buttons reworked:** new icons drawn in the style of BO1's perk-machine logos (an upright bullet for FIRE, a Bowie knife, a grenade, a magazine, a crosshair, chevrons) sit on weathered metal badges; FIRE gets a red rim, and a held button glows amber. Settings → Buttons → BUTTON ICONS picks the set: PERK (default), BO1 (its own HUD pictures), CLASSIC (the previous icons) or TEXT.
+- **BO1's menu sounds**, read from the install's `code_post_gfx` zone: highlight, click, the small-menu open and close for Settings and Co-op (and the pause menu), and the options slider for setting changes.
+- **Options as a Group 935 terminal:** a riveted dark-steel panel, amber old-monitor text, scanlines, a faint 935 emblem, and the selected tab shown in inverse video.
+- **BO1 loading screen:** the map's loading art fills the screen with its name, location (Kino: GERMANY) and a spinning 935 emblem; the stage list on the right is gone. The first frames of the map stay black, then fade in, so the map no longer flashes before the loading screen comes up.
+- **Zombies are solid to players:** the knife lunge stops at a zombie's edge instead of running into it, and zombies can't stand inside you.
+- Not yet: the Richtofen line at the start of the load (BO1's Kino loading sound isn't in the phone's files).
 
 **New in 0.3.41**
 

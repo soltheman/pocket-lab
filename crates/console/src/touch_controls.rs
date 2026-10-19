@@ -635,9 +635,42 @@ pub(crate) struct TouchEditBanner;
 #[derive(Component)]
 pub(crate) struct TouchEditPill(usize);
 
-/// The icons, decoded once.
+/// The icon sets, decoded once: PERK (drawn in the style of BO1's perk-machine logos),
+/// BO1 (its own HUD pictures where it has one), CLASSIC (the first drawn set), and the
+/// weathered metal badges the icons sit on.
 #[derive(Resource)]
-pub(crate) struct TouchIcons([Handle<Image>; BUTTON_COUNT]);
+pub(crate) struct TouchIcons {
+    perk: [Handle<Image>; BUTTON_COUNT],
+    classic: [Handle<Image>; BUTTON_COUNT],
+    bo1: [Handle<Image>; BUTTON_COUNT],
+    badge: Handle<Image>,
+    badge_fire: Handle<Image>,
+}
+
+impl TouchIcons {
+    fn set(&self, style: u8) -> &[Handle<Image>; BUTTON_COUNT] {
+        match style {
+            GameSettings::TOUCH_ICONS_BO1 => &self.bo1,
+            GameSettings::TOUCH_ICONS_CLASSIC => &self.classic,
+            _ => &self.perk,
+        }
+    }
+}
+
+/// The PERK set's picture for a button.
+fn perk_icon(key: &str) -> Option<&'static [u8]> {
+    Some(match key {
+        "fire" | "fire2" => include_bytes!("../assets/touch/perk_fire.png"),
+        "aim" => include_bytes!("../assets/touch/perk_aim.png"),
+        "reload" => include_bytes!("../assets/touch/perk_reload.png"),
+        "use" => include_bytes!("../assets/touch/perk_use.png"),
+        "jump" => include_bytes!("../assets/touch/perk_jump.png"),
+        "crouch" => include_bytes!("../assets/touch/perk_crouch.png"),
+        "knife" => include_bytes!("../assets/touch/perk_knife.png"),
+        "nade" => include_bytes!("../assets/touch/perk_nade.png"),
+        _ => return None,
+    })
+}
 
 /// Dark glass with a light rim, as BO1's console prompts; the fire button tinted red;
 /// a held button lit in BO1's menu orange. Alphas are scaled by BUTTON OPACITY.
@@ -686,21 +719,21 @@ pub(crate) fn load_touch_icons(
 ) {
     if let Some(mut icons) = icons {
         // BO1's own HUD pictures, once its fonts are read: the knife, the grenade and a
-        // round for FIRE (both fire buttons) over the drawn icons.
+        // round for FIRE (both fire buttons) over the classic icons, for the BO1 set.
         if !*from_game && let Some(fonts) = fonts {
             *from_game = true;
             for (index, spec) in BUTTONS.iter().enumerate() {
                 let key = if spec.key == "fire2" { "fire" } else { spec.key };
                 if let Some(handle) = fonts.button_icons.get(key) {
-                    icons.0[index] = handle.clone();
+                    icons.bo1[index] = handle.clone();
                 }
             }
         }
         return;
     }
-    let handles = BUTTONS.map(|spec| {
+    let mut decode = |png: &[u8]| {
         let image = Image::from_buffer(
-            spec.icon,
+            png,
             bevy::image::ImageType::Extension("png"),
             bevy::image::CompressedImageFormats::NONE,
             true,
@@ -709,8 +742,19 @@ pub(crate) fn load_touch_icons(
         )
         .unwrap_or_default();
         images.add(image)
+    };
+    let classic = BUTTONS.map(|spec| decode(spec.icon));
+    let perk = std::array::from_fn(|index| match perk_icon(BUTTONS[index].key) {
+        Some(png) => decode(png),
+        None => classic[index].clone(),
     });
-    commands.insert_resource(TouchIcons(handles));
+    commands.insert_resource(TouchIcons {
+        perk,
+        bo1: classic.clone(),
+        classic,
+        badge: decode(include_bytes!("../assets/touch/badge.png")),
+        badge_fire: decode(include_bytes!("../assets/touch/badge_fire.png")),
+    });
 }
 
 pub(crate) fn spawn_touch_overlay(commands: &mut Commands, enabled: bool) {
@@ -888,13 +932,16 @@ pub(crate) fn update_touch_overlay(
     mut root: Query<&mut Visibility, With<TouchOverlayRoot>>,
     mut buttons: Query<
         (
+            Entity,
             &TouchButtonNode,
             &mut Node,
             &mut BackgroundColor,
             &mut BorderColor,
             &mut Visibility,
+            Option<&mut ImageNode>,
         ),
         (
+            Without<TouchButtonIcon>,
             Without<TouchStickBase>,
             Without<TouchStickKnob>,
             Without<TouchStickHint>,
@@ -990,7 +1037,9 @@ pub(crate) fn update_touch_overlay(
         settings.touch_opacity
     };
     let grabbed = editing.grab.map(|(_, index, _)| index);
-    for (button, mut node, mut fill, mut rim, mut visibility) in &mut buttons {
+    let style = settings.touch_icon_style;
+    let badges = style != GameSettings::TOUCH_ICONS_TEXT && icons.is_some();
+    for (entity, button, mut node, mut fill, mut rim, mut visibility, badge) in &mut buttons {
         let Some(at) = placed[button.0] else {
             visibility.set_if_neq(Visibility::Hidden);
             continue;
@@ -1015,25 +1064,57 @@ pub(crate) fn update_touch_overlay(
         } else {
             IDLE_FILL
         };
-        let want_fill = if held { HELD_FILL } else { faded(idle, opacity) };
+        let fire = BUTTONS[button.0].command == "+attack";
+        // Icons sit on weathered metal badges (the badge is the button's picture; a held
+        // one glows amber at the rim); text buttons keep the dark glass circle.
+        let want_fill = if badges {
+            Color::NONE
+        } else if held {
+            HELD_FILL
+        } else {
+            faded(idle, opacity)
+        };
         if fill.0 != want_fill {
             fill.0 = want_fill;
         }
-        let rim_color = if BUTTONS[button.0].command == "+attack" {
-            FIRE_RIM
-        } else {
-            RIM
-        };
+        let rim_color = if fire { FIRE_RIM } else { RIM };
         let want_rim = BorderColor::all(if held {
             HELD_RIM
+        } else if badges {
+            Color::NONE
         } else {
             faded(rim_color, opacity)
         });
         if *rim != want_rim {
             *rim = want_rim;
         }
+        let badge_tint = if !badges {
+            Color::NONE
+        } else if held {
+            Color::srgba(1.0, 0.8, 0.55, opacity.max(0.6))
+        } else {
+            faded(Color::WHITE, opacity.max(0.45))
+        };
+        match (badge, icons.as_deref()) {
+            (Some(mut image), Some(icons)) => {
+                let handle = if fire { &icons.badge_fire } else { &icons.badge };
+                if image.image != *handle {
+                    image.image = handle.clone();
+                }
+                if image.color != badge_tint {
+                    image.color = badge_tint;
+                }
+            }
+            (None, Some(icons)) => {
+                let handle = if fire { &icons.badge_fire } else { &icons.badge };
+                commands
+                    .entity(entity)
+                    .insert(ImageNode::new(handle.clone()).with_color(badge_tint));
+            }
+            _ => {}
+        }
     }
-    let icons_on = settings.touch_icons && icons.is_some();
+    let icons_on = style != GameSettings::TOUCH_ICONS_TEXT && icons.is_some();
     for (label, mut text, mut node) in &mut labels {
         let radius = placed[label.0].map_or(30.0, |placed| placed.radius);
         text.set_size(label_px(radius));
@@ -1055,15 +1136,15 @@ pub(crate) fn update_touch_overlay(
                     image.color = tint;
                 }
                 if let Some(icons) = icons
-                    && image.image != icons.0[glyph.0]
+                    && image.image != icons.set(style)[glyph.0]
                 {
-                    image.image = icons.0[glyph.0].clone();
+                    image.image = icons.set(style)[glyph.0].clone();
                 }
             }
             (None, Some(icons)) => {
                 commands
                     .entity(entity)
-                    .insert(ImageNode::new(icons.0[glyph.0].clone()).with_color(tint));
+                    .insert(ImageNode::new(icons.set(style)[glyph.0].clone()).with_color(tint));
             }
             (None, None) => {}
         }

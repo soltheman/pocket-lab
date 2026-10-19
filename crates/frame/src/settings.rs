@@ -96,6 +96,8 @@ pub struct GameSettings {
     /// button sits in the custom layout ("FIRE:0.82,0.68;AIM:..", shares of the screen).
     pub touch_layout: u8,
     pub touch_icons: bool,
+    /// Which pictures the touch buttons show: TEXT, PERK (default), BO1, CLASSIC.
+    pub touch_icon_style: u8,
     /// AIM toggles aiming on and off (true) or aims while held (false).
     pub touch_aim_toggle: bool,
     /// BO1's console aim assist (slowdown, ADS snap) on touch looking.
@@ -142,6 +144,7 @@ impl Default for GameSettings {
             touch_opacity: 1.0,
             touch_layout: Self::TOUCH_LAYOUT_CLASSIC,
             touch_icons: true,
+            touch_icon_style: Self::TOUCH_ICONS_PERK,
             touch_aim_toggle: true,
             touch_aim_assist: true,
             menu_music: 1,
@@ -152,6 +155,11 @@ impl Default for GameSettings {
 }
 
 impl GameSettings {
+    pub const TOUCH_ICONS_TEXT: u8 = 0;
+    pub const TOUCH_ICONS_PERK: u8 = 1;
+    pub const TOUCH_ICONS_BO1: u8 = 2;
+    pub const TOUCH_ICONS_CLASSIC: u8 = 3;
+
     pub const FOV_DEFAULT: f32 = 65.0;
     pub const FOV_MIN: f32 = 65.0;
     pub const FOV_MAX: f32 = 120.0;

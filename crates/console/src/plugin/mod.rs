@@ -164,7 +164,10 @@ impl Plugin for ConsolePlugin {
                     crate::zombies_menu::animate_zombies_menu,
                     crate::zombies_menu::zombies_menu_buttons,
                     crate::zombies_menu::zombies_menu_cards,
-                    crate::zombies_menu::sync_menu_music,
+                    (
+                        crate::zombies_menu::sync_menu_music,
+                        crate::zombies_menu::zombies_menu_sounds,
+                    ),
                     crate::zombies_menu::show_coop_page,
                     crate::zombies_menu::coop_page_input,
                     crate::zombies_menu::show_zombies_options,

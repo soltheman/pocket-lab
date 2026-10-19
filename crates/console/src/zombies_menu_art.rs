@@ -64,6 +64,13 @@ pub(crate) struct MenuArt {
     images: [Option<Handle<Image>>; ART.len()],
 }
 
+impl MenuArt {
+    /// Group 935's emblem, once decoded.
+    pub(crate) fn logo(&self) -> Option<Handle<Image>> {
+        self.images[LOGO].clone()
+    }
+}
+
 fn turn(look: Look, (width, height, mut rgba): (u32, u32, Vec<u8>)) -> (u32, u32, Vec<u8>) {
     for pixel in rgba.chunks_exact_mut(4) {
         let lum = (u32::from(pixel[0]) + u32::from(pixel[1]) + u32::from(pixel[2])) / 3;

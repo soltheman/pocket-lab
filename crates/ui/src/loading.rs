@@ -13,8 +13,81 @@ use crate::load_table::{RowState, format_elapsed, project, total_elapsed};
 #[derive(Component)]
 pub(crate) struct LoadingRoot;
 
+/// What the spawned overlay was built for: a different title, or the same map
+/// now known to be BO1 zombies, is a different screen.
 #[derive(Component)]
-pub(crate) struct LoadingOverlayTitle(String);
+pub(crate) struct LoadingOverlayTitle {
+    title: String,
+    look: LoadingLook,
+}
+
+/// Which loading screen a load gets. BO1 zombies maps get BO1's own: the
+/// loadscreen picture over the whole screen, the map's name bottom-left and the
+/// 935 emblem turning in the corner, with no stage table.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum LoadingLook {
+    Generic,
+    Bo1Zombies,
+}
+
+impl LoadingLook {
+    /// The map's zone name is the reliable signal (`zombie_theater`, with or
+    /// without a `t5:` prefix); the launch labels BO1 zombies loads `ZOMBIES`,
+    /// which covers a screen that arrives before its preview source.
+    pub(crate) fn for_load(screen: &LoadingScreen, source: Option<&LoadingPreviewSource>) -> Self {
+        let zone_says = source
+            .is_some_and(|source| asset_transport::t5_zombies_map_name(&source.map_name).is_some());
+        let label_says = screen.mode_label().trim().eq_ignore_ascii_case("zombies");
+        if zone_says || label_says {
+            Self::Bo1Zombies
+        } else {
+            Self::Generic
+        }
+    }
+}
+
+/// BO1 writes where a map is under its name on the loading screen. Zone names
+/// match without their `t5:` prefix; a map not listed gets no line.
+const BO1_MAP_LOCATIONS: &[(&str, &str)] = &[("zombie_theater", "GERMANY")];
+
+pub(crate) fn bo1_map_location(map_name: &str) -> Option<&'static str> {
+    let (_, stem) = asset_transport::split_zone_key(map_name);
+    BO1_MAP_LOCATIONS
+        .iter()
+        .find(|(zone, _)| zone.eq_ignore_ascii_case(stem))
+        .map(|(_, line)| *line)
+}
+
+/// The BO1 overlay's picture box: sized every frame to a 16:9 frame covering
+/// the screen, because BO1 stores its loadscreens square for a 16:9 display.
+#[derive(Component)]
+pub(crate) struct LoadingPicture;
+
+/// The 935 emblem turning in the corner while the map loads.
+#[derive(Component)]
+pub(crate) struct LoadingEmblem;
+
+/// Where the BO1 overlay says a load failed, since it has no stage table to
+/// say it in.
+#[derive(Component)]
+pub(crate) struct LoadingFailureText;
+
+/// Black over the first frames of the map after a BO1 load, fading out so the
+/// world is never seen before gameplay has drawn it. Not part of the overlay:
+/// it outlives the dismissal and despawns itself.
+#[derive(Component)]
+pub(crate) struct LoadingFadeCover {
+    frames: u32,
+    elapsed: Duration,
+}
+
+/// `zombie_logo_c`, decoded once per install and kept for every later load.
+#[derive(Resource, Default)]
+pub(crate) struct LoadingEmblemCache {
+    image: Option<Handle<Image>>,
+    tried: Option<std::path::PathBuf>,
+    task: Option<Task<Option<(u32, u32, Vec<u8>)>>>,
+}
 
 #[derive(Component)]
 pub(crate) struct LoadingCamera;
@@ -126,11 +199,51 @@ const LOADING_CLEAR: Color = Color::srgb(0.08, 0.09, 0.12);
 const STATUS_TOTAL: Color = Color::srgb(0.92, 0.93, 0.95);
 const STATUS_FAILED: Color = Color::srgb(1.0, 0.35, 0.25);
 
+// The BO1 look is sized in viewport height (`Vh`), so it keeps its proportions
+// from a 390-pt phone up: 1 Vh is 3.9 pt there.
+/// The map's name: about 40 pt at 390 pt tall.
+const BO1_TITLE_VH: f32 = 10.0;
+/// The location line under it: about 16 pt.
+const BO1_LOCATION_VH: f32 = 4.1;
+/// The emblem: 64 pt.
+const BO1_EMBLEM_VH: f32 = 64.0 / 390.0 * 100.0;
+const BO1_EDGE_VH: f32 = 6.0;
+/// BO1's loading indicator turns slowly, about a revolution every ten seconds.
+const BO1_EMBLEM_DEG_PER_SEC: f32 = 35.0;
+const BO1_EMBLEM_TINT: Color = Color::srgba(0.93, 0.88, 0.78, 0.55);
+const BO1_TITLE_COLOR: Color = Color::srgb(0.96, 0.94, 0.88);
+const BO1_LOCATION_COLOR: Color = Color::srgb(0.6, 0.6, 0.58);
+const BO1_PICTURE_ASPECT: f32 = 16.0 / 9.0;
+/// Frames of the map kept fully black before the fade starts: the first ones
+/// after a load are the camera and HUD settling.
+const FADE_HOLD_FRAMES: u32 = 3;
+const FADE_DURATION: Duration = Duration::from_millis(800);
+/// One slow frame (the first in-game ones often are) must not eat the fade.
+const FADE_MAX_STEP: Duration = Duration::from_millis(33);
+/// Above the world and the loading overlay, under the zombies menus and HUD.
+const FADE_Z: i32 = 19_000;
+
 fn loading_text_shadow() -> TextShadow {
     TextShadow {
         offset: Vec2::splat(1.5),
         color: Color::linear_rgba(0., 0., 0., 0.75),
         ..default()
+    }
+}
+
+/// BO1's loading text sits on a picture, not a plain backdrop: a heavier shadow.
+fn bo1_text_shadow() -> TextShadow {
+    TextShadow {
+        offset: Vec2::splat(2.0),
+        color: Color::linear_rgba(0., 0., 0., 0.9),
+        ..default()
+    }
+}
+
+fn game_text_font_vh(font: &Handle<Font>, size_vh: f32) -> TextFont {
+    TextFont {
+        font_size: bevy::text::FontSize::Vh(size_vh),
+        ..game_text_font(font, 0.0)
     }
 }
 
@@ -142,15 +255,18 @@ pub(crate) fn spawn_loading_screen(
     existing: Query<(Entity, Option<&LoadingOverlayTitle>), With<LoadingRoot>>,
     cameras: Query<Entity, With<LoadingCamera>>,
     leftover_overlay: Query<Entity, With<OverlayUiCamera>>,
+    fade_covers: Query<Entity, With<LoadingFadeCover>>,
     inflight_preview: Option<Res<LoadingPreviewTask>>,
+    mut emblem: ResMut<LoadingEmblemCache>,
 ) {
     let Some(screen) = screen else {
         return;
     };
     let title = screen.title();
+    let look = LoadingLook::for_load(&screen, zone_ff.as_deref());
     let title_ok = existing
         .iter()
-        .any(|(_, spawned)| spawned.is_some_and(|s| s.0 == title));
+        .any(|(_, spawned)| spawned.is_some_and(|s| s.title == title && s.look == look));
     if title_ok && leftover_overlay.is_empty() {
         return;
     }
@@ -165,6 +281,8 @@ pub(crate) fn spawn_loading_screen(
         .map(|(entity, _)| entity)
         .chain(cameras.iter())
         .chain(leftover_overlay.iter())
+        // A new load's screen replaces the last one's fade, not the other way round.
+        .chain(fade_covers.iter())
         .collect();
     for entity in stale {
         commands.entity(entity).try_despawn();
@@ -182,7 +300,7 @@ pub(crate) fn spawn_loading_screen(
         LoadingCamera,
     ));
 
-    commands
+    let root = commands
         .spawn((
             Node {
                 width: Val::Percent(100.0),
@@ -191,88 +309,42 @@ pub(crate) fn spawn_loading_screen(
                 justify_content: JustifyContent::FlexEnd,
                 align_items: AlignItems::Center,
                 flex_direction: FlexDirection::Column,
+                // The BO1 picture is a 16:9 frame covering the screen, so it is
+                // taller or wider than the root on most phones.
+                overflow: Overflow::clip(),
                 ..default()
             },
-            BackgroundColor(LOADING_CLEAR),
+            BackgroundColor(match look {
+                LoadingLook::Generic => LOADING_CLEAR,
+                LoadingLook::Bo1Zombies => Color::BLACK,
+            }),
             GlobalZIndex(10_000),
             UiLayer::Loading,
             UiLayerVisibility,
             Visibility::Inherited,
             LoadingRoot,
-            LoadingOverlayTitle(title.to_owned()),
+            LoadingOverlayTitle {
+                title: title.to_owned(),
+                look,
+            },
         ))
-        .with_children(|root| {
-            root.spawn(Node {
-                width: Val::Percent(78.0),
-                margin: UiRect {
-                    bottom: Val::Percent(10.0),
-                    ..default()
-                },
-                flex_direction: FlexDirection::Row,
-                justify_content: JustifyContent::SpaceBetween,
-                align_items: AlignItems::FlexEnd,
-                column_gap: Val::Px(48.0),
-                ..default()
-            })
-            .with_children(|row| {
-                row.spawn(Node {
-                    width: Val::Percent(48.0),
-                    flex_direction: FlexDirection::Column,
-                    align_items: AlignItems::FlexStart,
-                    row_gap: Val::Px(8.0),
-                    ..default()
-                })
-                .with_children(|left| {
-                    left.spawn((
-                        Text::default(),
-                        TextLayout::justify(Justify::Left),
-                        loading_text_shadow(),
-                    ))
-                    .with_children(|text| {
-                        let letter_px = letter_font_px(screen.title());
-                        for (index, letter) in screen.title().chars().enumerate() {
-                            text.spawn((
-                                TextSpan::new(letter.to_string()),
-                                game_text_font(&font, letter_px),
-                                TextColor(Color::srgb(0.42, 0.44, 0.47)),
-                                LoadingLetter(index),
-                            ));
-                        }
-                    });
-                    left.spawn((
-                        Text::new(screen.mode_label().to_owned()),
-                        game_text_font(&font, MODE_FONT_PX),
-                        TextColor(Color::srgb(0.92, 0.93, 0.95)),
-                        TextLayout::justify(Justify::Left),
-                        loading_text_shadow(),
-                    ));
-                });
-                row.spawn(Node {
-                    width: Val::Percent(48.0),
-                    flex_direction: FlexDirection::Column,
-                    align_items: AlignItems::Stretch,
-                    justify_content: JustifyContent::FlexEnd,
-                    row_gap: Val::Px(2.0),
-                    ..default()
-                })
-                .with_children(|right| {
-                    right.spawn((
-                        LoadingStatusList,
-                        Node {
-                            width: Val::Percent(100.0),
-                            flex_direction: FlexDirection::Column,
-                            align_items: AlignItems::Stretch,
-                            row_gap: Val::Px(2.0),
-                            ..default()
-                        },
-                    ));
-                });
-            });
-        });
+        .id();
+    match look {
+        LoadingLook::Generic => spawn_generic_chrome(&mut commands, root, &screen, &font),
+        LoadingLook::Bo1Zombies => {
+            let location = zone_ff
+                .as_deref()
+                .and_then(|source| bo1_map_location(&source.map_name));
+            spawn_bo1_chrome(&mut commands, root, &screen, &font, location);
+            if let Some(source) = zone_ff.as_deref() {
+                begin_emblem_decode(&mut emblem, &source.path);
+            }
+        }
+    }
 
     diag::info!(
         Ui,
-        "loading: screen spawned (title=`{}`, mode=`{}`)",
+        "loading: screen spawned (title=`{}`, mode=`{}`, look={look:?})",
         screen.title(),
         screen.mode_label()
     );
@@ -290,6 +362,341 @@ pub(crate) fn spawn_loading_screen(
             );
         }
     }
+}
+
+/// The engine's own screen: the title's letters lighting in turn, the mode, and
+/// the stage table on the right.
+fn spawn_generic_chrome(
+    commands: &mut Commands,
+    root: Entity,
+    screen: &LoadingScreen,
+    font: &Handle<Font>,
+) {
+    commands.entity(root).with_children(|root| {
+        root.spawn(Node {
+            width: Val::Percent(78.0),
+            margin: UiRect {
+                bottom: Val::Percent(10.0),
+                ..default()
+            },
+            flex_direction: FlexDirection::Row,
+            justify_content: JustifyContent::SpaceBetween,
+            align_items: AlignItems::FlexEnd,
+            column_gap: Val::Px(48.0),
+            ..default()
+        })
+        .with_children(|row| {
+            row.spawn(Node {
+                width: Val::Percent(48.0),
+                flex_direction: FlexDirection::Column,
+                align_items: AlignItems::FlexStart,
+                row_gap: Val::Px(8.0),
+                ..default()
+            })
+            .with_children(|left| {
+                left.spawn((
+                    Text::default(),
+                    TextLayout::justify(Justify::Left),
+                    loading_text_shadow(),
+                ))
+                .with_children(|text| {
+                    let letter_px = letter_font_px(screen.title());
+                    for (index, letter) in screen.title().chars().enumerate() {
+                        text.spawn((
+                            TextSpan::new(letter.to_string()),
+                            game_text_font(font, letter_px),
+                            TextColor(Color::srgb(0.42, 0.44, 0.47)),
+                            LoadingLetter(index),
+                        ));
+                    }
+                });
+                left.spawn((
+                    Text::new(screen.mode_label().to_owned()),
+                    game_text_font(font, MODE_FONT_PX),
+                    TextColor(Color::srgb(0.92, 0.93, 0.95)),
+                    TextLayout::justify(Justify::Left),
+                    loading_text_shadow(),
+                ));
+            });
+            row.spawn(Node {
+                width: Val::Percent(48.0),
+                flex_direction: FlexDirection::Column,
+                align_items: AlignItems::Stretch,
+                justify_content: JustifyContent::FlexEnd,
+                row_gap: Val::Px(2.0),
+                ..default()
+            })
+            .with_children(|right| {
+                right.spawn((
+                    LoadingStatusList,
+                    Node {
+                        width: Val::Percent(100.0),
+                        flex_direction: FlexDirection::Column,
+                        align_items: AlignItems::Stretch,
+                        row_gap: Val::Px(2.0),
+                        ..default()
+                    },
+                ));
+            });
+        });
+    });
+}
+
+/// BO1's zombies loading screen: the loadscreen picture over everything, a dark
+/// wash along the bottom, the map's name and where it is bottom-left, and the
+/// 935 emblem turning bottom-right. The stage table is not shown; the load's
+/// progress is still tracked the same way.
+fn spawn_bo1_chrome(
+    commands: &mut Commands,
+    root: Entity,
+    screen: &LoadingScreen,
+    font: &Handle<Font>,
+    location: Option<&str>,
+) {
+    commands.entity(root).with_children(|root| {
+        root.spawn((
+            LoadingPicture,
+            Node {
+                position_type: PositionType::Absolute,
+                width: Val::Percent(100.0),
+                height: Val::Percent(100.0),
+                ..default()
+            },
+        ));
+        // Without it the text would sit on whatever the picture has at the bottom.
+        root.spawn((
+            Node {
+                position_type: PositionType::Absolute,
+                left: Val::Px(0.0),
+                right: Val::Px(0.0),
+                bottom: Val::Px(0.0),
+                height: Val::Percent(45.0),
+                ..default()
+            },
+            BackgroundGradient(vec![Gradient::Linear(LinearGradient::to_top(vec![
+                ColorStop::percent(Color::srgba(0.0, 0.0, 0.0, 0.8), 0.0),
+                ColorStop::percent(Color::srgba(0.0, 0.0, 0.0, 0.45), 45.0),
+                ColorStop::percent(Color::srgba(0.0, 0.0, 0.0, 0.0), 100.0),
+            ]))]),
+        ));
+        root.spawn(Node {
+            position_type: PositionType::Absolute,
+            left: Val::Vh(BO1_EDGE_VH),
+            bottom: Val::Vh(BO1_EDGE_VH),
+            max_width: Val::Percent(70.0),
+            flex_direction: FlexDirection::Column,
+            align_items: AlignItems::FlexStart,
+            row_gap: Val::Vh(0.6),
+            ..default()
+        })
+        .with_children(|left| {
+            left.spawn((
+                Text::new(screen.title().to_uppercase()),
+                game_text_font_vh(font, BO1_TITLE_VH),
+                TextColor(BO1_TITLE_COLOR),
+                TextLayout::justify(Justify::Left),
+                bo1_text_shadow(),
+            ));
+            if let Some(location) = location {
+                left.spawn((
+                    Text::new(location.to_owned()),
+                    game_text_font_vh(font, BO1_LOCATION_VH),
+                    TextColor(BO1_LOCATION_COLOR),
+                    TextLayout::justify(Justify::Left),
+                    bo1_text_shadow(),
+                ));
+            }
+            left.spawn((
+                LoadingFailureText,
+                Text::new(""),
+                game_text_font_vh(font, BO1_LOCATION_VH),
+                TextColor(STATUS_FAILED),
+                TextLayout::justify(Justify::Left),
+                bo1_text_shadow(),
+            ));
+        });
+        root.spawn((
+            LoadingEmblem,
+            Node {
+                position_type: PositionType::Absolute,
+                right: Val::Vh(BO1_EDGE_VH),
+                bottom: Val::Vh(BO1_EDGE_VH),
+                width: Val::Vh(BO1_EMBLEM_VH),
+                height: Val::Vh(BO1_EMBLEM_VH),
+                ..default()
+            },
+            UiTransform::default(),
+        ));
+    });
+}
+
+/// The emblem comes from the install the map is loaded from, decoded off the
+/// main thread like the preview. One decode per install: later loads reuse it.
+fn begin_emblem_decode(cache: &mut LoadingEmblemCache, zone_ff: &std::path::Path) {
+    if cache.image.is_some() {
+        return;
+    }
+    let Ok(main) = asset_transport::game_root_for_zone(zone_ff).map(|root| root.join("main"))
+    else {
+        return;
+    };
+    if cache.tried.as_ref() == Some(&main) {
+        return;
+    }
+    cache.tried = Some(main.clone());
+    cache.task = Some(AsyncComputeTaskPool::get().spawn(async move {
+        match asset_material::decode_ui_image_from_main(&main, "zombie_logo_c") {
+            Ok(image) => image,
+            Err(error) => {
+                diag::warn!(Ui, "loading: emblem: {error}");
+                None
+            }
+        }
+    }));
+}
+
+/// The BO1 overlay's per-frame work: the picture kept a 16:9 frame covering the
+/// screen, the emblem put on once decoded and turned, a failure written out.
+pub(crate) fn update_bo1_loading(
+    mut commands: Commands,
+    screen: Option<Res<LoadingScreen>>,
+    mut emblem: ResMut<LoadingEmblemCache>,
+    mut images: ResMut<Assets<Image>>,
+    roots: Query<&ComputedNode, With<LoadingRoot>>,
+    mut pictures: Query<&mut Node, With<LoadingPicture>>,
+    mut emblems: Query<(Entity, &mut UiTransform, Has<ImageNode>), With<LoadingEmblem>>,
+    mut failures: Query<&mut Text, With<LoadingFailureText>>,
+) {
+    if let Some(task) = emblem.task.as_mut()
+        && let Some(decoded) = future::block_on(future::poll_once(task))
+    {
+        emblem.task = None;
+        match decoded {
+            Some((width, height, pixels)) => {
+                emblem.image = Some(images.add(ui_image(width, height, pixels)));
+                diag::info!(Ui, "loading: 935 emblem ready ({width}x{height})");
+            }
+            None => diag::info!(Ui, "loading: no zombie_logo_c in this install (no emblem)"),
+        }
+    }
+    let Some(screen) = screen else {
+        return;
+    };
+
+    if let Ok(root) = roots.single() {
+        let size = root.size() * root.inverse_scale_factor();
+        let (width, height) = cover_16_9(size);
+        let left = Val::Px((size.x - width) * 0.5);
+        let top = Val::Px((size.y - height) * 0.5);
+        for mut node in &mut pictures {
+            if node.width != Val::Px(width)
+                || node.height != Val::Px(height)
+                || node.left != left
+                || node.top != top
+            {
+                node.width = Val::Px(width);
+                node.height = Val::Px(height);
+                node.left = left;
+                node.top = top;
+            }
+        }
+    }
+
+    let turn = Rot2::degrees(screen.elapsed().as_secs_f32() * BO1_EMBLEM_DEG_PER_SEC);
+    for (entity, mut transform, has_image) in &mut emblems {
+        transform.rotation = turn;
+        if !has_image && let Some(image) = emblem.image.clone() {
+            commands.entity(entity).insert(
+                ImageNode::new(image)
+                    .with_color(BO1_EMBLEM_TINT)
+                    .with_mode(bevy::ui::widget::NodeImageMode::Stretch),
+            );
+        }
+    }
+
+    let failure = screen
+        .failure()
+        .map(|reason| format!("Map load failed — {reason}"))
+        .unwrap_or_default();
+    for mut text in &mut failures {
+        set_text(&mut text, &failure);
+    }
+}
+
+/// The size of a 16:9 frame that covers `screen`: as wide as a wider screen, as
+/// tall as a taller one, overflowing (and clipped) the other way.
+fn cover_16_9(screen: Vec2) -> (f32, f32) {
+    if screen.y <= 0.0 || screen.x <= 0.0 {
+        return (screen.x.max(0.0), screen.y.max(0.0));
+    }
+    if screen.x / screen.y >= BO1_PICTURE_ASPECT {
+        (screen.x, screen.x / BO1_PICTURE_ASPECT)
+    } else {
+        (screen.y * BO1_PICTURE_ASPECT, screen.y)
+    }
+}
+
+/// Puts black over the map as a BO1 load ends (see [`LoadingFadeCover`]).
+fn spawn_fade_cover(commands: &mut Commands) {
+    commands.spawn((
+        Node {
+            position_type: PositionType::Absolute,
+            width: Val::Percent(100.0),
+            height: Val::Percent(100.0),
+            ..default()
+        },
+        BackgroundColor(Color::BLACK),
+        GlobalZIndex(FADE_Z),
+        // Gameplay input is live from the first frame; the cover only darkens it.
+        bevy::ui::FocusPolicy::Pass,
+        LoadingFadeCover {
+            frames: 0,
+            elapsed: Duration::ZERO,
+        },
+    ));
+}
+
+/// Holds the cover black for the first few frames of the map, then fades it out
+/// and despawns it.
+pub(crate) fn fade_loading_cover(
+    mut commands: Commands,
+    time: Res<Time>,
+    mut covers: Query<(Entity, &mut LoadingFadeCover, &mut BackgroundColor)>,
+) {
+    for (entity, mut cover, mut color) in &mut covers {
+        if cover.frames < FADE_HOLD_FRAMES {
+            cover.frames += 1;
+            continue;
+        }
+        cover.elapsed += time.delta().min(FADE_MAX_STEP);
+        let alpha = fade_alpha(cover.elapsed);
+        if alpha <= 0.0 {
+            commands.entity(entity).try_despawn();
+        } else {
+            color.0 = Color::BLACK.with_alpha(alpha);
+        }
+    }
+}
+
+fn fade_alpha(elapsed: Duration) -> f32 {
+    (1.0 - elapsed.as_secs_f32() / FADE_DURATION.as_secs_f32()).clamp(0.0, 1.0)
+}
+
+fn ui_image(width: u32, height: u32, pixels: Vec<u8>) -> Image {
+    let size = bevy::render::render_resource::Extent3d {
+        width,
+        height,
+        depth_or_array_layers: 1,
+    };
+    let mut image = Image::new(
+        size,
+        bevy::render::render_resource::TextureDimension::D2,
+        pixels,
+        bevy::render::render_resource::TextureFormat::Rgba8UnormSrgb,
+        bevy::asset::RenderAssetUsages::default(),
+    );
+    image.sampler = bevy::image::ImageSampler::linear();
+    image
 }
 
 fn begin_loading_preview_decode(
@@ -332,6 +739,7 @@ pub(crate) fn poll_loading_preview(
     source: Option<Res<LoadingPreviewSource>>,
     mut images: ResMut<Assets<Image>>,
     loading_root: Query<Entity, With<LoadingRoot>>,
+    pictures: Query<Entity, With<LoadingPicture>>,
 ) {
     let Some(task) = task.as_deref_mut() else {
         return;
@@ -350,24 +758,14 @@ pub(crate) fn poll_loading_preview(
     let Some(loading) = loading.as_deref_mut() else {
         return;
     };
-    match (decoded, loading_root.single()) {
-        (Some((width, height, pixels)), Ok(root)) => {
-            let size = bevy::render::render_resource::Extent3d {
-                width,
-                height,
-                depth_or_array_layers: 1,
-            };
-            let mut image = Image::new(
-                size,
-                bevy::render::render_resource::TextureDimension::D2,
-                pixels,
-                bevy::render::render_resource::TextureFormat::Rgba8UnormSrgb,
-                bevy::asset::RenderAssetUsages::default(),
-            );
-            image.sampler = bevy::image::ImageSampler::linear();
-            let handle = images.add(image);
+    // The BO1 look has a box of its own for the picture; the generic one shows
+    // it on the root.
+    let target = pictures.single().or(loading_root.single());
+    match (decoded, target) {
+        (Some((width, height, pixels)), Ok(target)) => {
+            let handle = images.add(ui_image(width, height, pixels));
             commands
-                .entity(root)
+                .entity(target)
                 .insert(ImageNode::new(handle).with_mode(bevy::ui::widget::NodeImageMode::Stretch));
             loading.mark_preview_ready();
             diag::info!(Ui, "loading: map preview ready ({width}x{height})");
@@ -391,6 +789,7 @@ pub(crate) fn update_loading_screen(
     list: Query<(Entity, Option<&Children>), With<LoadingStatusList>>,
     mut cells: Query<(&LoadingStatusCell, &mut Text, &mut TextColor), Without<LoadingLetter>>,
     roots: Query<Entity, Or<(With<LoadingRoot>, With<LoadingCamera>)>>,
+    looks: Query<&LoadingOverlayTitle, With<LoadingRoot>>,
 ) {
     let Some(screen) = screen.as_deref_mut() else {
         return;
@@ -415,6 +814,14 @@ pub(crate) fn update_loading_screen(
     }
 
     if screen.is_complete() {
+        // Dropping the overlay at once shows the map raw for a moment before
+        // gameplay has drawn it; BO1 fades in from black instead.
+        if looks
+            .iter()
+            .any(|spawned| spawned.look == LoadingLook::Bo1Zombies)
+        {
+            spawn_fade_cover(&mut commands);
+        }
         dismiss_loading_overlay(&mut commands, roots.iter(), std::iter::empty(), true);
         diag::info!(Ui, "loading: screen dismissed");
         return;
@@ -671,4 +1078,76 @@ fn ping_pong(step: usize, count: usize) -> usize {
 fn letter_font_px(title: &str) -> f32 {
     let n = title.chars().count().max(1) as f32;
     (LETTER_FONT_PX * 10.0 / n).clamp(LETTER_FONT_MIN, LETTER_FONT_PX)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn screen(title: &str, mode: &str) -> LoadingScreen {
+        LoadingScreen::new(LoadProgress::default(), title, mode)
+    }
+
+    fn source(map_name: &str) -> LoadingPreviewSource {
+        LoadingPreviewSource {
+            path: std::path::PathBuf::from("zone/english/x.ff"),
+            map_name: map_name.to_owned(),
+            request_id: 0,
+        }
+    }
+
+    #[test]
+    fn bo1_zombies_maps_get_the_bo1_look() {
+        let kino = screen("Kino der Toten", "Free-for-all");
+        assert_eq!(
+            LoadingLook::for_load(&kino, Some(&source("zombie_theater"))),
+            LoadingLook::Bo1Zombies
+        );
+        assert_eq!(
+            LoadingLook::for_load(&kino, Some(&source("t5:zombie_theater"))),
+            LoadingLook::Bo1Zombies
+        );
+        // The launch's label covers a screen whose preview source is not in yet.
+        assert_eq!(
+            LoadingLook::for_load(&screen("Kino der Toten", "ZOMBIES"), None),
+            LoadingLook::Bo1Zombies
+        );
+    }
+
+    #[test]
+    fn other_maps_keep_the_generic_look() {
+        let rust = screen("mp_rust", "Free-for-all");
+        assert_eq!(
+            LoadingLook::for_load(&rust, Some(&source("mp_rust"))),
+            LoadingLook::Generic
+        );
+        assert_eq!(LoadingLook::for_load(&rust, None), LoadingLook::Generic);
+    }
+
+    #[test]
+    fn location_line_is_per_map() {
+        assert_eq!(bo1_map_location("zombie_theater"), Some("GERMANY"));
+        assert_eq!(bo1_map_location("t5:ZOMBIE_THEATER"), Some("GERMANY"));
+        assert_eq!(bo1_map_location("zombie_unknown"), None);
+    }
+
+    #[test]
+    fn picture_covers_the_screen_at_16_9() {
+        // An iPhone in landscape is wider than 16:9: full width, overflowing height.
+        let (w, h) = cover_16_9(Vec2::new(844.0, 390.0));
+        assert_eq!(w, 844.0);
+        assert!((h - 844.0 * 9.0 / 16.0).abs() < 1e-3 && h >= 390.0);
+        // A 4:3 screen: full height, overflowing width.
+        let (w, h) = cover_16_9(Vec2::new(1024.0, 768.0));
+        assert_eq!(h, 768.0);
+        assert!((w - 768.0 * 16.0 / 9.0).abs() < 1e-3 && w >= 1024.0);
+    }
+
+    #[test]
+    fn fade_runs_from_black_to_clear() {
+        assert_eq!(fade_alpha(Duration::ZERO), 1.0);
+        assert!((fade_alpha(FADE_DURATION / 2) - 0.5).abs() < 1e-3);
+        assert_eq!(fade_alpha(FADE_DURATION), 0.0);
+        assert_eq!(fade_alpha(FADE_DURATION * 2), 0.0);
+    }
 }

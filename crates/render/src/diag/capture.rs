@@ -79,6 +79,10 @@ impl CaptureFrameFacts {
     }
 
     fn obstruction(self) -> Option<CaptureWait> {
+        // IW4L_SHOT_ANY=1 shoots whatever is up, loading screens included.
+        if std::env::var_os("IW4L_SHOT_ANY").is_some() {
+            return None;
+        }
         if self.screen == AppScreen::Loading {
             return Some(CaptureWait::MatchLoading);
         }

@@ -318,14 +318,30 @@ impl AudioRuntime {
     }
 
     pub(crate) fn trigger_cue(&self, request: CueTrigger) -> CueHandle {
-        self.trigger_with_fade(request, None)
+        self.trigger_with_fade(request, None, None)
     }
 
     pub(crate) fn trigger_faded_cue(&self, request: CueTrigger, frames: u64) -> CueHandle {
-        self.trigger_with_fade(request, Some(frames))
+        self.trigger_with_fade(request, Some(frames), None)
     }
 
-    fn trigger_with_fade(&self, request: CueTrigger, fade: Option<u64>) -> CueHandle {
+    /// A one-shot cue served by `media` instead of the installed clip store,
+    /// the cue counterpart of `source_cue_with_media`: BO1's menu sounds keep
+    /// their own resident bank and play the same whatever bank the session holds.
+    pub(crate) fn trigger_cue_with_media(
+        &self,
+        request: CueTrigger,
+        media: MediaService,
+    ) -> CueHandle {
+        self.trigger_with_fade(request, None, Some(media))
+    }
+
+    fn trigger_with_fade(
+        &self,
+        request: CueTrigger,
+        fade: Option<u64>,
+        media: Option<MediaService>,
+    ) -> CueHandle {
         let CueTrigger {
             event,
             bank,
@@ -358,7 +374,7 @@ impl AudioRuntime {
             .as_ref()
             .filter(|mix| class.scope() == AudioScope::Match && mix.epoch == epoch)
             .cloned();
-        let media = self.media_for_bank(&bank);
+        let media = media.or_else(|| self.media_for_bank(&bank));
         let state = crate::cue::CueState::new();
         if let Some(frames) = fade {
             state.release.fade_in(self.audio_frame(), frames);

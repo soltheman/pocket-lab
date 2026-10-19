@@ -19,6 +19,7 @@ mod rumble;
 mod shellshock;
 mod space;
 mod start;
+mod ui_sound;
 
 pub use aliases::{
     StepGait, footstep_aliases, gear_alias, gear_rattle_alias, land_aliases, quiet_surface_alias,
@@ -43,6 +44,7 @@ pub use space::{distance_inches, transform_inches};
 pub use start::{
     SoundClass, StartDecision, StartDecisions, StartFailure, StartOutcome, SuppressReason,
 };
+pub use ui_sound::{UiSound, UiSoundKind};
 
 mod destructible_loops;
 mod match_set;

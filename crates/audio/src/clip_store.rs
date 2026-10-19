@@ -486,13 +486,25 @@ impl MediaService {
     /// music read back from its cache file — where starting the usual 2–4
     /// workers would park threads for the whole process to serve nothing.
     pub(crate) fn resident(bank: Arc<SoundCatalog>, key: ClipKey, pcm: PcmBuffer) -> Self {
+        Self::resident_clips(bank, [(key, pcm)])
+    }
+
+    /// `resident` for several clips of one bank: BO1's menu sounds, decoded
+    /// once at startup and kept for the whole process.
+    pub(crate) fn resident_clips(
+        bank: Arc<SoundCatalog>,
+        clips: impl IntoIterator<Item = (ClipKey, PcmBuffer)>,
+    ) -> Self {
         let (retirement, _) = channel::<ClipWorkers>();
         let queue = Arc::new(MediaJobQueue::new());
         queue.close();
         let mut requests = MediaRequests::default();
-        requests.queued.insert(key.clone());
-        let used = USE_TICK.fetch_add(1, Ordering::Relaxed);
-        let outcomes = Outcomes::from([(key, (Ok(pcm), used))]);
+        let mut outcomes = Outcomes::new();
+        for (key, pcm) in clips {
+            requests.queued.insert(key.clone());
+            let used = USE_TICK.fetch_add(1, Ordering::Relaxed);
+            outcomes.insert(key, (Ok(pcm), used));
+        }
         Self(Arc::new(MediaServiceInner {
             bank,
             queue,
@@ -847,7 +859,7 @@ fn note_outcome(path: ClipPath, result: Result<&PcmBuffer, &ClipError>) {
     }
 }
 
-fn prepare_clip_now(
+pub(crate) fn prepare_clip_now(
     bank: &SoundCatalog,
     iwd: Option<&NamespaceSoundIwd>,
     key: &ClipKey,

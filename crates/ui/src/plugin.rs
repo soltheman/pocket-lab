@@ -6,7 +6,10 @@ use crate::classes::select::ClassSelectPlugin;
 use crate::gap_hud::register_gap_hud_systems;
 use crate::launch_report::publish_gap_hud;
 use crate::layers::{GameUiFontPlugin, UiLayersPlugin};
-use crate::loading::{poll_loading_preview, spawn_loading_screen, update_loading_screen};
+use crate::loading::{
+    LoadingEmblemCache, fade_loading_cover, poll_loading_preview, spawn_loading_screen,
+    update_bo1_loading, update_loading_screen,
+};
 use crate::menu::MenuPlugin;
 use crate::screen::register_screen_systems;
 
@@ -21,13 +24,16 @@ impl Plugin for UiPlugin {
             MenuPlugin,
             ClassSelectPlugin,
         ))
+        .init_resource::<LoadingEmblemCache>()
         .add_systems(Startup, spawn_loading_screen)
         .add_systems(
             Update,
             (
                 spawn_loading_screen,
                 poll_loading_preview,
+                update_bo1_loading,
                 update_loading_screen,
+                fade_loading_cover,
             )
                 .chain()
                 .in_set(ClientSet::Ui),

@@ -49,6 +49,15 @@ const LABEL: Color = Color::srgb(0.8, 0.79, 0.75);
 const HOT: Color = Color::srgb(1.0, 0.66, 0.18);
 const PANEL: Color = Color::srgba(0.03, 0.03, 0.03, 0.94);
 const BAR: Color = Color::srgba(1.0, 1.0, 1.0, 0.12);
+/// The options' Group 935 terminal: a dark riveted steel panel, amber old-monitor text.
+const TERM_PANEL: Color = Color::srgba(0.07, 0.075, 0.08, 0.97);
+const TERM_EDGE: Color = Color::srgb(0.3, 0.32, 0.34);
+const TERM_RIVET: Color = Color::srgb(0.46, 0.48, 0.5);
+const TERM_KEY: Color = Color::srgb(0.15, 0.16, 0.17);
+const TERM_TRACK: Color = Color::srgb(0.03, 0.032, 0.035);
+const AMBER: Color = Color::srgb(1.0, 0.7, 0.16);
+const AMBER_DIM: Color = Color::srgb(0.74, 0.52, 0.16);
+const AMBER_FAINT: Color = Color::srgba(1.0, 0.7, 0.16, 0.12);
 /// Sizes at a 390-point-tall screen (an iPhone in landscape), scaled with the screen.
 const REFERENCE_HEIGHT: f32 = 390.0;
 /// Clear of the notch / Dynamic Island in landscape.
@@ -276,7 +285,7 @@ impl Setting {
             Setting::Volume => "VOLUME",
             Setting::InvertLook => "INVERT LOOK",
             Setting::Layout => "BUTTON LAYOUT",
-            Setting::Style => "BUTTON STYLE",
+            Setting::Style => "BUTTON ICONS",
             Setting::AimMode => "AIM BUTTON",
             Setting::AimAssist => "AIM ASSIST",
             Setting::MenuMusic => "MENU MUSIC",
@@ -295,9 +304,8 @@ impl Setting {
             Setting::Sensitivity => (0.5, 20.0, 0.5),
             Setting::FieldOfView => (GameSettings::FOV_MIN, 110.0, 1.0),
             Setting::Volume => (0.0, 1.0, 0.05),
-            Setting::InvertLook | Setting::Style | Setting::AimMode | Setting::AimAssist => {
-                (0.0, 1.0, 1.0)
-            }
+            Setting::InvertLook | Setting::AimMode | Setting::AimAssist => (0.0, 1.0, 1.0),
+            Setting::Style => (0.0, 3.0, 1.0),
             Setting::Layout => (0.0, f32::from(GameSettings::TOUCH_LAYOUT_CUSTOM), 1.0),
             Setting::ButtonSize => (0.75, 1.35, 0.05),
             Setting::ButtonOpacity => (0.3, 1.0, 0.05),
@@ -332,7 +340,7 @@ impl Setting {
             Setting::Volume => settings.master_volume,
             Setting::InvertLook => f32::from(u8::from(settings.invert_mouse)),
             Setting::Layout => f32::from(settings.touch_layout),
-            Setting::Style => f32::from(u8::from(settings.touch_icons)),
+            Setting::Style => f32::from(settings.touch_icon_style),
             Setting::AimMode => f32::from(u8::from(settings.touch_aim_toggle)),
             Setting::AimAssist => f32::from(u8::from(settings.touch_aim_assist)),
             Setting::ButtonSize => settings.touch_button_scale,
@@ -354,7 +362,10 @@ impl Setting {
             Setting::Volume => settings.master_volume = value,
             Setting::InvertLook => settings.invert_mouse = value >= 0.5,
             Setting::Layout => settings.touch_layout = value as u8,
-            Setting::Style => settings.touch_icons = value >= 0.5,
+            Setting::Style => {
+                settings.touch_icon_style = value as u8;
+                settings.touch_icons = value as u8 != GameSettings::TOUCH_ICONS_TEXT;
+            }
             Setting::AimMode => settings.touch_aim_toggle = value >= 0.5,
             Setting::AimAssist => settings.touch_aim_assist = value >= 0.5,
             Setting::ButtonSize => settings.touch_button_scale = value,
@@ -384,7 +395,11 @@ impl Setting {
             Setting::Sensitivity => format!("{value:.1}"),
             Setting::FieldOfView => format!("{value:.0}"),
             Setting::InvertLook => if value >= 0.5 { "ON" } else { "OFF" }.to_owned(),
-            Setting::Style => if value >= 0.5 { "ICONS" } else { "TEXT" }.to_owned(),
+            Setting::Style => ["TEXT", "PERK", "BO1", "CLASSIC"]
+                .get(value.round() as usize)
+                .copied()
+                .unwrap_or("PERK")
+                .to_owned(),
             Setting::AimMode => if value >= 0.5 { "TOGGLE" } else { "HOLD" }.to_owned(),
             Setting::AimAssist => if value >= 0.5 { "ON" } else { "OFF" }.to_owned(),
             Setting::Layout => LAYOUT_NAMES
@@ -947,7 +962,12 @@ pub(crate) fn zombies_menu_buttons(
             None
         }
         Some("style") => {
-            tests.settings.touch_icons = words.next() != Some("text");
+            tests.settings.touch_icon_style = match words.next() {
+                Some("text") => GameSettings::TOUCH_ICONS_TEXT,
+                Some("bo1") => GameSettings::TOUCH_ICONS_BO1,
+                Some("classic") => GameSettings::TOUCH_ICONS_CLASSIC,
+                _ => GameSettings::TOUCH_ICONS_PERK,
+            };
             tests.settings.touch();
             None
         }
@@ -1166,6 +1186,8 @@ pub(crate) fn show_zombies_options(
     font: Option<Res<GameUiFont>>,
     window: Query<&Window, With<PrimaryWindow>>,
     mut root: Query<&mut Visibility, With<OptionsRoot>>,
+    mut images: ResMut<Assets<Image>>,
+    art: Res<crate::zombies_menu_art::MenuArt>,
 ) {
     if let Ok(mut visibility) = root.single_mut() {
         visibility.set_if_neq(if open.0 {
@@ -1184,6 +1206,19 @@ pub(crate) fn show_zombies_options(
     let font = font.0.clone();
     let s = screen_scale(window);
     let row_height = 34.0 * s;
+    // An old monitor's scanlines: one dark row in three, tiled over the panel.
+    let scanlines = images.add(Image::new(
+        bevy::render::render_resource::Extent3d {
+            width: 1,
+            height: 3,
+            depth_or_array_layers: 1,
+        },
+        bevy::render::render_resource::TextureDimension::D2,
+        vec![0, 0, 0, 90, 0, 0, 0, 0, 0, 0, 0, 0],
+        bevy::render::render_resource::TextureFormat::Rgba8UnormSrgb,
+        bevy::asset::RenderAssetUsages::default(),
+    ));
+    let emblem = art.logo();
     commands
         .spawn((
             OptionsRoot,
@@ -1208,15 +1243,54 @@ pub(crate) fn show_zombies_options(
                     width: percent(88),
                     max_width: px(640.0 * s),
                     flex_direction: FlexDirection::Column,
-                    padding: UiRect::axes(px(18.0 * s), px(10.0 * s)),
-                    border: UiRect::top(px(3.0 * s)),
+                    padding: UiRect::axes(px(20.0 * s), px(12.0 * s)),
+                    border: UiRect::all(px(2.0 * s)),
                     row_gap: px(2.0 * s),
                     ..default()
                 },
-                BackgroundColor(PANEL),
-                BorderColor::all(RED),
+                BackgroundColor(TERM_PANEL),
+                BorderColor::all(TERM_EDGE),
+                BoxShadow::new(
+                    AMBER.with_alpha(0.18),
+                    px(0),
+                    px(0),
+                    px(0),
+                    px(14.0 * s),
+                ),
             ))
             .with_children(|panel| {
+                // Group 935's emblem, faint, in the corner; rivets at the corners.
+                if let Some(emblem) = emblem.clone() {
+                    panel.spawn((
+                        Node {
+                            position_type: PositionType::Absolute,
+                            right: px(10.0 * s),
+                            bottom: px(8.0 * s),
+                            width: px(120.0 * s),
+                            height: px(120.0 * s),
+                            ..default()
+                        },
+                        ImageNode::new(emblem).with_color(AMBER.with_alpha(0.08)),
+                        FocusPolicy::Pass,
+                    ));
+                }
+                for (left, top) in [(true, true), (false, true), (true, false), (false, false)] {
+                    panel.spawn((
+                        Node {
+                            position_type: PositionType::Absolute,
+                            left: if left { px(5.0 * s) } else { Val::Auto },
+                            right: if left { Val::Auto } else { px(5.0 * s) },
+                            top: if top { px(5.0 * s) } else { Val::Auto },
+                            bottom: if top { Val::Auto } else { px(5.0 * s) },
+                            width: px(6.0 * s),
+                            height: px(6.0 * s),
+                            border_radius: BorderRadius::MAX,
+                            ..default()
+                        },
+                        BackgroundColor(TERM_RIVET),
+                        FocusPolicy::Pass,
+                    ));
+                }
                 // OPTIONS, and the pages' tabs on its right.
                 panel
                     .spawn(Node {
@@ -1226,7 +1300,15 @@ pub(crate) fn show_zombies_options(
                         ..default()
                     })
                     .with_children(|top| {
-                        top.spawn(text(&font, 22.0 * s, WHITE, "OPTIONS"));
+                        top.spawn(Node {
+                            flex_direction: FlexDirection::Column,
+                            row_gap: px(6.0 * s),
+                            ..default()
+                        })
+                        .with_children(|title| {
+                            title.spawn(text(&font, 11.0 * s, AMBER_DIM, "GROUP 935  //  SYSTEM SETTINGS"));
+                            title.spawn(text(&font, 22.0 * s, AMBER, "OPTIONS"));
+                        });
                         top.spawn(Node {
                             column_gap: px(6.0 * s),
                             ..default()
@@ -1238,16 +1320,16 @@ pub(crate) fn show_zombies_options(
                                     Button,
                                     Node {
                                         padding: UiRect::axes(px(12.0 * s), px(4.0 * s)),
-                                        border: UiRect::bottom(px(2.0 * s)),
+                                        border: UiRect::all(px(1.0)),
                                         ..default()
                                     },
-                                    BorderColor::all(Color::NONE),
+                                    BorderColor::all(TERM_EDGE),
                                     BackgroundColor(Color::NONE),
                                 ))
                                 .with_child(text(
                                     &font,
                                     14.0 * s,
-                                    WHITE,
+                                    AMBER,
                                     label,
                                 ));
                             }
@@ -1272,7 +1354,7 @@ pub(crate) fn show_zombies_options(
                         .with_child(text(
                             &font,
                             13.0 * s,
-                            LABEL,
+                            AMBER_DIM,
                             "MOVE BUTTONS",
                         ));
                         row.spawn((
@@ -1283,10 +1365,10 @@ pub(crate) fn show_zombies_options(
                                 border: UiRect::all(px(1.0)),
                                 ..default()
                             },
-                            BorderColor::all(HOT),
-                            BackgroundColor(Color::srgba(1.0, 0.66, 0.18, 0.14)),
+                            BorderColor::all(AMBER),
+                            BackgroundColor(AMBER_FAINT),
                         ))
-                        .with_child((OptionsEditLabel, text(&font, 14.0 * s, WHITE, "EDIT")));
+                        .with_child((OptionsEditLabel, text(&font, 14.0 * s, AMBER, "EDIT")));
                     });
                 for setting in Setting::ALL {
                     panel
@@ -1307,7 +1389,7 @@ pub(crate) fn show_zombies_options(
                             .with_child(text(
                                 &font,
                                 13.0 * s,
-                                LABEL,
+                                AMBER_DIM,
                                 setting.label(),
                             ));
                             let step = |row: &mut ChildSpawnerCommands, sign: f32, label: &str| {
@@ -1322,13 +1404,13 @@ pub(crate) fn show_zombies_options(
                                         border: UiRect::all(px(1.0)),
                                         ..default()
                                     },
-                                    BorderColor::all(Color::srgba(1.0, 1.0, 1.0, 0.25)),
-                                    BackgroundColor(Color::srgba(1.0, 1.0, 1.0, 0.06)),
+                                    BorderColor::all(TERM_EDGE),
+                                    BackgroundColor(TERM_KEY),
                                 ))
                                 .with_child(text(
                                     &font,
                                     16.0 * s,
-                                    WHITE,
+                                    AMBER,
                                     label,
                                 ));
                             };
@@ -1342,7 +1424,7 @@ pub(crate) fn show_zombies_options(
                                     height: px(10.0 * s),
                                     ..default()
                                 },
-                                BackgroundColor(BAR),
+                                BackgroundColor(TERM_TRACK),
                             ))
                             .with_child((
                                 OptionFill(setting),
@@ -1351,7 +1433,7 @@ pub(crate) fn show_zombies_options(
                                     height: percent(100),
                                     ..default()
                                 },
-                                BackgroundColor(HOT),
+                                BackgroundColor(AMBER),
                                 FocusPolicy::Pass,
                             ));
                             step(row, 1.0, "+");
@@ -1360,7 +1442,7 @@ pub(crate) fn show_zombies_options(
                                 justify_content: JustifyContent::FlexEnd,
                                 ..default()
                             })
-                            .with_child((OptionValue(setting), text(&font, 14.0 * s, WHITE, "")));
+                            .with_child((OptionValue(setting), text(&font, 14.0 * s, AMBER, "")));
                         });
                 }
                 panel
@@ -1394,11 +1476,31 @@ pub(crate) fn show_zombies_options(
                                     border: UiRect::all(px(1.0)),
                                     ..default()
                                 },
-                                BorderColor::all(HOT),
-                                BackgroundColor(Color::srgba(1.0, 0.66, 0.18, 0.14)),
+                                BorderColor::all(AMBER),
+                                BackgroundColor(AMBER_FAINT),
                             ))
-                            .with_child(text(&font, 18.0 * s, WHITE, "DONE"));
+                            .with_child(text(&font, 18.0 * s, AMBER, "DONE"));
                     });
+                panel.spawn((
+                    Node {
+                        position_type: PositionType::Absolute,
+                        left: px(0),
+                        top: px(0),
+                        width: percent(100),
+                        height: percent(100),
+                        ..default()
+                    },
+                    ImageNode {
+                        image: scanlines.clone(),
+                        image_mode: bevy::ui::widget::NodeImageMode::Tiled {
+                            tile_x: true,
+                            tile_y: true,
+                            stretch_value: 1.0,
+                        },
+                        ..default()
+                    },
+                    FocusPolicy::Pass,
+                ));
             });
         });
 }
@@ -1512,7 +1614,8 @@ pub(crate) fn zombies_options_pages(
     touch: Option<Res<crate::touch_controls::TouchGameplay>>,
     mut editing: ResMut<crate::touch_controls::TouchEditing>,
     tabs: Query<(&OptionTabButton, &Interaction), Changed<Interaction>>,
-    mut tab_looks: Query<(&OptionTabButton, &mut BorderColor)>,
+    mut tab_looks: Query<(&OptionTabButton, &mut BackgroundColor, &Children)>,
+    mut tab_labels: Query<&mut GameText, Without<OptionsEditLabel>>,
     edit: Query<&Interaction, (With<OptionsEdit>, Changed<Interaction>)>,
     mut edit_label: Query<&mut GameText, With<OptionsEditLabel>>,
     mut rows: Query<(&OptionRow, &mut Node)>,
@@ -1525,10 +1628,16 @@ pub(crate) fn zombies_options_pages(
             *tab = button.0;
         }
     }
-    for (button, mut border) in &mut tab_looks {
-        let want = BorderColor::all(if button.0 == *tab { HOT } else { Color::NONE });
-        if *border != want {
-            *border = want;
+    for (button, mut fill, children) in &mut tab_looks {
+        let selected = button.0 == *tab;
+        let want = if selected { AMBER } else { Color::NONE };
+        if fill.0 != want {
+            fill.0 = want;
+        }
+        for child in children.iter() {
+            if let Ok(mut label) = tab_labels.get_mut(child) {
+                label.set_color(if selected { TERM_PANEL } else { AMBER });
+            }
         }
     }
     for (row, mut node) in &mut rows {
@@ -1563,6 +1672,75 @@ pub(crate) struct ScriptedOptions<'w> {
     tab: ResMut<'w, OptionsTab>,
     editing: ResMut<'w, crate::touch_controls::TouchEditing>,
     settings: ResMut<'w, GameSettings>,
+}
+
+/// BO1's menu sounds: a pointer reaching an entry plays its "over" and a press its
+/// "click" (a setting's step or bar its slider), and the
+/// settings and co-op pages open and close with BO1's small-menu sounds.
+#[allow(clippy::type_complexity)]
+pub(crate) fn zombies_menu_sounds(
+    sounds: Option<ResMut<Messages<audio::UiSound>>>,
+    options: Res<ZombiesOptionsOpen>,
+    coop: Res<CoopOpen>,
+    mut was_open: Local<(bool, bool)>,
+    mut held: Local<std::collections::HashSet<Entity>>,
+    entries: Query<
+        (
+            Entity,
+            &Interaction,
+            Has<OptionStep>,
+            Has<OptionBar>,
+            Has<OptionsDone>,
+            Option<&CoopButton>,
+        ),
+        (
+            Changed<Interaction>,
+            Or<(
+                With<MenuAction>,
+                With<MapCard>,
+                With<OptionTabButton>,
+                With<OptionStep>,
+                With<OptionBar>,
+                With<OptionsDone>,
+                With<CoopButton>,
+            )>,
+        ),
+    >,
+) {
+    let Some(mut sounds) = sounds else {
+        return;
+    };
+    use audio::UiSoundKind as Kind;
+    let mut play = |kind: Kind| {
+        sounds.write(audio::UiSound(kind));
+    };
+    for (entity, interaction, step, bar, done, coop_button) in &entries {
+        match interaction {
+            Interaction::Pressed => {
+                held.insert(entity);
+                // DONE and BACK close their page, which plays the close.
+                if done || matches!(coop_button, Some(CoopButton::Back)) {
+                    continue;
+                }
+                play(if step || bar { Kind::Slider } else { Kind::Click });
+            }
+            // The release after a press is no new focus.
+            Interaction::Hovered => {
+                if !held.remove(&entity) {
+                    play(Kind::Over);
+                }
+            }
+            Interaction::None => {
+                held.remove(&entity);
+            }
+        }
+    }
+    let open = (options.0, coop.0);
+    if open != *was_open {
+        let opened = (open.0 && !was_open.0) || (open.1 && !was_open.1);
+        play(if opened { Kind::Open } else { Kind::Close });
+        *was_open = open;
+    }
 }
 
 /// The saved MENU MUSIC choice drives the track the BO1 main menu loops.
