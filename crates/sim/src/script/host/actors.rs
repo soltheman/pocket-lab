@@ -257,9 +257,9 @@ struct Traverse {
     to: [f32; 3],
     start_ms: i64,
     ms: i64,
-    /// Through its window (BO1 waits on the traverse notifies), not an unsticking hop.
+    /// Through its window (BO1 waits on the traverse notifies), not a traversal link.
     window: bool,
-    /// Over a ledge (a traversal link or a hop): up before across when climbing, across
+    /// Over a ledge (a traversal link): up before across when climbing, across
     /// before down when dropping, so it doesn't pass through the ledge's corner.
     ledge: bool,
     /// Carried by its clip's root motion (sampled over the clip), played facing this yaw
@@ -336,7 +336,7 @@ impl Traverse {
     }
 }
 
-/// How long a traversal (or hop) from `from` to `to` takes.
+/// How long a traversal from `from` to `to` takes.
 fn ledge_ms(from: [f32; 3], to: [f32; 3]) -> i64 {
     let rise = (to[2] - from[2]).abs();
     (500.0 + flat_distance(from, to) * 3.0 + rise * 4.0).clamp(500.0, 2500.0) as i64
@@ -375,10 +375,16 @@ pub(crate) struct Actor {
     lookahead_amount: f32,
     /// The look-ahead point last worked out, for which next node (kept `LOOKAHEAD_MS`).
     lookahead_point: Option<([f32; 3], [f32; 3])>,
-    /// Route nodes it got stuck heading straight for: never cut to them again.
+    /// Route nodes it got stuck heading straight for: no route starts at them again until
+    /// it reaches a node.
     blocked_cuts: Vec<[f32; 3]>,
+    /// The route node it is closing on round a corner, the nearest it has come to it and
+    /// since when (`NO_CLOSER_MS`).
+    closing: Option<([f32; 3], f32, i64)>,
     /// The height it spawned at: far below that it has fallen out of the map.
     home_z: f32,
+    /// Where it left the floor, while it falls (IW4L_ACTOR_DEBUG logs big drops).
+    airborne_from: Option<[f32; 3]>,
 }
 
 impl Actor {
@@ -391,12 +397,11 @@ impl Actor {
 /// How far above or below its goal an actor may be and still be at it.
 const GOAL_HEIGHT: f32 = 80.0;
 
-/// No headway for this long and the actor hops to where it steers, when that is in sight
-/// and near (a rail, a ledge, a step too tall for the walk).
+/// No headway for this long and the actor plans its route again, from a node it can walk
+/// onto.
 const STUCK_MS: i64 = 800;
 /// After it gets stuck it follows its route node by node (no look-ahead) this long.
 const STUCK_DIRECT_MS: i64 = 5000;
-const HOP_REACH: f32 = 260.0;
 /// Fallen this far below its spawn: out of the map, so it dies.
 const FELL_OUT: f32 = 1500.0;
 
@@ -456,20 +461,6 @@ fn floor_near(world: &mut World, object: u64, at: [f32; 3]) -> bool {
         ),
         crate::bullet_collision::TraceOutcome::Hit { .. }
     )
-}
-
-/// Nothing solid between two points at chest height, straight across or over the top
-/// (up from the lower one, across at the higher one's height, down: a ledge or a drop).
-fn in_sight(world: &mut World, object: u64, from: [f32; 3], to: [f32; 3]) -> bool {
-    let mut clear = |a: [f32; 3], b: [f32; 3]| clear_between(world, object, a, b);
-    let lift = |p: [f32; 3]| [p[0], p[1], p[2] + 40.0];
-    if clear(lift(from), lift(to)) {
-        return true;
-    }
-    let top = from[2].max(to[2]) + 40.0;
-    let over_from = [from[0], from[1], top];
-    let over_to = [to[0], to[1], top];
-    clear(lift(from), over_from) && clear(over_from, over_to) && clear(over_to, lift(to))
 }
 
 /// Plan again this often, or as soon as the goal moves this far.
@@ -548,6 +539,62 @@ fn route_starts(
     }
 }
 
+/// The nodes a route may start at for an actor at `at`, as `route_starts` (inside) or
+/// `graph_end` (on the way to its window) pick them, kept to those it can walk straight
+/// onto (`walk_onto`) and not one it just got stuck heading for (`blocked`). A node in
+/// sight past a door jamb or a stair's newel post is no start: heading for it the body
+/// catches on the corner. When none is walkable, the nodes in sight as before.
+fn walkable_starts(
+    world: &mut World,
+    object: u64,
+    nav: &crate::actor_nav::ActorNav,
+    at: [f32; 3],
+    inside: bool,
+    blocked: &[[f32; 3]],
+) -> Vec<(usize, f32)> {
+    let open = |node: usize| !blocked.contains(&nav.nodes[node]);
+    if inside {
+        let seen = route_starts(world, object, nav, at);
+        let walkable: Vec<(usize, f32)> = seen
+            .iter()
+            .copied()
+            .filter(|&(node, _)| open(node) && walk_onto(world, object, at, nav.nodes[node]))
+            .collect();
+        return if walkable.is_empty() { seen } else { walkable };
+    }
+    let near = nav.nearest_k(at, 6);
+    let mut fallback = None;
+    for node in near.iter().copied() {
+        let n = nav.nodes[node];
+        if !clear_between(
+            world,
+            object,
+            [at[0], at[1], at[2] + 40.0],
+            [n[0], n[1], n[2] + 40.0],
+        ) {
+            continue;
+        }
+        fallback.get_or_insert(node);
+        if open(node) && walk_onto(world, object, at, n) {
+            return vec![(node, 0.0)];
+        }
+    }
+    fallback
+        .or_else(|| near.first().copied())
+        .map(|node| vec![(node, 0.0)])
+        .unwrap_or_default()
+}
+
+/// Whether an actor at `at` could walk straight onto the floor under route node `node`.
+fn walk_onto(world: &mut World, object: u64, at: [f32; 3], node: [f32; 3]) -> bool {
+    if flat_distance(at, node) < 1.0 {
+        return true;
+    }
+    // Nodes sit about 32 over the floor (more over a clip ramp on stairs).
+    let floor = floor_below(world, object, node).unwrap_or(node[2] - 32.0);
+    body_clear(world, object, at, node, (floor - at[2]).clamp(-64.0, 64.0))
+}
+
 /// Where to steer this tick toward `target`: the next node of a walk-graph route when the
 /// map has one and both ends are on it, else straight at the target.
 fn steer_point(
@@ -563,19 +610,13 @@ fn steer_point(
     };
     // Near and in plain sight: straight at it. Near behind a wall (a window's attack spot
     // round the corner of its frame), still by the route, or it walks into the wall.
-    // In sight at the knee as well as the chest: a low wall between (the one along Kino's
-    // foyer window, outside) is clear at chest height, and walking straight at the spot
-    // over it kept zombies against it until BO1's failsafe killed them.
+    // In sight for its whole body (`body_clear`), not just lines through its middle: a low
+    // wall between (the one along Kino's foyer window, outside) is clear at chest height,
+    // and a wall's end by a spawn closet's way out clear of a line past it; walking
+    // straight at the spot kept zombies against them.
     let close = flat_distance(origin, target) < 96.0
         && (origin[2] - target[2]).abs() < 40.0
-        && [20.0, 40.0].into_iter().all(|height| {
-            clear_between(
-                world,
-                object,
-                [origin[0], origin[1], origin[2] + height],
-                [target[0], target[1], target[2] + height],
-            )
-        });
+        && body_clear(world, object, origin, target, target[2] - origin[2]);
     if close || nav.is_empty() {
         state.route.clear();
         state.route_traverse.clear();
@@ -592,13 +633,7 @@ fn steer_point(
                 .resource_mut::<Runtime>()
                 .object_field(object, "completed_emerging_into_playable_area"),
         );
-        let starts = if inside {
-            route_starts(world, object, &nav, origin)
-        } else {
-            graph_end(world, object, &nav, origin)
-                .map(|node| vec![(node, 0.0)])
-                .unwrap_or_default()
-        };
+        let starts = walkable_starts(world, object, &nav, origin, inside, &state.blocked_cuts);
         let goal = graph_end(world, object, &nav, target);
         // Around closed doors and debris (their `disconnectpaths`).
         let blocks = &world.resource::<Runtime>().nav_blocks;
@@ -647,45 +682,50 @@ fn steer_point(
                 state.route_traverse.get(1).copied().unwrap_or(false)
                     || flat_distance(origin, state.route[1])
                         >= flat_distance(state.route[0], state.route[1])
-                    || !clear_between(
-                        world,
-                        object,
-                        [origin[0], origin[1], origin[2] + 40.0],
-                        [
-                            state.route[1][0],
-                            state.route[1][1],
-                            state.route[1][2] + 40.0,
-                        ],
-                    )
+                    || !walk_onto(world, object, origin, state.route[1])
             } else {
                 let next = state.route[1];
-                !line_clear(world, object, origin, next)
+                !walk_onto(world, object, origin, next)
             };
         if state.route.len() > 1 && !keep_entry {
             state.route.remove(0);
             state.route_traverse.remove(0);
         }
     }
-    let outside = !truthy(
-        &world
-            .resource_mut::<Runtime>()
-            .object_field(object, "completed_emerging_into_playable_area"),
-    );
     while let Some(next) = state.route.first() {
         // Nodes sit about 32 above the floor, more over the clip ramp on a flight of
         // stairs (Kino's back stairwell: 62), so one up to the goal height counts.
         let rise = next[2] - origin[2];
         let near = flat_distance(origin, *next);
-        // Near enough, unless (on the way to its window) the way on is round a corner from
-        // here: then right up to it first, or it cuts the corner into the wall (Kino's
-        // foyer window).
+        // Near enough, unless the way on is round a corner from here: then right up to it
+        // first, or it cuts the corner into the wall (Kino's foyer window) or catches the
+        // newel post at the top of a flight. A traversal's start is reached as it is.
+        // Or as near as its body gets: a node closer to a rail or wall than its width (on
+        // the turn of a curved flight) can't be stood on, and it would slide round it.
         let reached = near < NODE_REACHED
-            && (near < NODE_REACHED_CORNER || !outside || {
-                let on = state.route.get(1).copied().unwrap_or(target);
-                body_clear(world, object, origin, on, 0.0)
-            });
+            && (near < NODE_REACHED_CORNER
+                || state.route_traverse.get(1).copied().unwrap_or(false)
+                || {
+                    let on = state.route.get(1).copied().unwrap_or(target);
+                    walk_onto(world, object, origin, on)
+                }
+                || match state.closing {
+                    Some((node, best, since)) if node == *next => {
+                        if near < best - 1.0 {
+                            state.closing = Some((node, near, now));
+                            false
+                        } else {
+                            now - since >= NO_CLOSER_MS
+                        }
+                    }
+                    _ => {
+                        state.closing = Some((*next, near, now));
+                        false
+                    }
+                });
         if reached && rise < GOAL_HEIGHT && rise > -48.0 {
             let begin = *next;
+            state.blocked_cuts.clear();
             state.route.remove(0);
             if !state.route_traverse.is_empty() {
                 state.route_traverse.remove(0);
@@ -853,43 +893,46 @@ const LOOKAHEAD_MS: i64 = 150;
 
 
 /// Whether an actor could walk straight from `origin` to `to` (rising `rise` on the way):
-/// clear at knee and chest across the width of its body, not just a line through its
-/// middle, since a line clear of a window frame's corner can still take its shoulder.
+/// its body swept along the way, above what its walk steps up (`STEP_HEIGHT`), clears what
+/// its walk collides with (monster clip included). A line through its middle, or one per
+/// shoulder, misses a door jamb or a stair's newel post its body still catches, more so on
+/// a slant, where the box is wider than its shoulders.
 fn body_clear(world: &mut World, object: u64, origin: [f32; 3], to: [f32; 3], rise: f32) -> bool {
-    let along = [to[0] - origin[0], to[1] - origin[1]];
-    let length = (along[0] * along[0] + along[1] * along[1])
-        .sqrt()
-        .max(0.001);
-    let side = [-along[1] / length * RADIUS, along[0] / length * RADIUS];
-    [20.0, 40.0].into_iter().all(|height| {
-        [-1.0, 0.0, 1.0].into_iter().all(|offset: f32| {
-            let (dx, dy) = (side[0] * offset, side[1] * offset);
-            clear_between(
-                world,
-                object,
-                [origin[0] + dx, origin[1] + dy, origin[2] + height],
-                [to[0] + dx, to[1] + dy, origin[2] + height + rise],
-            )
-        })
-    })
+    let mins = [-RADIUS, -RADIUS, STEP_HEIGHT + 1.0];
+    let maxs = [RADIUS, RADIUS, STEP_HEIGHT + 1.0 + 2.0 * RADIUS];
+    let end = [to[0], to[1], origin[2] + rise];
+    let (fraction, inside) = crate::step::actor_box_sweep(world, object, origin, end, mins, maxs);
+    if inside {
+        // Already touching something at that height (a low ceiling, a rail it leans on):
+        // by lines at knee and chest across its width instead.
+        let along = [to[0] - origin[0], to[1] - origin[1]];
+        let length = (along[0] * along[0] + along[1] * along[1])
+            .sqrt()
+            .max(0.001);
+        let side = [-along[1] / length * RADIUS, along[0] / length * RADIUS];
+        return [20.0, 40.0].into_iter().all(|height| {
+            [-1.0, 0.0, 1.0].into_iter().all(|offset: f32| {
+                let (dx, dy) = (side[0] * offset, side[1] * offset);
+                clear_between(
+                    world,
+                    object,
+                    [origin[0] + dx, origin[1] + dy, origin[2] + height],
+                    [to[0] + dx, to[1] + dy, origin[2] + height + rise],
+                )
+            })
+        });
+    }
+    fraction >= 1.0
 }
 
-/// Whether the way from `origin` to `to` is open at knee and chest height (a low wall
-/// shows at the knee only).
-fn line_clear(world: &mut World, object: u64, origin: [f32; 3], to: [f32; 3]) -> bool {
-    [20.0, 40.0].into_iter().all(|height| {
-        clear_between(
-            world,
-            object,
-            [origin[0], origin[1], origin[2] + height],
-            [to[0], to[1], origin[2] + height],
-        )
-    })
-}
+/// How high an actor's walk steps up (its slide's step).
+const STEP_HEIGHT: f32 = 18.0;
 
 /// How near a route node an actor has to come before leaving it for the next, when the
 /// way on from where it stands is round a corner.
 const NODE_REACHED_CORNER: f32 = 8.0;
+/// Within reach of a route node and no nearer to it for this long: as near as it gets.
+const NO_CLOSER_MS: i64 = 600;
 
 fn actor_id(world: &mut World, receiver: &Value) -> Result<u64, String> {
     let object = super::natives::engine::entity_id(world, receiver)?;
@@ -2502,7 +2545,19 @@ fn think(
         radius: RADIUS,
         velocity: [walk[0], walk[1], state.fall],
     };
-    let slid = crate::step::actor_slide(world, object, origin, &mut slide);
+    let mut slid = crate::step::actor_slide(world, object, origin, &mut slide);
+    let wanted = (walk[0] * walk[0] + walk[1] * walk[1]).sqrt() * dt;
+    // Its body caught square on a corner (a door jamb, the newel post at the top of a
+    // flight), where sliding along it goes nowhere: a step aside, toward where it steers,
+    // round the corner. A walk like any other, against the same walls and rails.
+    if wanted > 1.0
+        && flat_distance(origin, slid) < wanted * 0.5
+        && let Some(via) = steering
+        && let Some((aside, velocity)) = step_aside(world, object, origin, walk, state.fall, via)
+    {
+        slid = aside;
+        slide.velocity = velocity;
+    }
     state.fall = slide.velocity[2];
     let moved = push_actors(world, object, origin, slid);
     if moved[2] < state.home_z - FELL_OUT {
@@ -2519,9 +2574,7 @@ fn think(
         kill(world, object, &[], Value::Undefined);
         return;
     }
-    // No headway on a walk: hop to where it steers if that is near and in sight (a rail,
-    // a ledge, a step too tall), else plan the route again.
-    let wanted = (walk[0] * walk[0] + walk[1] * walk[1]).sqrt() * dt;
+    // No headway on a walk even aside: plan the route again from a node it can walk onto.
     if wanted > 1.0 && flat_distance(origin, slid) < wanted * 0.25 {
         let since = *state.stuck_since.get_or_insert(now);
         if now - since >= STUCK_MS {
@@ -2619,35 +2672,40 @@ fn think(
             state.route.clear();
             state.replan_ms = 0;
             // Node by node for a while: a look-ahead past a step it can't walk up would
-            // only steer it back into the step (and too far off to hop to).
+            // only steer it back into the step.
             state.lookahead_ms = now + STUCK_DIRECT_MS;
             // Its next node, with the least look-ahead (as BO1 trims a blocked one).
             state.lookahead_point = None;
             state.lookahead_amount = LOOKAHEAD_AREA_MIN;
+            // The new route starts at a node it can walk onto, not the one it was heading
+            // for. It stays on the floor: BO1's AI leave it only at traversals.
             if let Some(via) = steering {
                 if state.blocked_cuts.len() >= 8 {
                     state.blocked_cuts.remove(0);
                 }
                 state.blocked_cuts.push(via);
             }
-            if let Some(via) = steering.filter(|via| {
-                flat_distance(moved, *via) < HOP_REACH && (via[2] - moved[2]).abs() < 300.0
-            }) && in_sight(world, object, moved, via)
-            {
-                let ms = ((flat_distance(moved, via) / speed) * 1000.0) as i64;
-                state.traverse = Some(Traverse {
-                    from: moved,
-                    to: via,
-                    start_ms: now,
-                    ms: ms.clamp(400, 1500),
-                    window: false,
-                    ledge: true,
-                    motion: None,
-                });
-            }
         }
     } else {
         state.stuck_since = None;
+    }
+    // IW4L_ACTOR_DEBUG: a walk that left the floor and came down far below (off a ledge
+    // or over a rail; BO1's AI only leave the floor at traversals).
+    if std::env::var_os("IW4L_ACTOR_DEBUG").is_some() {
+        if state.fall < -150.0 {
+            state.airborne_from.get_or_insert(origin);
+        } else if state.fall > -1.0
+            && let Some(from) = state.airborne_from.take()
+            && from[2] - moved[2] > 40.0
+        {
+            diag::info!(
+                Sim,
+                "actor debug: {object} dropped {:.0} from {:?} to {:?}",
+                from[2] - moved[2],
+                from.map(|v| v as i32),
+                moved.map(|v| v as i32)
+            );
+        }
     }
     // IW4L_ACTOR_TRACE=1: every actor's position ten times a second (path shape).
     if std::env::var_os("IW4L_ACTOR_TRACE").is_some() && now % 100 < i64::from(crate::MATCH_TICK_MS)
@@ -2771,6 +2829,45 @@ fn think(
     for client in hits {
         super::players::actor_hit_player(world, client, object, damage, moved);
     }
+}
+
+/// The walk `walk` turned aside, nearest the straight way first and at most about a right
+/// angle off it, when that gets it on: it moves at least half its step, not away from
+/// `via`, and keeps a floor under it. Where it slides to and the slide's velocity after.
+fn step_aside(
+    world: &mut World,
+    object: u64,
+    origin: [f32; 3],
+    walk: [f32; 2],
+    fall: f32,
+    via: [f32; 3],
+) -> Option<([f32; 3], [f32; 3])> {
+    let dt = crate::MATCH_TICK_MS as f32 / 1000.0;
+    let step = (walk[0] * walk[0] + walk[1] * walk[1]).sqrt() * dt;
+    let toward = [via[0] - origin[0], via[1] - origin[1]];
+    for angle in [0.5f32, -0.5, 1.0, -1.0, 1.5, -1.5] {
+        let (sin, cos) = angle.sin_cos();
+        let mut slide = super::mechanics::Slide {
+            center: [0.0, 0.0, RADIUS + 1.0],
+            radius: RADIUS,
+            velocity: [
+                walk[0] * cos - walk[1] * sin,
+                walk[0] * sin + walk[1] * cos,
+                fall,
+            ],
+        };
+        let at = crate::step::actor_slide(world, object, origin, &mut slide);
+        let went = [at[0] - origin[0], at[1] - origin[1]];
+        let away = went[0] * toward[0] + went[1] * toward[1] < 0.0;
+        if away || flat_distance(origin, at) < step * 0.5 {
+            continue;
+        }
+        if floor_below(world, object, at).is_none_or(|floor| at[2] - floor > 24.0) {
+            continue;
+        }
+        return Some((at, slide.velocity));
+    }
+    None
 }
 
 /// Starts a swing at `target`: one of BO1's swings for its gait (a walker's or runner's

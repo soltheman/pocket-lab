@@ -1991,7 +1991,26 @@ struct PlayerBodyClip {
     origin: [f32; 3],
 }
 
+/// The bodies a player's movement collides with: the living players and the AI.
 fn alive_body_clips(world: &FrameWorld) -> Vec<PlayerBodyClip> {
+    let mut bodies = alive_player_body_clips(world);
+    // BO1's AI are solid to players: a lunge stops at a zombie's edge and nobody walks
+    // through one. Numbered past any client so they never match the mover.
+    bodies.extend(
+        world
+            .actor_bodies()
+            .iter()
+            .enumerate()
+            .map(|(index, at)| PlayerBodyClip {
+                entnum: ACTOR_BODY_ENTNUM_BASE + index as u16,
+                origin: [at[0], at[1], at[2]],
+            }),
+    );
+    bodies
+}
+
+/// The living players' bodies alone.
+fn alive_player_body_clips(world: &FrameWorld) -> Vec<PlayerBodyClip> {
     let mut bodies: Vec<_> = world
         .client_ids_sorted()
         .into_iter()
@@ -2014,18 +2033,6 @@ fn alive_body_clips(world: &FrameWorld) -> Vec<PlayerBodyClip> {
             .map(|body| PlayerBodyClip {
                 entnum: body.client.0 as u16,
                 origin: body.origin,
-            }),
-    );
-    // BO1's AI are solid to players: a lunge stops at a zombie's edge and nobody walks
-    // through one. Numbered past any client so they never match the mover.
-    bodies.extend(
-        world
-            .actor_bodies()
-            .iter()
-            .enumerate()
-            .map(|(index, at)| PlayerBodyClip {
-                entnum: ACTOR_BODY_ENTNUM_BASE + index as u16,
-                origin: [at[0], at[1], at[2]],
             }),
     );
     bodies
@@ -2243,6 +2250,38 @@ pub(crate) fn actor_box_solid(
     )
 }
 
+/// How far (0..1) a box `mins`..`maxs` swept from `from` to `to` gets through what an
+/// actor's walk collides with, players' bodies aside (one in the way is no wall: the walk
+/// stops at it, or swings), and whether it starts inside something.
+pub(crate) fn actor_box_sweep(
+    world: &mut World,
+    object: u64,
+    from: [f32; 3],
+    to: [f32; 3],
+    mins: [f32; 3],
+    maxs: [f32; 3],
+) -> (f32, bool) {
+    use movement_iw4::CollisionBackend;
+    with_slide_collision(
+        world,
+        object,
+        (crate::bullet_collision::MASK_PLAYER_SOLID
+            & !CONTENTS_PLAYERCLIP
+            & !crate::world::CONTENTS_BODY)
+            | CONTENTS_MONSTERCLIP,
+        |backend, mask| {
+            let trace = backend.trace(movement_iw4::GroundTraceInput {
+                start: from,
+                end: to,
+                mins,
+                maxs,
+                tracemask: mask,
+            });
+            (trace.fraction, trace.startsolid != 0 || trace.allsolid != 0)
+        },
+    )
+}
+
 /// The collision a slide moves through for `object` (the world, entity brushes and
 /// bodies, less what it is linked to) and the mask it moves with.
 fn with_slide_collision<R>(
@@ -2315,7 +2354,9 @@ fn with_slide_collision<R>(
             .script_model()
             .is_some_and(|model| excluded_models.contains(&model))
     });
-    let mut bodies = alive_body_clips(&frame);
+    // Players' bodies only: the AI's own bodies (the mover's among them, which it would
+    // start inside and never walk out of) are BO1's actor push, `push_actors`.
+    let mut bodies = alive_player_body_clips(&frame);
     bodies.retain(|body| !excluded_clients.contains(&body.entnum));
     let glass_damage = frame.world_objects().glass_damage_pairs();
     let backend = ClipBackend {
