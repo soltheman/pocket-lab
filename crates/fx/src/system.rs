@@ -644,6 +644,24 @@ impl FxSystemHost {
         }
     }
 
+    /// Stops every effect bolted to `dobj` (its entity is gone).
+    pub fn stop_all_bolted_to(&mut self, dobj: u32) {
+        let slots: Vec<_> = self
+            .effects
+            .iter()
+            .enumerate()
+            .filter_map(|(slot, effect)| {
+                (effect.ring_resident
+                    && !fx_iw4::bolt_handle_is_none(effect.bolt_packed)
+                    && fx_iw4::bolt_dobj(effect.bolt_packed) == dobj)
+                    .then_some(slot)
+            })
+            .collect();
+        for slot in slots {
+            crate::spawn::stop_effect_non_recursive(self, slot);
+        }
+    }
+
     pub fn stop_owned(&mut self, handle: u16) {
         let Some(slot) = self.slot_index_for_handle(handle) else {
             return;

@@ -163,6 +163,7 @@ fn submit_presented_audio(
     map: Option<Res<crate::ambient::MapSources>>,
     menu: Option<Res<crate::frontend::MenuSources>>,
     menu_music: Option<Res<crate::menu_music::MenuMusic>>,
+    loading_voice: Option<Res<crate::loading_voice::LoadingVoice>>,
     shellshock: Option<Res<crate::shellshock::ShellshockSources>>,
     breath: Option<Res<crate::breath::BreathSources>>,
 ) {
@@ -189,6 +190,9 @@ fn submit_presented_audio(
     }
     if let Some(menu_music) = menu_music {
         desired.extend(menu_music.source.iter().cloned());
+    }
+    if let Some(loading_voice) = loading_voice {
+        desired.extend(loading_voice.source.iter().cloned());
     }
     if let Some(shellshock) = shellshock {
         desired.extend(shellshock.source.iter().cloned());

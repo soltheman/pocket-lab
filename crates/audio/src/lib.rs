@@ -9,6 +9,7 @@ mod emit;
 mod entity_events;
 mod frontend;
 mod media_queue;
+mod loading_voice;
 mod menu_music;
 mod messages;
 mod pcm;

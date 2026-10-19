@@ -37,6 +37,20 @@ foreach ($z in $zones) { Stage (Join-Path $Bo1 "zone\$z") (Join-Path $game "zone
 Get-ChildItem (Join-Path $Bo1 'zone\English') -Filter *.ff | ForEach-Object { Stage $_.FullName (Join-Path $game "zone\English\$($_.Name)") }
 # textures and sounds
 Get-ChildItem (Join-Path $Bo1 'main') -Filter *.iwd | ForEach-Object { Stage $_.FullName (Join-Path $game "main\$($_.Name)") }
+# The loading screen's voice (Richtofen on Kino's): the audio of BO1's loading video,
+# converted to a WAV the app plays while the map loads. Needs ffmpeg on PATH.
+$video = Join-Path $game 'main\video'
+New-Item -ItemType Directory -Force -Path $video | Out-Null
+foreach ($map in 'zombie_theater') {
+    $bik = Join-Path $Bo1 "main\video\${map}_load.bik"
+    $wav = Join-Path $video "${map}_load.wav"
+    if (-not (Test-Path $bik)) { continue }
+    if (Get-Command ffmpeg -ErrorAction SilentlyContinue) {
+        ffmpeg -hide_banner -loglevel error -y -i $bik -vn -c:a pcm_s16le $wav
+    } else {
+        "ffmpeg not found: skipping the loading voice ($map)"
+    }
+}
 foreach ($f in 'localization.txt') { if (Test-Path (Join-Path $Bo1 $f)) { Stage (Join-Path $Bo1 $f) (Join-Path $game $f) } }
 
 $bytes = (Get-ChildItem $game -Recurse -File | Measure-Object Length -Sum).Sum

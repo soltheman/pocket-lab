@@ -158,6 +158,7 @@ pub(crate) fn register_combat_fx_systems(app: &mut App) {
         .add_observer(explosion)
         .add_observer(stop_killcam_explosion_fx)
         .init_resource::<PendingTagFx>()
+        .init_resource::<BoltedTagFx>()
         .init_resource::<UnboltedTagFx>()
         .add_observer(play_fx)
         .add_observer(play_fx_bullet_hit)
@@ -2905,8 +2906,15 @@ const TAG_FX_POSE_WAIT: u8 = 8;
 
 /// Tag effects that had to play where the entity stood (no pose for its bone came): they
 /// stop with it, as a bolted one would. A power-up's glow kept glowing after the pick-up.
+/// Each remembers the entity it was played for, as its number is soon reused.
 #[derive(Resource, Default)]
-struct UnboltedTagFx(Vec<(u16, u16, String, u16)>);
+struct UnboltedTagFx(Vec<(u16, u16, String, u16, Option<Entity>)>);
+
+/// The entity each bolted tag effect was played on, by number: when that entity is
+/// deleted (a power-up picked up) or its number goes to a new one, its effects stop
+/// instead of lingering where it last stood.
+#[derive(Resource, Default)]
+struct BoltedTagFx(std::collections::HashMap<u16, Entity>);
 
 /// `fx_play <effect> [distance]` (tests): plays an effect in front of the camera, facing
 /// it as a hit's effect faces the shooter.
@@ -2949,13 +2957,24 @@ fn drain_tag_fx(
     poses: Option<Res<crate::adapters::anim::dobj_pose::HostDObjPoseFrame>>,
     mut demand: ResMut<render_anim::ScriptModelBoltDemand>,
     fx_world: FxSceneAccess,
-    (slots, mut unbolted): (Res<CEntitySlots>, ResMut<UnboltedTagFx>),
+    (slots, mut unbolted, mut bolted): (
+        Res<CEntitySlots>,
+        ResMut<UnboltedTagFx>,
+        ResMut<BoltedTagFx>,
+    ),
 ) {
-    // Unbolted tag effects end with their entity.
-    unbolted.0.retain(|&(entnum, _, _, handle)| {
-        let alive = slots.entity_for_number(entnum).is_some();
+    // Tag effects end with their entity.
+    unbolted.0.retain(|&(entnum, _, _, handle, owner)| {
+        let alive = slots.entity_for_number(entnum).is_some_and(|now| owner.is_none_or(|owner| owner == now));
         if !alive {
             host.0.stop_handle(handle);
+        }
+        alive
+    });
+    bolted.0.retain(|&entnum, owner| {
+        let alive = slots.entity_for_number(entnum) == Some(*owner);
+        if !alive {
+            host.0.stop_all_bolted_to(u32::from(entnum));
         }
         alive
     });
@@ -2977,7 +2996,7 @@ fn drain_tag_fx(
                     || queued.entnum != request.entnum
                     || queued.bone != request.bone
             });
-            unbolted.0.retain(|(entnum, bone, def, handle)| {
+            unbolted.0.retain(|(entnum, bone, def, handle, _)| {
                 let same = *entnum == request.entnum
                     && *bone == request.bone
                     && *def == request.def_name;
@@ -3009,6 +3028,9 @@ fn drain_tag_fx(
             });
         match resolved {
             Some(target) => {
+                if let Some(owner) = slots.entity_for_number(request.entnum) {
+                    bolted.0.insert(request.entnum, owner);
+                }
                 render_fx::present::play_named_bolted_in_world(
                     &mut host.0,
                     &catalog.0,
@@ -3039,6 +3061,7 @@ fn drain_tag_fx(
                         request.bone,
                         request.def_name.clone(),
                         handle,
+                        slots.entity_for_number(request.entnum),
                     ));
                 }
             }

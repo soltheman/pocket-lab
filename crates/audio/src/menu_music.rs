@@ -265,15 +265,15 @@ fn seconds(pcm: &PcmBuffer) -> f64 {
 }
 
 #[derive(Debug, PartialEq, Eq)]
-struct WavPcm16 {
-    channels: u16,
-    rate: u32,
-    data: Range<usize>,
+pub(crate) struct WavPcm16 {
+    pub(crate) channels: u16,
+    pub(crate) rate: u32,
+    pub(crate) data: Range<usize>,
 }
 
 /// The fmt and data chunks of a mono or stereo PCM16 WAV, or `None` for any
 /// other file, which is then left to the general decoders.
-fn parse_pcm16_wav(bytes: &[u8]) -> Option<WavPcm16> {
+pub(crate) fn parse_pcm16_wav(bytes: &[u8]) -> Option<WavPcm16> {
     if bytes.get(..4)? != b"RIFF" || bytes.get(8..12)? != b"WAVE" {
         return None;
     }
@@ -315,10 +315,16 @@ fn parse_pcm16_wav(bytes: &[u8]) -> Option<WavPcm16> {
 /// the track's resident service for `Loaded(0)`. The loaded entry carries no
 /// bytes — the service already holds the PCM, and nothing decodes this bank.
 fn menu_music_bank(channels: u16, rate: u32) -> SoundCatalog {
+    one_track_bank(MENU_MUSIC_ALIAS, channels, rate, true)
+}
+
+/// A one-alias, 2D, unity-gain T5 bank naming a resident track (looping or
+/// played once).
+pub(crate) fn one_track_bank(alias: &str, channels: u16, rate: u32, looping: bool) -> SoundCatalog {
     let mut bank = SoundCatalog::default();
     bank.set_capture_game(ZoneGame::T5);
     let mut loaded = LoadedSoundPcm::captured(
-        MENU_MUSIC_ALIAS,
+        alias,
         asset_audio::MSS_PCM,
         rate,
         i32::from(channels),
@@ -328,19 +334,19 @@ fn menu_music_bank(channels: u16, rate: u32) -> SoundCatalog {
     loaded.game = ZoneGame::T5;
     bank.ingest_loaded(loaded);
     bank.ingest_sound(CapturedSound {
-        name: MENU_MUSIC_ALIAS.to_owned(),
+        name: alias.to_owned(),
         aliases: vec![CapturedAlias {
-            alias_name: MENU_MUSIC_ALIAS.to_owned(),
-            loaded_name: Some(MENU_MUSIC_ALIAS.to_owned()),
+            alias_name: alias.to_owned(),
+            loaded_name: Some(alias.to_owned()),
             file_type: Some(1),
             vol_min: 1.0,
             vol_max: 1.0,
             pitch_min: 1.0,
             pitch_max: 1.0,
             probability: 1.0,
-            // Looping, 2D (no 3D bit), mixer group 0: unity gain, no falloff.
-            flags: Some(asset_iw4::SND_ALIAS_FLAG_LOOPING),
-            looping: Some(true),
+            // 2D (no 3D bit), mixer group 0: unity gain, no falloff.
+            flags: Some(if looping { asset_iw4::SND_ALIAS_FLAG_LOOPING } else { 0 }),
+            looping: Some(looping),
             ..Default::default()
         }],
         ..Default::default()

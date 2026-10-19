@@ -550,6 +550,10 @@ pub(crate) fn fx_on_tag(
     }
     let (origin, direction) = pose.unwrap_or(fallback);
     let index = frame.effect_name_index(&name);
+    // No such tag (or no pose for the model yet): the entity's root bone, so the effect
+    // still goes with the entity and stops when it is deleted. Played as a free effect at
+    // its origin it outlived the entity: a power-up's glow stayed after the pick-up.
+    let bone = bone.or(number.map(|_| 0));
     match (number, bone.and_then(|bone| i32::try_from(bone).ok())) {
         (Some(number), Some(bone)) => {
             let tick = world.resource::<crate::step::StepRequest>().tick;

@@ -11,6 +11,7 @@ impl Plugin for AudioPlugin {
         crate::match_set::register(app);
         crate::frontend::register_frontend_audio(app);
         crate::menu_music::register(app);
+        crate::loading_voice::register(app);
         crate::ui_sound::register(app);
         crate::entity_events::register_entity_event_audio(app);
         crate::rumble::register(app);

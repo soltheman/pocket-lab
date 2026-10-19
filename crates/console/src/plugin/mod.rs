@@ -155,7 +155,11 @@ impl Plugin for ConsolePlugin {
                 (
                     crate::touch_controls::update_touch_overlay,
                     crate::touch_controls::load_touch_icons,
-                    crate::zombies_hud::update_zombies_hud,
+                    (
+                        crate::zombies_hud::update_zombies_hud,
+                        crate::zombies_hud::update_score_popups,
+                    )
+                        .chain(),
                     crate::zombies_hud::update_zombies_hint,
                     crate::zombies_hud::place_zombies_hud,
                     crate::zombies_hud::stain_zombies_score,
@@ -180,6 +184,7 @@ impl Plugin for ConsolePlugin {
                     crate::touch_controls::handle_touch_commands.after(ConsoleDispatchSet),
                 ),
             )
+            .init_resource::<crate::zombies_hud::ScoreChanges>()
             .init_resource::<frame::ActivePad>()
             .init_resource::<frame::InputDevices>()
             .add_systems(

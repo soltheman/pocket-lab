@@ -58,6 +58,31 @@ const AMMO_LOW: Color = Color::srgb(0.85, 0.12, 0.08);
 #[derive(Component)]
 pub(crate) struct ZombiesGameOver;
 
+/// BO1's points pop-ups (`score_highlight` in `_zombiemode_score`): each change of the
+/// points shows as "+N" in yellow or "-N" in dark red beside them, drifting 20 to 60 units
+/// left and up to 15 up or down over half a second, fading over the second half.
+#[derive(Component)]
+pub(crate) struct ScorePopup {
+    gain: bool,
+    age: f32,
+    /// Where it starts: its right edge at the points' left, level with them (logical
+    /// pixels from the HUD's right and top).
+    right: f32,
+    top: f32,
+    drift_x: f32,
+    drift_y: f32,
+}
+
+/// Point changes seen this frame, for the pop-ups.
+#[derive(Resource, Default)]
+pub(crate) struct ScoreChanges(Vec<i64>);
+
+const POPUP_SECONDS: f32 = 0.5;
+/// BO1's `fontScale` 8 against the points' size.
+const POPUP_PX: f32 = 18.0;
+const POPUP_GAIN: Color = Color::srgb(0.9, 0.9, 0.0);
+const POPUP_LOSS: Color = Color::srgb(0.21, 0.0, 0.0);
+
 #[derive(Component)]
 pub(crate) struct ZombiesSurvived;
 
@@ -234,6 +259,8 @@ pub(crate) fn update_zombies_hud(
     mut over: Query<&mut Visibility, (With<ZombiesGameOver>, Without<ZombiesHudRoot>)>,
     mut points: Query<&mut GameText, (With<ZombiesPoints>, Without<ZombiesSurvived>)>,
     mut survived: Query<&mut GameText, (With<ZombiesSurvived>, Without<ZombiesPoints>)>,
+    mut changes: ResMut<ScoreChanges>,
+    mut last: Local<Option<i64>>,
 ) {
     let Ok(mut visibility) = root.single_mut() else {
         return;
@@ -255,8 +282,17 @@ pub(crate) fn update_zombies_hud(
     let in_game = screen.is_some_and(|s| *s == frame::AppScreen::InGame);
     let Some((Some(score), game_over)) = dvars.filter(|_| in_game) else {
         visibility.set_if_neq(Visibility::Hidden);
+        *last = None;
         return;
     };
+    if let Ok(now) = score.trim().parse::<i64>() {
+        if let Some(before) = *last
+            && now != before
+        {
+            changes.0.push(now - before);
+        }
+        *last = Some(now);
+    }
     visibility.set_if_neq(Visibility::Inherited);
     let rounds = game_over.filter(|rounds| !rounds.is_empty());
     if let Ok(mut shown) = over.single_mut() {
@@ -512,5 +548,87 @@ pub(crate) fn update_hurt_overlay(
                     ..ImageNode::new(handle).with_color(color)
                 });
         }
+    }
+}
+
+/// Spawns a pop-up for each change of the points and moves, fades and removes them.
+pub(crate) fn update_score_popups(
+    mut commands: Commands,
+    time: Res<Time>,
+    mut changes: ResMut<ScoreChanges>,
+    window: Query<&Window, With<bevy::window::PrimaryWindow>>,
+    root: Query<(Entity, &ComputedNode), With<ZombiesHudRoot>>,
+    points: Query<(&ComputedNode, &bevy::ui::UiGlobalTransform), With<ZombiesPoints>>,
+    mut popups: Query<(Entity, &mut ScorePopup, &mut Node, &mut GameText)>,
+    mut seed: Local<u32>,
+) {
+    // BO1's RandomInt, from a small xorshift.
+    let mut random = || {
+        if *seed == 0 {
+            *seed = 0x9e37_79b9 ^ (time.elapsed().as_nanos() as u32 | 1);
+        }
+        *seed ^= *seed << 13;
+        *seed ^= *seed >> 17;
+        *seed ^= *seed << 5;
+        (*seed >> 8) as f32 / (1u32 << 24) as f32
+    };
+    let height = window.single().map_or(REFERENCE_HEIGHT, |w| w.height().max(1.0));
+    // BO1's HUD is laid out on a 640x480 screen.
+    let unit = height / 480.0;
+    let scale = (height / REFERENCE_HEIGHT).clamp(0.8, 2.5);
+    let anchor = root.single().ok().zip(points.single().ok()).map(
+        |((root, root_node), (node, transform))| {
+            let to_logical = node.inverse_scale_factor();
+            let left = transform.translation.x - node.size().x * 0.5;
+            let right = (root_node.size().x - left) * to_logical + 4.0 * scale;
+            let top = transform.translation.y * to_logical - POPUP_PX * scale * 0.6;
+            (root, right, top)
+        },
+    );
+    if let Some((root, right, top)) = anchor {
+        for value in changes.0.drain(..) {
+            let (text, color) = if value > 0 {
+                (format!("+{value}"), POPUP_GAIN)
+            } else {
+                (value.to_string(), POPUP_LOSS)
+            };
+            let popup = commands
+                .spawn((
+                    ScorePopup {
+                        gain: value > 0,
+                        age: 0.0,
+                        drift_x: 20.0 + random() * 40.0,
+                        drift_y: -15.0 + random() * 30.0,
+                        right,
+                        top,
+                    },
+                    Node {
+                        position_type: PositionType::Absolute,
+                        right: px(right),
+                        top: px(top),
+                        ..default()
+                    },
+                    GameText::new(GameFont::Big, (POPUP_PX * scale).round(), color, text),
+                ))
+                .id();
+            commands.entity(root).add_child(popup);
+        }
+    } else {
+        changes.0.clear();
+    }
+    let step = time.delta_secs();
+    for (entity, mut popup, mut node, mut text) in &mut popups {
+        popup.age += step;
+        let t = (popup.age / POPUP_SECONDS).min(1.0);
+        if popup.age >= POPUP_SECONDS {
+            commands.entity(entity).despawn();
+            continue;
+        }
+        // Left of the points by its own drift; BO1's y grows downwards as the screen's.
+        node.right = px(popup.right + popup.drift_x * t * unit);
+        node.top = px(popup.top - popup.drift_y * t * unit);
+        let fade = if t < 0.5 { 1.0 } else { 1.0 - (t - 0.5) * 2.0 };
+        let base = if popup.gain { POPUP_GAIN } else { POPUP_LOSS };
+        text.set_color(base.with_alpha(fade));
     }
 }

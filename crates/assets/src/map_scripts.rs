@@ -380,6 +380,7 @@ face_power_switch()
     away = vectornormalize((p.origin[0] - target[0], p.origin[1] - target[1], 0));
     p setorigin((target[0], target[1], target[2] - 40) + (away[0] * 48, away[1] * 48, 0));
     p setplayerangles(vectortoangles(target - (p.origin + (0, 0, 60))));
+    logprint("power debug: switch at " + target + ", player at " + p.origin);
 }
 
 // Debug (IW4L_ZM_WATCH=box): the first player gets 10000 points and stands at the mystery
@@ -612,6 +613,11 @@ drop_powerup()
     wait 4;
     p setorigin(spot);
     logprint("powerup debug: grabbed");
+    // Back off and look at the spot: nothing of the drop should be left there.
+    wait 1;
+    p setorigin(spot - (forward[0] * 150, forward[1] * 150, 0));
+    p setplayerangles((20, p.angles[1], 0));
+    logprint("powerup debug: looking back");
 }
 
 // Debug (IW4L_ZM_WATCH=dogs): four hellhounds through Black Ops' own special_dog_spawn
