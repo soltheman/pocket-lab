@@ -9,6 +9,7 @@ mod emit;
 mod entity_events;
 mod frontend;
 mod media_queue;
+mod menu_music;
 mod messages;
 mod pcm;
 mod pcm_budget;
@@ -28,6 +29,7 @@ pub use ambient::{MapAmbientBooted, SoundIwd};
 pub use clip_store::{ClipPath, ClipPathCost, ClipPrepCost, ClipStore, clip_prep_cost};
 pub use emit::{BobCycleTracker, emit_footstep_on_bob_wrap, emit_weapon_fire};
 pub use frontend::FrontendAudio;
+pub use menu_music::{MENU_TRACKS, MenuMusicChoice};
 pub use match_set::{AudioReady, AudioSilent};
 pub use messages::{
     AliasCommand, BoundWeaponSound, Footstep, LandSound, PlayAlias, SND_ENT_LOCAL,

@@ -162,6 +162,7 @@ fn submit_presented_audio(
     destructibles: Option<Res<crate::destructible_loops::DestructibleSources>>,
     map: Option<Res<crate::ambient::MapSources>>,
     menu: Option<Res<crate::frontend::MenuSources>>,
+    menu_music: Option<Res<crate::menu_music::MenuMusic>>,
     shellshock: Option<Res<crate::shellshock::ShellshockSources>>,
     breath: Option<Res<crate::breath::BreathSources>>,
 ) {
@@ -185,6 +186,9 @@ fn submit_presented_audio(
     }
     if let Some(menu) = menu {
         desired.extend(menu.source.iter().cloned());
+    }
+    if let Some(menu_music) = menu_music {
+        desired.extend(menu_music.source.iter().cloned());
     }
     if let Some(shellshock) = shellshock {
         desired.extend(shellshock.source.iter().cloned());

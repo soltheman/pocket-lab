@@ -480,6 +480,31 @@ impl MediaService {
         }))
     }
 
+    /// A service whose one clip is already decoded: no prep workers, no queue.
+    /// `ready` answers `key` from the first call; any other key is refused as a
+    /// closed queue. For media that lives outside every zone — the BO1 menu
+    /// music read back from its cache file — where starting the usual 2–4
+    /// workers would park threads for the whole process to serve nothing.
+    pub(crate) fn resident(bank: Arc<SoundCatalog>, key: ClipKey, pcm: PcmBuffer) -> Self {
+        let (retirement, _) = channel::<ClipWorkers>();
+        let queue = Arc::new(MediaJobQueue::new());
+        queue.close();
+        let mut requests = MediaRequests::default();
+        requests.queued.insert(key.clone());
+        let used = USE_TICK.fetch_add(1, Ordering::Relaxed);
+        let outcomes = Outcomes::from([(key, (Ok(pcm), used))]);
+        Self(Arc::new(MediaServiceInner {
+            bank,
+            queue,
+            requests: Arc::new(Mutex::new(requests)),
+            outcomes: Arc::new(Mutex::new(outcomes)),
+            workers: None,
+            retirement,
+            clip_cache: None,
+            common_profile_id: 0,
+        }))
+    }
+
     pub(crate) fn same_owner(&self, other: &Self) -> bool {
         Arc::ptr_eq(&self.0, &other.0)
     }
@@ -932,10 +957,20 @@ fn prepare_streamed(
             return Err(ClipError::Read);
         }
     };
+    decode_streamed_bytes(ns, &bytes)
+}
+
+/// A streamed file's bytes as PCM: T5's own stream container when it is not
+/// RIFF, otherwise whatever RIFF/symphonia reads. Shared by the IWD clip path
+/// and the BO1 menu music, which reads its tracks out of the same archives.
+pub(crate) fn decode_streamed_bytes(
+    ns: AssetNamespace,
+    bytes: &[u8],
+) -> Result<PcmBuffer, ClipError> {
     let pcm = if ns == AssetNamespace::T5 && !bytes.starts_with(b"RIFF") {
-        crate::pcm::t5_stream::decode(&bytes)
+        crate::pcm::t5_stream::decode(bytes)
     } else {
-        decode_audio_bytes(&bytes)
+        decode_audio_bytes(bytes)
     };
     pcm.map_err(ClipError::from)
 }

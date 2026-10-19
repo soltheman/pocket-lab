@@ -235,6 +235,18 @@ impl AudioRuntime {
         &self,
         request: crate::sources::SourceCueRequest,
     ) -> Option<Arc<SourceCue>> {
+        let media = self.media_for_bank(&request.bank)?;
+        self.source_cue_with_media(request, media)
+    }
+
+    /// A source cue served by `media` instead of the installed clip store. The
+    /// store belongs to whichever bank the session holds; a source whose clip
+    /// lives in no zone (the cached BO1 menu music) brings its own service.
+    pub(crate) fn source_cue_with_media(
+        &self,
+        request: crate::sources::SourceCueRequest,
+        media: MediaService,
+    ) -> Option<Arc<SourceCue>> {
         let crate::sources::SourceCueRequest {
             bank,
             namespace,
@@ -247,7 +259,6 @@ impl AudioRuntime {
         let lease = self
             .cue_cancellation
             .lease(namespace, &alias, emitter, scope, epoch)?;
-        let media = self.media_for_bank(&bank)?;
         let mix = self
             .cue_mix
             .lock()

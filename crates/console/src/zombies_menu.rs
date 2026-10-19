@@ -118,6 +118,7 @@ pub(crate) enum Setting {
     Volume,
     InvertLook,
     AimAssist,
+    MenuMusic,
     Layout,
     Style,
     AimMode,
@@ -226,7 +227,7 @@ impl LaunchGraphics {
 const LAYOUT_NAMES: [&str; 5] = ["CLASSIC", "LEFT FIRE", "COMPACT", "SOUTHPAW", "CUSTOM"];
 
 impl Setting {
-    const ALL: [Setting; 14] = [
+    const ALL: [Setting; 15] = [
         Setting::Brightness,
         Setting::Shadows,
         Setting::FrameRate,
@@ -241,6 +242,7 @@ impl Setting {
         Setting::AimMode,
         Setting::ButtonSize,
         Setting::ButtonOpacity,
+        Setting::MenuMusic,
     ];
 
     fn tab(self) -> OptionsTab {
@@ -248,7 +250,7 @@ impl Setting {
             Setting::Brightness | Setting::Shadows | Setting::FrameRate | Setting::Textures => {
                 OptionsTab::Graphics
             }
-            Setting::Volume => OptionsTab::Audio,
+            Setting::Volume | Setting::MenuMusic => OptionsTab::Audio,
             Setting::Sensitivity
             | Setting::FieldOfView
             | Setting::InvertLook
@@ -277,6 +279,7 @@ impl Setting {
             Setting::Style => "BUTTON STYLE",
             Setting::AimMode => "AIM BUTTON",
             Setting::AimAssist => "AIM ASSIST",
+            Setting::MenuMusic => "MENU MUSIC",
             Setting::ButtonSize => "BUTTON SIZE",
             Setting::ButtonOpacity => "BUTTON OPACITY",
         }
@@ -288,6 +291,7 @@ impl Setting {
             Setting::Brightness => (-0.2, 0.2, 0.02),
             Setting::Shadows => (0.0, 2.0, 1.0),
             Setting::FrameRate | Setting::Textures => (0.0, 3.0, 1.0),
+            Setting::MenuMusic => (0.0, audio::MENU_TRACKS.len() as f32, 1.0),
             Setting::Sensitivity => (0.5, 20.0, 0.5),
             Setting::FieldOfView => (GameSettings::FOV_MIN, 110.0, 1.0),
             Setting::Volume => (0.0, 1.0, 0.05),
@@ -312,6 +316,7 @@ impl Setting {
                 | Setting::Shadows
                 | Setting::FrameRate
                 | Setting::Textures
+                | Setting::MenuMusic
         )
     }
 
@@ -321,6 +326,7 @@ impl Setting {
             Setting::Shadows => f32::from(launch.shadows),
             Setting::FrameRate => f32::from(launch.pace),
             Setting::Textures => f32::from(launch.textures),
+            Setting::MenuMusic => f32::from(settings.menu_music),
             Setting::Sensitivity => settings.sensitivity,
             Setting::FieldOfView => settings.fov,
             Setting::Volume => settings.master_volume,
@@ -342,6 +348,7 @@ impl Setting {
             Setting::Shadows => launch.shadows = value as u8,
             Setting::FrameRate => launch.pace = value as u8,
             Setting::Textures => launch.textures = value as u8,
+            Setting::MenuMusic => settings.menu_music = value as u8,
             Setting::Sensitivity => settings.sensitivity = value,
             Setting::FieldOfView => settings.fov = value,
             Setting::Volume => settings.master_volume = value,
@@ -367,6 +374,13 @@ impl Setting {
             Setting::Shadows => named(&SHADOW_CHOICES),
             Setting::FrameRate => named(&PACE_CHOICES),
             Setting::Textures => named(&TEXTURE_CHOICES),
+            Setting::MenuMusic => match value.round() as usize {
+                0 => "OFF".to_owned(),
+                n => audio::MENU_TRACKS
+                    .get(n - 1)
+                    .map_or("OFF", |(label, _)| *label)
+                    .to_owned(),
+            },
             Setting::Sensitivity => format!("{value:.1}"),
             Setting::FieldOfView => format!("{value:.0}"),
             Setting::InvertLook => if value >= 0.5 { "ON" } else { "OFF" }.to_owned(),
@@ -925,6 +939,13 @@ pub(crate) fn zombies_menu_buttons(
             if let Some(layout) = words.next().and_then(|n| n.parse::<u8>().ok()) {
                 tests.settings.touch_layout = layout;
                 tests.settings.sanitize();
+                tests.settings.touch();
+            }
+            None
+        }
+        Some("music") => {
+            if let Some(track) = words.next().and_then(|n| n.parse::<u8>().ok()) {
+                tests.settings.menu_music = track;
                 tests.settings.touch();
             }
             None
@@ -1546,6 +1567,18 @@ pub(crate) struct ScriptedOptions<'w> {
     tab: ResMut<'w, OptionsTab>,
     editing: ResMut<'w, crate::touch_controls::TouchEditing>,
     settings: ResMut<'w, GameSettings>,
+}
+
+/// The saved MENU MUSIC choice drives the track the BO1 main menu loops.
+pub(crate) fn sync_menu_music(
+    settings: Res<GameSettings>,
+    choice: Option<ResMut<audio::MenuMusicChoice>>,
+) {
+    if let Some(mut choice) = choice
+        && choice.0 != settings.menu_music
+    {
+        choice.0 = settings.menu_music;
+    }
 }
 
 /// Black Ops' solo pause: while the options panel (the pause menu) or the touch buttons'

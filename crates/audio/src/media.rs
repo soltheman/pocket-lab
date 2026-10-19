@@ -377,6 +377,16 @@ impl PcmBuffer {
     pub(crate) fn len(&self) -> usize {
         self.len
     }
+    /// The samples as 16-bit little-endian PCM: half an f32 buffer's size, for a long
+    /// track kept resident (the menu's music).
+    pub(crate) fn pcm16_bytes(&self) -> Arc<[u8]> {
+        let mut out = Vec::with_capacity(self.len * 2);
+        for index in 0..self.len {
+            let value = (self.sample(index).clamp(-1.0, 1.0) * 32767.0).round() as i16;
+            out.extend_from_slice(&value.to_le_bytes());
+        }
+        out.into()
+    }
     pub(crate) fn resident_bytes(&self) -> usize {
         match &self.allocation.samples {
             Samples::F32(samples) => samples.len() * size_of::<f32>(),

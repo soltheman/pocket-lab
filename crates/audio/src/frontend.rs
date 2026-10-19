@@ -35,8 +35,14 @@ struct FrontendAudioPrepare(Task<FrontendAudioWalked>);
 /// retried: each try re-indexed every IWD sound (tens of thousands of paths) every
 /// couple of seconds for the whole session, which on the phone churned memory up to
 /// iOS's limit and hitched frames.
+///
+/// The sound archives the same walk opened stay with it: BO1's menu music
+/// reads its tracks straight out of the T5 IWDs, and reopening them would
+/// repeat that walk.
 #[derive(Resource)]
-struct FrontendAudioUnavailable;
+pub(crate) struct FrontendAudioUnavailable {
+    pub iwd: Arc<NamespaceSoundIwd>,
+}
 
 struct FrontendAudioWalked {
     bank: Option<Arc<SoundCatalog>>,
@@ -149,7 +155,7 @@ fn install_frontend_audio_prepare(
             Audio,
             "audio: frontend sound bank did not build — the menu stays silent (typed gap)"
         );
-        commands.insert_resource(FrontendAudioUnavailable);
+        commands.insert_resource(FrontendAudioUnavailable { iwd: walked.iwd });
         return;
     };
     commands.insert_resource(FrontendAudio {

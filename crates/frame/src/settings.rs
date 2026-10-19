@@ -100,6 +100,9 @@ pub struct GameSettings {
     pub touch_aim_toggle: bool,
     /// BO1's console aim assist (slowdown, ADS snap) on touch looking.
     pub touch_aim_assist: bool,
+    /// The BO1 track the zombies main menu loops (0 off, else a track of the audio crate's
+    /// list; 1 is Kino's theme).
+    pub menu_music: u8,
     pub touch_custom: String,
 
     pub revision: u64,
@@ -141,6 +144,7 @@ impl Default for GameSettings {
             touch_icons: true,
             touch_aim_toggle: true,
             touch_aim_assist: true,
+            menu_music: 1,
             touch_custom: String::new(),
             revision: 0,
         }

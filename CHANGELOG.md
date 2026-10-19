@@ -1,4 +1,14 @@
-# Bo1ZPocket 0.3.38
+# Bo1ZPocket 0.3.39
+
+**New in 0.3.39**
+
+- **Main menu as a map select:** ZOMBIES, SOLO / CO-OP / SETTINGS on the left; map cards bottom right with BO1's loading-screen art (Kino playable; Five and Dead Ops Arcade shown NOT INSTALLED). The selected map's art drifts behind the menu.
+- **Menu music from BO1's own soundtrack**, read straight from the install's archives (no map needed): Kino's theme by default; Settings → Audio → MENU MUSIC switches to 115, Abracadavre, Not Ready to Die, Pareidolia, Coming Home, or off. One track is kept in memory (16-bit) and freed when a match starts.
+- **Settings tabs:** GRAPHICS (brightness now; shadows, frame rate and texture detail on the next app start, kept in `iw4l-env.txt`), CONTROLS, BUTTONS, AUDIO.
+- **Co-op page:** a placeholder lobby with four player slots; HOST and JOIN say it's coming.
+- **Touch buttons:** BO1's `hud_knife`, `hud_us_grenade` and a rifle round (FIRE) from the install; darker glass buttons with a worn rim and a blood-red FIRE.
+- **Checked on PC:** every screen at iPhone size, all six tracks decode and play with no underruns, music stops when Kino loads. Not tried on an iPhone yet.
+
 
 **New in 0.3.38**
 

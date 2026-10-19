@@ -350,6 +350,7 @@ fn serialize_settings(settings: &frame::GameSettings, binds: &KeyBinds) -> Strin
         format!("touch_icons={}", settings.touch_icons),
         format!("touch_aim_toggle={}", settings.touch_aim_toggle),
         format!("touch_aim_assist={}", settings.touch_aim_assist),
+        format!("menu_music={}", settings.menu_music),
         format!("touch_custom={}", settings.touch_custom),
     ];
     lines.extend(crate::game_folders::serialize_game_folders(settings));
@@ -460,6 +461,7 @@ fn parse_settings(source: &str, settings: &mut frame::GameSettings, binds: &mut 
             "touch_icons" => parse_into(value, &mut settings.touch_icons),
             "touch_aim_toggle" => parse_into(value, &mut settings.touch_aim_toggle),
             "touch_aim_assist" => parse_into(value, &mut settings.touch_aim_assist),
+            "menu_music" => parse_into(value, &mut settings.menu_music),
             "touch_custom" => settings.touch_custom = value.to_owned(),
             _ if crate::game_folders::parse_game_folder(key, value, settings) => {}
             _ => warn!("ignored unknown setting `{key}`"),
