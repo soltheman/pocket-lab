@@ -1293,6 +1293,7 @@ fn preflight_match_install(
             ("IW4L_ZM_INSTA", "iw4l_zm_insta"),
             ("IW4L_ZM_EVERY", "iw4l_zm_every"),
             ("IW4L_ZM_TOTAL", "iw4l_zm_total"),
+            ("IW4L_ZM_QR", "iw4l_zm_qr"),
         ] {
             if let Ok(value) = std::env::var(env) {
                 script_dvars.push((dvar.into(), value));

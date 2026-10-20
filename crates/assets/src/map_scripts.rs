@@ -53,6 +53,94 @@ pub(crate) const ZOMBIES_HUD: (&str, &str) = (
         level thread audit_rounds();
     if (getdvar("iw4l_zm_watch") == "reel")
         level thread camera_reel();
+    if (getdvar("iw4l_zm_watch") == "downed")
+        level thread watch_downed();
+}
+
+// Debug (IW4L_ZM_WATCH=downed): the first player stands at IW4L_ZM_X/Y/Z for the
+// zombies to down (IW4L_ZM_QR=1: with Quick Revive, a solo player's extra life). Once
+// down it looks at the nearest zombie, and logs each zombie within 300 units every
+// half second ("downed debug:").
+watch_downed()
+{
+    if (getdvar("iw4l_zm_total") != "")
+        level thread crowd_round();
+    wait 8;
+    players = getplayers();
+    if (!players.size)
+        return;
+    p = players[0];
+    at = (getdvarfloat("iw4l_zm_x"), getdvarfloat("iw4l_zm_y"), getdvarfloat("iw4l_zm_z"));
+    p setorigin(at);
+    if (getdvar("iw4l_zm_qr") == "1")
+    {
+        p maps\_zombiemode_perks::give_perk("specialty_quickrevive");
+        logprint("downed debug: quick revive, lives " + p.lives);
+    }
+    logprint("downed debug: player " + p.origin);
+    // IW4L_ZM_TOTAL=<n>: this round has n zombies, spawned fast, and the player holds out
+    // IW4L_ZM_EVERY seconds (a crowd gathers round it) before the next hit downs it.
+    if (getdvar("iw4l_zm_total") != "")
+    {
+        hold = getdvarfloat("iw4l_zm_every");
+        p setmaxhealth(100000);
+        for (t = 0; t < hold; t += 0.5)
+        {
+            p.health = 100000;
+            p setorigin(at);
+            wait 0.5;
+        }
+        // The next zombie to hit it downs it.
+        p setmaxhealth(100);
+        p.health = 1;
+        logprint("downed debug: downing blow");
+    }
+    hit = false;
+    last = "";
+    for (;;)
+    {
+        wait 0.5;
+        down = p maps\_laststand::player_is_in_laststand();
+        state = "origin " + p.origin + " laststand " + down + " health " + p.health + " session " + p.sessionstate + " ignoreme " + p.ignoreme + " intermission " + level.intermission;
+        if (state != last)
+            logprint("downed debug: state " + state);
+        last = state;
+        if (down || p.health < p.maxhealth)
+            hit = true;
+        if (!hit)
+        {
+            p setorigin(at);
+            continue;
+        }
+        zombies = getaiarray("axis");
+        nearest = undefined;
+        for (i = 0; i < zombies.size; i++)
+        {
+            z = zombies[i];
+            d = distance2d(z.origin, p.origin);
+            if (!isdefined(nearest) || d < distance2d(nearest.origin, p.origin))
+                nearest = z;
+            if (d < 300)
+                logprint("downed debug: zombie " + z getentitynumber() + " at " + z.origin + " gap " + d + " ignoreall " + z.ignoreall);
+        }
+        // IW4L_ZM_LOOK=fixed: looking along IW4L_ZM_PITCH/YAW instead (pitch 60 with
+        // `thirdperson 1`: a camera above the player looking down at it and the zombies
+        // round it).
+        if (getdvar("iw4l_zm_look") == "fixed")
+            p setplayerangles((getdvarfloat("iw4l_zm_pitch"), getdvarfloat("iw4l_zm_yaw"), 0));
+        else if (isdefined(nearest))
+            p setplayerangles(vectortoangles(nearest.origin + (0, 0, 40) - p geteye()));
+    }
+}
+
+// IW4L_ZM_TOTAL: once the first round has set its own count, it has that many zombies,
+// spawned fast.
+crowd_round()
+{
+    while (!isdefined(level.zombie_total) || level.zombie_total <= 0)
+        wait 0.05;
+    level.zombie_total = getdvarint("iw4l_zm_total");
+    level.zombie_vars["zombie_spawn_delay"] = 0.2;
 }
 
 // `animScripted` on a script model (Kino's stage curtains): the engine plays the clip,

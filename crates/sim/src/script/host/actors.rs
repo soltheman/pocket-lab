@@ -107,6 +107,10 @@ const QUAD_HEIGHT: f32 = 28.0;
 const PUSH_MIN_STEP: f32 = 1.5;
 /// Where it stops walking at a player (from feet to feet, horizontally).
 const REACH: f32 = 52.0;
+/// Once it stands at its goal, how far past the goal radius it may be shoved before it
+/// walks back: the crowd round a goal (zombies round a downed player) jostles each one
+/// to and fro across the radius, which would flick it between walking and standing.
+const SETTLE_SLACK: f32 = 16.0;
 /// BO1 swings at a player this close (`anim.meleeRange`), and its hit lands only if the
 /// player is still within it (to the edge of their body) when the swing's "fire" note
 /// comes; BO1's `ai_meleeRange`.
@@ -400,6 +404,11 @@ pub(crate) struct Actor {
     home_z: f32,
     /// Where it left the floor, while it falls (IW4L_ACTOR_DEBUG logs big drops).
     airborne_from: Option<[f32; 3]>,
+    /// Bumped by each goal or scripted clip its scripts give it, so one given while it
+    /// thinks (a callback its own swing set off) outlasts the think.
+    script_edits: u32,
+    /// Standing at its goal (or at a player), until shoved `SETTLE_SLACK` off it.
+    settled: bool,
 }
 
 impl Actor {
@@ -999,9 +1008,23 @@ pub(crate) fn set_goal(
     };
     let yaw = vector_arg(args, 1).map(|angles| angles[1]);
     with_actor(world, object, |actor| {
+        // Given the goal it stands at again (BO1 re-sends the enemy's spot every tenth
+        // of a second), it stays standing; a goal elsewhere sets it walking.
+        let moved = match (&actor.goal, &goal) {
+            (Some(Goal::Pos(was)), Goal::Pos(now)) => {
+                let d = [now[0] - was[0], now[1] - was[1], now[2] - was[2]];
+                (d[0] * d[0] + d[1] * d[1] + d[2] * d[2]).sqrt() > 1.0
+            }
+            (Some(Goal::Entity(was)), Goal::Entity(now)) => was != now,
+            _ => true,
+        };
+        if moved {
+            actor.settled = false;
+        }
         actor.goal = Some(goal);
         actor.goal_yaw = yaw;
         actor.goal_reached = false;
+        actor.script_edits = actor.script_edits.wrapping_add(1);
     });
     Ok(Value::Undefined)
 }
@@ -1102,6 +1125,7 @@ pub(crate) fn anim_scripted(
     }
     if let Some(actor) = runtime.actors.get_mut(&object) {
         actor.clip = None;
+        actor.script_edits = actor.script_edits.wrapping_add(1);
         actor.scripted = Some(Scripted {
             notify,
             start_ms: now,
@@ -1121,7 +1145,10 @@ pub(crate) fn stop_anim_scripted(world: &mut World, receiver: &Value) -> Result<
         .resource_mut::<Runtime>()
         .actors
         .get_mut(&object)
-        .and_then(|actor| actor.scripted.take());
+        .and_then(|actor| {
+            actor.script_edits = actor.script_edits.wrapping_add(1);
+            actor.scripted.take()
+        });
     if let Some(scripted) = scripted {
         raise(
             world,
@@ -2399,6 +2426,20 @@ pub(crate) fn advance(world: &mut World) {
         if let Some(slot) = world.resource_mut::<Runtime>().actors.get_mut(&object) {
             // A death during the think (it fell out, a script killed it) stands.
             let died = slot.died_ms;
+            // So do a goal or a scripted clip its scripts gave it meanwhile: its swing's
+            // hit runs the player's damage callback there and then, and BO1's solo Quick
+            // Revive sends every zombie off from it (`default_exit_level`), this one too.
+            if slot.script_edits != state.script_edits {
+                state.goal = slot.goal.take();
+                state.goal_yaw = slot.goal_yaw;
+                state.goal_reached = slot.goal_reached;
+                state.settled = slot.settled;
+                state.scripted = slot.scripted.take();
+                if state.scripted.is_some() {
+                    state.clip = None;
+                }
+                state.script_edits = slot.script_edits;
+            }
             *slot = state;
             slot.died_ms = slot.died_ms.or(died);
         }
@@ -2898,11 +2939,17 @@ fn think(
         let to = [at[0] - origin[0], at[1] - origin[1]];
         let distance = (to[0] * to[0] + to[1] * to[1]).sqrt();
         let arrive = if goal.is_some() { radius } else { REACH };
+        let arrive = if state.settled {
+            arrive + SETTLE_SLACK
+        } else {
+            arrive
+        };
         // On its goal's floor too (the engine's goal height): a zombie upstairs right
         // above its window has not reached it; it walks on and, when no route leads
         // there, raises `bad_path` so BO1 picks another window.
         let level = (at[2] - origin[2]).abs() <= GOAL_HEIGHT;
         if distance > arrive || !level {
+            state.settled = false;
             let via = steer_point(world, object, state, origin, at, now);
             steering = Some(via);
             let to = [via[0] - origin[0], via[1] - origin[1]];
@@ -2932,6 +2979,7 @@ fn think(
             walk = [heading.cos() * step, heading.sin() * step];
             yaw = Some(heading.to_degrees());
         } else {
+            state.settled = true;
             let idle = if dog {
                 DOG_IDLE
             } else if is_quad(&mut world.resource_mut::<Runtime>(), object) {
