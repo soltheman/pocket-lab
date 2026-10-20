@@ -744,11 +744,16 @@ kill_all_zombies()
 look_at_body(p, body)
 {
     logprint("ragdoll debug: watching a body at " + body.origin);
-    for (t = 0; t < 56 && isdefined(body); t++)
+    // IW4L_ZM_EVERY of 10 or more: until the body is taken away (or 10 seconds).
+    watch = 56;
+    if (getdvar("iw4l_zm_every") != "" && getdvarfloat("iw4l_zm_every") >= 10)
+        watch = 200;
+    for (t = 0; t < watch && isdefined(body); t++)
     {
         p setplayerangles(vectortoangles(body.origin + (0, 0, 8) - p geteye()));
         wait 0.05;
     }
+    logprint("ragdoll debug: stopped watching after " + (t * 0.05) + " s, body there " + isdefined(body));
 }
 
 // Debug (IW4L_ZM_WATCH=die): the first player takes a killing blow after 35 seconds.

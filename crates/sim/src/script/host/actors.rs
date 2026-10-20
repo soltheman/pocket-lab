@@ -8,7 +8,7 @@
 //! scripts score the hit and call `finishActorDamage`; at zero health it runs
 //! `CodeCallback_ActorKilled`, the `death` notify and the death animscript, whose
 //! `startRagdoll` hands the body to the client's ragdoll. The body then stays on the floor
-//! in one of BO1's `ai_corpseCount` corpse slots.
+//! in one of BO1's `ai_corpseCount` corpse slots, and is taken away a few seconds later.
 
 use bevy_ecs::prelude::World;
 
@@ -121,6 +121,13 @@ const RADIUS: f32 = 15.0;
 /// A killed actor stays an actor this long (its death animscript), then its body becomes
 /// a corpse.
 const CORPSE_MS: i64 = 1500;
+/// A body is taken away this long after its death. BO1 keeps a body until its
+/// `ai_corpseCount` slot is wanted for a newer one; ours also go once they have lain
+/// a while, so the floor does not stay strewn with them.
+const CORPSE_STAY_MS: i64 = 6500;
+/// A body is never taken away sooner than this after its ragdoll started, so it does not
+/// vanish mid-fall (a ragdoll comes to rest in a second or two).
+const CORPSE_SETTLE_MS: i64 = 4000;
 /// How many bodies of the dead stay on the floor: BO1's `ai_corpseCount` (5, its
 /// default and the menu's "medium").
 const AI_CORPSE_COUNT: usize = 5;
@@ -355,6 +362,9 @@ pub(crate) struct Actor {
     clip_start_ms: i64,
     fall: f32,
     died_ms: Option<i64>,
+    /// The death clip its death animscript started (`setFlaggedAnimKnobAll("deathanim",
+    /// ...)`), once dead.
+    death_clip: Option<&'static str>,
     /// The clip the body plays now.
     clip: Option<&'static str>,
     goal: Option<Goal>,
@@ -1576,6 +1586,8 @@ pub(crate) fn spawn_from_spawner(
     runtime.set_object_field(id, "ignoreall", Value::Int(0));
     runtime.set_object_field(id, "ignoreme", Value::Int(0));
     runtime.set_object_field(id, "damagelocation", Value::string("none"));
+    runtime.set_object_field(id, "damageyaw", Value::Int(0));
+    runtime.set_object_field(id, "damagetaken", Value::Int(0));
     // The engine's dog flag: `zombie_behind_vox` (the growl of a zombie close behind you)
     // and others test it on every AI, so an unset one made them skip every zombie.
     runtime.set_object_field(id, "isdog", Value::Int(i32::from(kind == "dog")));
@@ -1759,6 +1771,18 @@ fn finish(world: &mut World, object: u64, args: &[Value]) {
         runtime.set_object_field(object, "damagelocation", get(8));
         runtime.set_object_field(object, "damageweapon", get(5));
         runtime.set_object_field(object, "damagemod", get(4));
+        // And `Actor_Damage`'s: the amount, the hit's direction and its yaw against the
+        // actor's facing (`AngleNormalize180(vectoyaw(dir) - angles[1])`), which BO1's
+        // death and pain scripts pick their clips by.
+        runtime.set_object_field(object, "damagetaken", Value::Int(amount));
+        if let Some(Value::Vector(dir)) = args.get(7) {
+            runtime.set_object_field(object, "damagedir", Value::Vector(*dir));
+            if dir[0] != 0.0 || dir[1] != 0.0 {
+                let facing = vec_field(&mut runtime, object, "angles")[1];
+                let yaw = damage_yaw(*dir, facing);
+                runtime.set_object_field(object, "damageyaw", Value::Int(yaw as i32));
+            }
+        }
         (before, after)
     };
     if std::env::var_os("IW4L_ACTOR_DEBUG").is_some() {
@@ -1786,6 +1810,13 @@ fn finish(world: &mut World, object: u64, args: &[Value]) {
     }
 }
 
+/// `AngleNormalize180(vectoyaw(dir) - facing)`: where a hit came from against an actor's
+/// facing, BO1's `damageyaw` (beyond 135 either way it struck the front).
+fn damage_yaw(dir: [f32; 3], facing: f32) -> f32 {
+    let along = dir[1].atan2(dir[0]).to_degrees();
+    (along - facing + 540.0).rem_euclid(360.0) - 180.0
+}
+
 /// BO1's dog death by where the killing hit came from (`getAnimDirection(damageyaw)`):
 /// the hit's direction (`direction`, else from `point`) against the dog's facing.
 fn dog_death_clip(world: &mut World, object: u64, args: &[Value]) -> &'static str {
@@ -1797,8 +1828,7 @@ fn dog_death_clip(world: &mut World, object: u64, args: &[Value]) -> &'static st
         (_, Some(Value::Vector(point))) => [at[0] - point[0], at[1] - point[1], 0.0],
         _ => return DOG_DEATH_CLIPS[0],
     };
-    let along = direction[1].atan2(direction[0]).to_degrees();
-    let yaw = (along - facing + 540.0).rem_euclid(360.0) - 180.0;
+    let yaw = damage_yaw(direction, facing);
     if !(-135.0..=135.0).contains(&yaw) {
         DOG_DEATH_CLIPS[0]
     } else if yaw > 45.0 {
@@ -1807,6 +1837,107 @@ fn dog_death_clip(world: &mut World, object: u64, args: &[Value]) -> &'static st
         DOG_DEATH_CLIPS[2]
     } else {
         DOG_DEATH_CLIPS[3]
+    }
+}
+
+/// `setFlaggedAnimKnobAll(flag, anim, ...)` and its kin on a dead zombie: BO1's death
+/// animscript plays the death clip itself (`self.deathanim`, which the spawn picked at
+/// random from `level._zombie_deaths`, a crawler's or a gibbed zombie's own, a
+/// traversal's). The body plays it, and its notetracks go out as `flag` notifies at their
+/// times, "end" last, for the script's `DoNoteTracks` (its `start_ragdoll` note, or
+/// `waitForRagdoll` at 35% of the clip, starts the ragdoll). Anything else is the actor's
+/// own think's, as before.
+pub(crate) fn death_anim(
+    world: &mut World,
+    receiver: &Value,
+    args: &[Value],
+) -> Result<Value, String> {
+    let Value::Object(object) = receiver else {
+        return Ok(Value::Undefined);
+    };
+    let object = *object;
+    let (Some(flag @ Value::String(_)), Some(Value::Animation { name, .. })) =
+        (args.first(), args.get(1))
+    else {
+        return Ok(Value::Undefined);
+    };
+    let dead = world
+        .resource::<Runtime>()
+        .actors
+        .get(&object)
+        .is_some_and(Actor::is_dead);
+    if !dead || is_dog(&mut world.resource_mut::<Runtime>(), object) {
+        return Ok(Value::Undefined);
+    }
+    let clip = intern(&name.to_string());
+    start_death_clip(world, object, clip, flag.clone(), true);
+    Ok(Value::Undefined)
+}
+
+/// Plays `clip` as the dead actor's death clip; with `notes`, its notetracks and "end" go
+/// out as `flag` notifies.
+fn start_death_clip(world: &mut World, object: u64, clip: &'static str, flag: Value, notes: bool) {
+    let Some(mut state) = world.resource::<Runtime>().actors.get(&object).cloned() else {
+        return;
+    };
+    // A restart of the clip it plays starts it over.
+    state.clip = None;
+    play(world, object, &mut state, clip);
+    state.death_clip = Some(clip);
+    if let Some(slot) = world.resource_mut::<Runtime>().actors.get_mut(&object) {
+        slot.clip = state.clip;
+        slot.clip_start_ms = state.clip_start_ms;
+        slot.death_clip = state.death_clip;
+    }
+    let seconds = clip_length(world, clip).unwrap_or(1.0);
+    let mut timed: Vec<(Value, f32)> = Vec::new();
+    if notes {
+        timed.extend(
+            clip_notes(world, clip)
+                .iter()
+                .filter(|note| !note.name.eq_ignore_ascii_case("end"))
+                .map(|note| (Value::string(&note.name), note.time * seconds)),
+        );
+    }
+    timed.push((Value::string("end"), seconds));
+    let now = super::players::now_ms(world);
+    for (note, at) in timed {
+        let _ = run_now(
+            world,
+            NOTIFY_AFTER,
+            Value::Object(object),
+            vec![flag.clone(), note, Value::Float(at.max(0.05))],
+            now,
+        );
+    }
+}
+
+/// A death clip for a zombie whose death animscript played none (its `deathFunction`
+/// dealt with the death): its `deathanim`, else one of `level._zombie_deaths` for its
+/// kind, else one of ours.
+fn fallback_death_clip(world: &mut World, object: u64) -> &'static str {
+    let (chosen, kind) = {
+        let mut runtime = world.resource_mut::<Runtime>();
+        let chosen = match runtime.object_field(object, "deathanim") {
+            Value::Animation { name, .. } => Some(intern(&name.to_string())),
+            _ => None,
+        };
+        (chosen, animname(&mut runtime, object))
+    };
+    if let Some(clip) = chosen {
+        return clip;
+    }
+    let listed = kind
+        .map(|kind| level_clips(world, "_zombie_deaths", &kind, None))
+        .unwrap_or_default();
+    let mut roll =
+        (super::players::now_ms(world) as u64) ^ object.wrapping_mul(0x9E37_79B9_7F4A_7C15);
+    roll = (roll ^ (roll >> 30)).wrapping_mul(0xBF58_476D_1CE4_E5B9);
+    roll ^= roll >> 27;
+    if listed.is_empty() {
+        DEATH_CLIPS[(roll % DEATH_CLIPS.len() as u64) as usize]
+    } else {
+        listed[(roll % listed.len() as u64) as usize]
     }
 }
 
@@ -1822,34 +1953,17 @@ fn kill(world: &mut World, object: u64, args: &[Value], attacker: Value) {
     world
         .resource_mut::<Runtime>()
         .set_object_field(object, "attacker", attacker.clone());
-    if let Some(mut state) = world.resource::<Runtime>().actors.get(&object).cloned() {
-        let quad_deaths: Vec<&'static str> =
-            if is_quad(&mut world.resource_mut::<Runtime>(), object) {
-                ["death1", "death2", "death3", "death4"]
-                    .iter()
-                    .flat_map(|key| level_clips(world, "scr_anim", "quad_zombie", Some(key)))
-                    .collect()
-            } else {
-                Vec::new()
-            };
-        let clip = if is_dog(&mut world.resource_mut::<Runtime>(), object) {
-            dog_death_clip(world, object, args)
-        } else if !quad_deaths.is_empty() {
-            pick(&quad_deaths, object)
-        } else {
-            pick(&DEATH_CLIPS, object)
-        };
+    let dog = is_dog(&mut world.resource_mut::<Runtime>(), object);
+    if dog && let Some(mut state) = world.resource::<Runtime>().actors.get(&object).cloned() {
+        // A hellhound's death by where the hit came from, as its death animscript picks.
+        let clip = dog_death_clip(world, object, args);
         play(world, object, &mut state, clip);
         if let Some(slot) = world.resource_mut::<Runtime>().actors.get_mut(&object) {
             *slot = state;
         }
-        // BO1's death animscript plays out `deathanim` to its "end" note before it runs
-        // the actor's `deathanimscript` (a Nova crawler's gas): the note comes as the
-        // clip ends, before the body is cleared away.
         let seconds = clip_length(world, clip)
             .unwrap_or(1.0)
             .min((CORPSE_MS - 100) as f32 / 1000.0);
-        let now = super::players::now_ms(world);
         let _ = run_now(
             world,
             NOTIFY_AFTER,
@@ -1875,18 +1989,37 @@ fn kill(world: &mut World, object: u64, args: &[Value], attacker: Value) {
     ];
     let _ = run_now(world, ACTOR_KILLED, Value::Object(object), killed, now);
     raise(world, Value::Object(object), "death", vec![attacker]);
-    // The death animscript: a zombie's `deathFunction` hands out the kill points there.
-    let dog = world
+    // The death animscript: a zombie's `deathFunction` hands out the kill points there,
+    // then it plays the death clip (`death_anim`).
+    let dog_script = world
         .resource::<Runtime>()
         .entities
         .get(&object)
         .is_some_and(|entity| entity.classname.contains("dog"));
-    let death = if dog {
+    let death = if dog_script {
         "animscripts/zombie_dog_death::main"
     } else {
         "animscripts/zombie_death::main"
     };
     let _ = run_now(world, death, Value::Object(object), Vec::new(), now);
+    if dog {
+        return;
+    }
+    let played = world
+        .resource::<Runtime>()
+        .actors
+        .get(&object)
+        .is_some_and(|actor| actor.death_clip.is_some());
+    if !played {
+        let clip = fallback_death_clip(world, object);
+        if std::env::var_os("IW4L_ACTOR_DEBUG").is_some() {
+            diag::info!(
+                Sim,
+                "actor debug: {object} death animscript played no clip; {clip}"
+            );
+        }
+        start_death_clip(world, object, clip, Value::string("deathanim"), false);
+    }
 }
 
 /// The engine's dog flag, which the spawn sets from the aitype.
@@ -2186,8 +2319,9 @@ fn favorite_enemy(
 
 /// Each tick: play out scripted clips and window climbs, walk every other living actor at
 /// its goal (or the nearest living player when its scripts set none) and swing at players
-/// in reach; delete bodies whose time is up.
+/// in reach; turn the dead into corpses and take away the bodies whose time is up.
 pub(crate) fn advance(world: &mut World) {
+    remove_old_corpses(world);
     if world.resource::<Runtime>().actors.is_empty() {
         return;
     }
@@ -2242,8 +2376,69 @@ pub(crate) fn advance(world: &mut World) {
         }
     }
     for object in expired {
-        world.resource_mut::<Runtime>().actors.remove(&object);
-        become_corpse(world, object);
+        let died = world
+            .resource_mut::<Runtime>()
+            .actors
+            .remove(&object)
+            .and_then(|actor| actor.died_ms)
+            .unwrap_or(now);
+        become_corpse(world, object, died);
+    }
+}
+
+/// A dead actor's body on the floor, in one of the `ai_corpseCount` slots.
+#[derive(Clone, Copy, Debug)]
+pub(crate) struct ActorCorpse {
+    pub(crate) object: u64,
+    died_ms: i64,
+}
+
+/// When a body goes: `CORPSE_STAY_MS` after its death, but not before its ragdoll (if it
+/// has one) has had `CORPSE_SETTLE_MS` to come to rest.
+fn corpse_due(died_ms: i64, ragdoll_ms: Option<i64>) -> i64 {
+    let stay = died_ms + CORPSE_STAY_MS;
+    ragdoll_ms.map_or(stay, |start| stay.max(start + CORPSE_SETTLE_MS))
+}
+
+/// Deletes the bodies that have lain long enough (`corpse_due`).
+fn remove_old_corpses(world: &mut World) {
+    if world.resource::<Runtime>().actor_corpses.is_empty() {
+        return;
+    }
+    let now = super::players::now_ms(world);
+    let mut runtime = world.resource_mut::<Runtime>();
+    let due: Vec<u64> = runtime
+        .actor_corpses
+        .iter()
+        .filter(|corpse| {
+            let ragdoll = runtime
+                .ragdolls
+                .get(&corpse.object)
+                .map(|mark| i64::from(mark.start_ms));
+            now >= corpse_due(corpse.died_ms, ragdoll)
+        })
+        .map(|corpse| corpse.object)
+        .collect();
+    for object in due {
+        if std::env::var_os("IW4L_ACTOR_DEBUG").is_some() {
+            let died = runtime
+                .actor_corpses
+                .iter()
+                .find(|corpse| corpse.object == object)
+                .map_or(now, |corpse| corpse.died_ms);
+            diag::info!(
+                Sim,
+                "actor debug: {object} body removed {} ms after its death",
+                now - died
+            );
+        }
+        runtime
+            .actor_corpses
+            .retain(|corpse| corpse.object != object);
+        runtime.ragdolls.remove(&object);
+        if runtime.live(&object) && !runtime.pending_deletes.contains(&object) {
+            runtime.pending_deletes.push(object);
+        }
     }
 }
 
@@ -2259,6 +2454,25 @@ pub(crate) struct RagdollMark {
 /// changes nothing (BO1 leaves a ragdoll trajectory alone).
 pub(crate) fn start_ragdoll(world: &mut World, object: u64) {
     let now = super::players::now_ms(world) as i32;
+    if std::env::var_os("IW4L_ACTOR_DEBUG").is_some() && !is_ragdoll(world, object) {
+        let runtime = world.resource::<Runtime>();
+        let died = runtime
+            .actors
+            .get(&object)
+            .and_then(|actor| actor.died_ms)
+            .or_else(|| {
+                runtime
+                    .actor_corpses
+                    .iter()
+                    .find(|corpse| corpse.object == object)
+                    .map(|corpse| corpse.died_ms)
+            });
+        diag::info!(
+            Sim,
+            "actor debug: {object} ragdoll starts {:?} ms after its death",
+            died.map(|died| i64::from(now) - died)
+        );
+    }
     world
         .resource_mut::<Runtime>()
         .ragdolls
@@ -2287,7 +2501,7 @@ pub(crate) fn launch_ragdoll(world: &mut World, object: u64, force: [f32; 3], hi
 /// the body stays where it fell, no longer solid, in one of `ai_corpseCount` slots. With
 /// every slot taken, the body farthest behind the player goes (else the farthest off to
 /// the side, else the farthest), as `G_GetFreeActorCorpseIndex` picks.
-fn become_corpse(world: &mut World, object: u64) {
+fn become_corpse(world: &mut World, object: u64, died_ms: i64) {
     let view = {
         let runtime = world.resource::<Runtime>();
         let clients: Vec<u32> = runtime.players.keys().copied().collect();
@@ -2301,34 +2515,39 @@ fn become_corpse(world: &mut World, object: u64) {
         })
     };
     let mut runtime = world.resource_mut::<Runtime>();
-    let kept: Vec<u64> = runtime
+    let kept: Vec<ActorCorpse> = runtime
         .actor_corpses
         .iter()
         .copied()
-        .filter(|id| runtime.live(id) && !runtime.pending_deletes.contains(id) && *id != object)
+        .filter(|corpse| {
+            let id = &corpse.object;
+            runtime.live(id) && !runtime.pending_deletes.contains(id) && *id != object
+        })
         .collect();
     runtime.actor_corpses = kept;
     if runtime.actor_corpses.len() >= AI_CORPSE_COUNT {
         let corpses: Vec<(u64, [f32; 3])> = runtime
             .actor_corpses
             .iter()
-            .map(|id| {
-                let at = match runtime.peek_field(*id, "origin") {
+            .map(|corpse| {
+                let at = match runtime.peek_field(corpse.object, "origin") {
                     Some(Value::Vector(at)) => *at,
                     _ => [0.0; 3],
                 };
-                (*id, at)
+                (corpse.object, at)
             })
             .collect();
         if let Some(freed) = corpse_to_free(&corpses, view) {
-            runtime.actor_corpses.retain(|id| *id != freed);
+            runtime
+                .actor_corpses
+                .retain(|corpse| corpse.object != freed);
             runtime.ragdolls.remove(&freed);
             if !runtime.pending_deletes.contains(&freed) {
                 runtime.pending_deletes.push(freed);
             }
         }
     }
-    runtime.actor_corpses.push(object);
+    runtime.actor_corpses.push(ActorCorpse { object, died_ms });
     if let Some(entity) = runtime.entities.get_mut(&object) {
         entity.solid = false;
     }
@@ -3276,6 +3495,28 @@ mod corpse_tests {
         assert_eq!(corpse_to_free(&[ahead_far, aside], view), Some(2));
         assert_eq!(corpse_to_free(&[ahead_far], view), Some(1));
         assert_eq!(corpse_to_free(&[], view), None);
+    }
+
+    #[test]
+    fn a_body_goes_after_its_stay_and_not_while_its_ragdoll_settles() {
+        use super::{CORPSE_SETTLE_MS, CORPSE_STAY_MS, corpse_due};
+        assert_eq!(corpse_due(1000, None), 1000 + CORPSE_STAY_MS);
+        assert_eq!(corpse_due(1000, Some(1500)), 1000 + CORPSE_STAY_MS);
+        // A ragdoll started late (a long death clip) gets its time to come to rest.
+        let late = 1000 + CORPSE_STAY_MS - 1000;
+        assert_eq!(corpse_due(1000, Some(late)), late + CORPSE_SETTLE_MS);
+    }
+
+    #[test]
+    fn damage_yaw_is_the_hit_against_the_facing() {
+        use super::damage_yaw;
+        // Facing +x, shot from the front: the bullet travels along -x.
+        assert_eq!(damage_yaw([-1.0, 0.0, 0.0], 0.0).abs(), 180.0);
+        // From behind.
+        assert_eq!(damage_yaw([1.0, 0.0, 0.0], 0.0), 0.0);
+        // Travelling along +y while facing +x: 90.
+        assert!((damage_yaw([0.0, 1.0, 0.0], 0.0) - 90.0).abs() < 1e-3);
+        assert!((damage_yaw([0.0, 1.0, 0.0], 170.0) + 80.0).abs() < 1e-3);
     }
 }
 

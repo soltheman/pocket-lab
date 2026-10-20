@@ -207,6 +207,17 @@ fn register_implemented(registry: &mut NativeRegistry) {
     registry.register(Method, "stopanimscripted", |world, receiver, _| {
         crate::script::host::actors::stop_anim_scripted(world, receiver)
     });
+    // On a dead zombie these play its death animscript's death clip; elsewhere the actor's
+    // own think picks its clips, and they are taken and ignored.
+    for name in [
+        "setflaggedanimknoball",
+        "setflaggedanimknoballrestart",
+        "setflaggedanimknob",
+    ] {
+        registry.register(Method, name, |world, receiver, args| {
+            crate::script::host::actors::death_anim(world, receiver, args)
+        });
+    }
     // The anim tree a model's clips come from: ours are looked up by name.
     registry.register(Method, "useanimtree", |_, _, _| Ok(Value::Undefined));
     registry.register(Method, "forceteleport", |world, receiver, args| {
@@ -230,9 +241,6 @@ fn register_implemented(registry: &mut NativeRegistry) {
         "clearanim",
         "setanimknoball",
         "setanimknoballrestart",
-        "setflaggedanimknoball",
-        "setflaggedanimknoballrestart",
-        "setflaggedanimknob",
         "setanimknob",
         "setanim",
         "setflaggedanim",

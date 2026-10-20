@@ -600,7 +600,7 @@ pub(crate) fn actor_body(world: &World, receiver: &Value) -> Option<u64> {
     };
     let runtime = world.resource::<Runtime>();
     (runtime.actors.contains_key(id)
-        || runtime.actor_corpses.contains(id)
+        || runtime.actor_corpses.iter().any(|corpse| corpse.object == *id)
         || runtime.ragdolls.contains_key(id))
     .then_some(*id)
 }
