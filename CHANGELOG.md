@@ -1,3 +1,14 @@
+# Bo1ZPocket 0.3.46
+
+**New in 0.3.46**
+
+- **Muzzle flash keeps playing:** effects bolted to a bone never gave back their slot in a 255-slot pool, so after about 120 shots no muzzle flash, shell eject or `playFxOnTag` effect (gib blood bursts and limb trails included) could play for the rest of the match. Slots are freed when the effect dies.
+- **Blood on the shot frame:** on the in-process (solo) server the client's predicted bullets now see the zombies' hitboxes, so flesh impacts play the frame you fire, and the authority's duplicate impact for that shot is skipped. Spread is seeded from the command (as IW's `BG_seedRandWithGameTime`) so predicted and real bullets agree.
+- **Gibs and deaths a tick sooner:** player commands now wake the scripts they hit in the same tick (BO1 runs the command, then the frame's scripts), and model/part/anim changes reach that tick's snapshot. `gib_throw`'s gore burst no longer waits a tick. Local commands go to the server every frame, and a touch tap that starts and ends in one frame still fires.
+- **Varied deaths:** `SetFlaggedAnimKnobAll` and friends now play the death clip BO1's script picks (`ch_dazed_a`..`d_death`, crawler `quad_death_*`), with its notetracks; the ragdoll starts at its `start_ragdoll` note or 35% in, as BO1's `waitForRagdoll`. Before, the engine chose one of two clips by object id, which came out the same for every zombie. Actors now get `damagetaken`, `damagedir` and `damageyaw`.
+- **Bodies go:** BO1 itself keeps bodies until the 5 corpse slots are needed; here a body is removed 6.5 s after death (and never sooner than 4 s after its ragdoll started).
+- **Downed player:** a zombie's hit runs the damage callback inside that zombie's own think, and Quick Revive's exit goal set there was overwritten when the think finished, so the zombie that downed you stayed on you flicking between walk and idle. Script goal/anim changes made during an actor's think now stick, and an actor at its goal stays standing until pushed 16 units past the radius.
+
 # Bo1ZPocket 0.3.45
 
 **New in 0.3.45**
