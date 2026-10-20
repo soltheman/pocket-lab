@@ -611,6 +611,9 @@ pub struct SimState {
     lagcomp_sample: HashMap<ClientId, crate::bullet_collision::ShotSampleProvenance>,
     lagcomp_commands: HashMap<(ClientId, i32), crate::bullet_collision::ShotSampleProvenance>,
 
+    /// A prediction world's borrowed shot targets (see `LentShotTargets`).
+    lent_shot_targets: Option<Arc<crate::bullet_collision::LentShotTargets>>,
+
     content_digest: u64,
 
     content_components: crate::ContentComponents,
@@ -730,6 +733,7 @@ impl Default for SimState {
             ),
             lagcomp_sample: HashMap::new(),
             lagcomp_commands: HashMap::new(),
+            lent_shot_targets: None,
             content_digest: 0,
             content_components: crate::ContentComponents::default(),
             journal: Vec::new(),
@@ -2031,11 +2035,19 @@ impl SimState {
     }
 
     fn lagcomp_plan(&self, attacker: ClientId, current: Tick) -> LagcompPlan {
+        self.lagcomp_plan_for(self.lagcomp_sample(attacker), current)
+    }
+
+    fn lagcomp_plan_for(
+        &self,
+        sample: Option<crate::bullet_collision::ShotSampleProvenance>,
+        current: Tick,
+    ) -> LagcompPlan {
         use crate::bullet_collision::{
             CurrentAuthorityReason, HistoryRefusalReason, LAGCOMP_MAX_REWIND_TICKS,
         };
 
-        let Some(sample) = self.lagcomp_sample(attacker) else {
+        let Some(sample) = sample else {
             return LagcompPlan::CurrentAuthority {
                 reason: CurrentAuthorityReason::NoSampleClaim,
             };
@@ -2120,10 +2132,44 @@ impl SimState {
         player: impl Fn(ClientId) -> Option<PlayerState>,
     ) -> crate::bullet_collision::LagcompQuery {
         let plan = self.lagcomp_plan(attacker, current);
+        let entities = match self.lent_shot_targets.as_deref() {
+            Some(lent) => crate::bullet_collision::EntityCollisionSample {
+                rows: lent.rows.clone(),
+                verdict: crate::bullet_collision::HistorySampleVerdict::CurrentAuthority {
+                    tick: current,
+                    reason: crate::bullet_collision::CurrentAuthorityReason::NoSampleClaim,
+                },
+            },
+            None => self.lagcomp_entities(current, plan),
+        };
         crate::bullet_collision::LagcompQuery {
             players: self.lagcomp_players(current, plan, player),
-            entities: self.lagcomp_entities(current, plan),
+            entities,
         }
+    }
+
+    /// The entity rows a shot claiming `sample` traces against at `current` (as
+    /// `lagcomp_query_for` picks them), for a listen client's predicted impacts.
+    pub fn entity_rows_for_sample(
+        &self,
+        sample: crate::bullet_collision::ShotSampleProvenance,
+        current: Tick,
+    ) -> Vec<crate::bullet_collision::EntityCollisionTraceGeom> {
+        let plan = self.lagcomp_plan_for(Some(sample), current);
+        self.lagcomp_entities(current, plan).rows
+    }
+
+    /// A prediction world's shots trace against these (the listen server's actors)
+    /// until they are taken back with `None`.
+    pub fn lend_shot_targets(
+        &mut self,
+        targets: Option<Arc<crate::bullet_collision::LentShotTargets>>,
+    ) {
+        self.lent_shot_targets = targets;
+    }
+
+    pub fn lent_shot_targets(&self) -> Option<&crate::bullet_collision::LentShotTargets> {
+        self.lent_shot_targets.as_deref()
     }
 
     fn lagcomp_players(

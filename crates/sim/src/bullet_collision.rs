@@ -1272,6 +1272,54 @@ pub struct EntityCollisionSample {
     pub verdict: HistorySampleVerdict,
 }
 
+/// What a listen server's own client traces its shots against before the authority
+/// runs them: the actors' hit boxes where the client draws them (the authority's rows
+/// for the client's shot sample), so the blood of a hit shows on the frame of the shot,
+/// as Black Ops' client traces its own bullets. The authority's result stands; only the
+/// flesh impacts are predicted.
+#[derive(Clone, Debug, Default)]
+pub struct LentShotTargets {
+    pub rows: Vec<EntityCollisionTraceGeom>,
+    pub actors: Vec<LentActor>,
+}
+
+/// A living actor among [`LentShotTargets`]: what the authority knows of it to call a
+/// bone hit flesh (its health for the fatal blood, its bones for the hit location).
+#[derive(Clone, Debug)]
+pub struct LentActor {
+    pub model: crate::ScriptModelId,
+    pub number: Option<i32>,
+    pub health: i32,
+    pub capability: Option<std::sync::Arc<xmodel_runtime::RetainedModelCapability>>,
+}
+
+impl LentShotTargets {
+    /// The hit location and health of a lent actor's bone, as the authority's
+    /// `actor_flesh_hit` reads them.
+    pub fn flesh_hit(&self, owner: AuthorityModelOwner, bone: u16) -> Option<(u8, i32)> {
+        let model = owner.script_model()?;
+        let actor = self.actors.iter().find(|actor| actor.model == model)?;
+        let hitloc = actor
+            .capability
+            .as_ref()
+            .and_then(|capability| capability.pose.bone_names.get(usize::from(bone)))
+            .map_or(0, |name| crate::script::host::actors::hitloc_for_bone(name));
+        Some((hitloc, actor.health))
+    }
+
+    pub fn actor_number(&self, owner: AuthorityModelOwner) -> Option<i32> {
+        let model = owner.script_model()?;
+        self.actors
+            .iter()
+            .find(|actor| actor.model == model)
+            .and_then(|actor| actor.number)
+    }
+
+    pub fn is_actor_number(&self, number: i32) -> bool {
+        self.actors.iter().any(|actor| actor.number == Some(number))
+    }
+}
+
 #[derive(Clone, Debug, PartialEq)]
 pub struct LagcompQuery {
     pub players: HistorySample,

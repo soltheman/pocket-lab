@@ -323,6 +323,16 @@ impl ClientPrediction {
             .map(|meta| meta.life_sequence)
     }
 
+    /// A listen client's shots trace against the authority's actors (see
+    /// `sim::bullet_collision::LentShotTargets`) while these are lent; `None` takes
+    /// them back.
+    pub fn lend_shot_targets(
+        &mut self,
+        targets: Option<std::sync::Arc<sim::bullet_collision::LentShotTargets>>,
+    ) {
+        self.world.lend_shot_targets(targets);
+    }
+
     pub fn take_owner_events(&mut self) -> Vec<EntityEventRecord> {
         let now = std::time::Instant::now();
         std::mem::take(&mut self.owner_events)
@@ -607,13 +617,20 @@ impl ClientPrediction {
         let local = i32::try_from(self.local.0).unwrap_or(-1);
         let mut owner_events = std::mem::take(&mut self.owner_events);
         let mut next = self.next_owner_event;
+        let lent = self.world.lent_shot_targets();
         for record in self.world.entity_events() {
+            let action = entity_event_action(record.event);
+            // With the authority's actors lent, a bullet that hit one bleeds now; the
+            // authority's own impact for it is then not played again.
+            let predicted_flesh = matches!(action, Ok(EntityEventAction::BulletHit))
+                && record.payload.surf_type == weapon_iw4::SURF_TYPE_FLESH as u8
+                && lent.is_some_and(|lent| lent.is_actor_number(record.payload.other_entity_num));
             if (record.sequence == events_from || record.sequence.is_newer_than(events_from))
                 && record.payload.number == local
-                && matches!(
-                    entity_event_action(record.event),
+                && (matches!(
+                    action,
                     Ok(EntityEventAction::WeaponFire | EntityEventAction::EjectBrass)
-                )
+                ) || predicted_flesh)
             {
                 owner_events.push((
                     EntityEventRecord {

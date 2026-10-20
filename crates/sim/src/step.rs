@@ -50,6 +50,8 @@ pub(crate) fn schedule() -> Schedule {
                 crate::script::sync_players,
                 crate::script::sync_presence,
                 run_players_system,
+                crate::script::run_woken_threads,
+                crate::script::sync_reshapes,
                 record_collision_state_system,
                 run_entity_types_system,
                 dispatch_touches_system,
@@ -562,6 +564,14 @@ fn run_players_system(ecs: &mut World) {
                     world.record_entity_collision_history(tick);
                 }
                 let emissions = phase_emit(&world, core::slice::from_ref(&shot));
+                if world.publishes_snapshot() {
+                    diag::shot_trace!(
+                        "authority fire tick={} cmd_time={} client={}",
+                        tick.0,
+                        cmd.server_time,
+                        id.0
+                    );
+                }
                 phase_trace(&mut world, tick, &emissions);
             }
             crate::equipment::phase_offhand(&mut world, tick, &[(*id, cmd)]);

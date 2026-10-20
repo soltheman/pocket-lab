@@ -520,6 +520,9 @@ pub(crate) fn read_touch_controls(
     }
     let stick_right = stick_on_right(&settings);
     let mut look = Vec2::ZERO;
+    // Buttons a finger came down on this frame: a quick tap can begin and end within
+    // one frame's touches, and it still presses its button for that frame.
+    let mut pressed_now: Vec<usize> = Vec::new();
     for touch in touches.read() {
         let id = touch.id;
         match touch.phase {
@@ -539,7 +542,9 @@ pub(crate) fn read_touch_controls(
                     if std::env::var_os("IW4L_TOUCH_DEBUG").is_some() {
                         diag::info!(Console, "touch: finger {id} on {}", BUTTONS[index].label);
                     }
+                    diag::shot_trace!("touch down {}", BUTTONS[index].label);
                     state.buttons.insert(id, index);
+                    pressed_now.push(index);
                     if BUTTONS[index].key == AIM_KEY && settings.touch_aim_toggle {
                         state.aim_latched = !state.aim_latched;
                     }
@@ -589,7 +594,7 @@ pub(crate) fn read_touch_controls(
         let held = if toggle && BUTTONS[index].key == AIM_KEY {
             state.aim_latched
         } else {
-            state.buttons.values().any(|&b| b == index)
+            state.buttons.values().any(|&b| b == index) || pressed_now.contains(&index)
         };
         if !held {
             continue;

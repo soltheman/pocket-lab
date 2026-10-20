@@ -1564,6 +1564,12 @@ pub fn predict_local_move(
     cls: Res<ClientRealtime>,
     cg_clock: Res<FrameClock>,
     trace: Option<ResMut<ClientPhaseTrace>>,
+    (authority, mut attack_held, mut authority_world, mut lent): (
+        Option<Res<crate::AuthorityClock>>,
+        Local<bool>,
+        Option<ResMut<crate::authority::runtime::AuthorityWorld>>,
+        Local<Option<LentTargetsCache>>,
+    ),
 ) {
     push_phase(trace, "Predict");
 
@@ -1585,13 +1591,65 @@ pub fn predict_local_move(
     }
 
     let sample = proxy.0.shot_sample(cg_clock.time());
-    if let Some((seq, cmd)) = prediction
-        .0
-        .predict(template.cmd, ServerTime::from_ms(cg_clock.time()))
+    // The listen server's own client: a shot traces the authority's actors where this
+    // client draws them, so a hit bleeds on the frame of the shot (Black Ops' client
+    // traces its own bullets) instead of when the authority runs the command, up to a
+    // 50 ms frame later. Lent only while the trigger is held.
+    let lend = *role == RuntimeRole::Listen
+        && template.cmd.buttons & playerstate_iw4::buttons::ATTACK != 0
+        && authority_world.is_some();
+    if !lend {
+        *lent = None;
+    }
+    if lend
+        && let (Some(world), Some(clock)) = (authority_world.as_deref_mut(), authority.as_ref())
     {
+        let current = sim::Tick(clock.tick);
+        let key = (current, sample.left, sample.right, sample.quality);
+        if lent.as_ref().is_none_or(|cache| cache.key != key) {
+            *lent = Some(LentTargetsCache {
+                key,
+                targets: std::sync::Arc::new(world.0.shot_targets_for_sample(sample, current)),
+            });
+        }
+        prediction
+            .0
+            .lend_shot_targets(lent.as_ref().map(|cache| cache.targets.clone()));
+    }
+    let predicted = prediction
+        .0
+        .predict(template.cmd, ServerTime::from_ms(cg_clock.time()));
+    if lend {
+        prediction.0.lend_shot_targets(None);
+    }
+    if let Some((seq, cmd)) = predicted {
+        if diag::shot_trace_on() {
+            let attack = cmd.buttons & playerstate_iw4::buttons::ATTACK != 0;
+            if attack != *attack_held {
+                diag::shot_trace!(
+                    "cmd attack {} seq={} cmd_time={} authority_time={:?}",
+                    if attack { "down" } else { "up" },
+                    seq.0,
+                    cmd.server_time,
+                    authority.as_ref().map(|clock| clock.time_ms)
+                );
+            }
+            *attack_held = attack;
+        }
         actions.consume_edges();
         pending.push(seq, cmd, sample);
     }
+}
+
+/// The shot targets lent for one authority frame and client shot sample.
+pub struct LentTargetsCache {
+    key: (
+        sim::Tick,
+        sim::Tick,
+        sim::Tick,
+        sim::bullet_collision::ShotSampleQuality,
+    ),
+    targets: std::sync::Arc<sim::bullet_collision::LentShotTargets>,
 }
 
 pub fn flush_bootstrap_applied(
@@ -1668,7 +1726,10 @@ pub fn send_pending_commands(
         return;
     }
 
-    if !pacer.gameplay_due(cls.realtime(), pending.newest_seq()) {
+    // The listen server's own client hands its commands over in memory, every frame: paced
+    // to 60 a second like a socket's, a command made just before an authority frame
+    // could miss it and wait a whole frame (50 ms) more.
+    if pending.newest_seq().is_none() {
         return;
     }
     pacer.note_sent(cls.realtime(), pending.newest_seq(), reliable_ack.0);

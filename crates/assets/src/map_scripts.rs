@@ -148,6 +148,8 @@ gib_fx(tag)
 
 // A severed limb thrown off as BO1's client throws it (do_gib): along the tag's own
 // motion at 600-1000 and 400-700 up, trailing blood, bouncing to rest on the floor.
+// The gore bursts at once: BO1's client plays it a client frame (16 ms) after the
+// gib, where a server frame here would hold it 50.
 gib_throw(model, tag)
 {
     if (!isdefined(model) || !isdefined(tag))
@@ -156,6 +158,7 @@ gib_throw(model, tag)
     angles = self.angles;
     if (!isdefined(start))
         return;
+    self thread gib_fx(tag);
     wait 0.05;
     at = start + anglestoforward(angles) * 10;
     if (isdefined(self))
@@ -166,8 +169,6 @@ gib_throw(model, tag)
     }
     away = vectornormalize(at - start);
     velocity = away * randomintrange(600, 1000) + (0, 0, randomintrange(400, 700));
-    if (isdefined(self))
-        self thread gib_fx(tag);
     piece = spawn("script_model", at);
     if (!isdefined(piece))
         return;

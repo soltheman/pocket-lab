@@ -1541,6 +1541,7 @@ fn register_attachments(registry: &mut NativeRegistry) {
             .iter()
             .position(|(m, t)| *m == model && tag.as_ref().is_none_or(|tag| t == tag))
             .ok_or_else(|| format!("model '{model}' is not attached"))?;
+        diag::shot_trace!("authority detach {id:?} {model}");
         entity.attachments.remove(index);
         Ok(Value::Undefined)
     });

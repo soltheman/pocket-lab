@@ -58,7 +58,11 @@ pub fn try_play_weapon_fx_bolted(
             *played = played.saturating_add(1);
             true
         }
-        Some(PlayResult::Failed(_)) | None => false,
+        Some(PlayResult::Failed(why)) => {
+            diag::shot_trace!("client bolted fx `{}` failed: {why:?}", name.name);
+            false
+        }
+        None => false,
     }
 }
 
@@ -347,6 +351,7 @@ pub fn play_impact_table_cell(
         return;
     };
     combat.last_impact_def = Some(def_name.name.to_owned());
+    diag::shot_trace!("client impact fx surf={surf} `{def_name}`");
     combat.last_impact_miss_why = None;
     if surf == FX_SURF_TYPE_FLESH && std::env::var_os("IW4L_IMPACT_DEBUG").is_some() {
         diag::info!(

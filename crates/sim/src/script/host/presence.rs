@@ -171,6 +171,83 @@ pub(crate) fn sync_presence(world: &mut World) {
     resolve_link_tags(world);
 }
 
+/// After the players' commands and the threads they woke: the model, attachment, part
+/// and animation changes those made (a zombie's death animation, the limb a gib took
+/// off) go into this frame's snapshot rather than the next one's. Poses, visibility and
+/// entities not yet shown stay with [`sync_presence`]: a mover is posed once a frame.
+pub(crate) fn sync_reshapes(world: &mut World) {
+    if !world
+        .resource::<crate::step::StepRequest>()
+        .reason
+        .advances_authority_world()
+    {
+        return;
+    }
+    let wanted = collect_reshapes(world);
+    if wanted.is_empty() {
+        return;
+    }
+    let mut frame = FrameWorld::from_world(world);
+    for want in &wanted {
+        present_model(&mut frame, want);
+    }
+    let mut runtime = world.resource_mut::<Runtime>();
+    for want in wanted {
+        if let Some(shown) = runtime.shown.get_mut(&want.object) {
+            shown.model = want.model;
+            shown.attachments = want.attachments;
+        }
+    }
+}
+
+fn collect_reshapes(world: &mut World) -> Vec<Wanted> {
+    let mut runtime = world.resource_mut::<Runtime>();
+    let runtime = &mut *runtime;
+    let ids: Vec<(u64, ScriptModelId)> = runtime
+        .entities
+        .iter()
+        .filter(|(id, _)| runtime.shown.contains_key(id))
+        .filter_map(|(id, e)| Some((*id, e.presence?)))
+        .collect();
+    let mut wanted = Vec::new();
+    for (object, presence) in ids {
+        let model = model_field(runtime, object);
+        let entity = runtime.entities.get_mut(&object).unwrap();
+        let shown = &runtime.shown[&object];
+        if entity.part_ops.is_empty()
+            && entity.anim_op.is_none()
+            && shown.model == model
+            && shown.attachments == entity.attachments
+        {
+            continue;
+        }
+        let part_ops = std::mem::take(&mut entity.part_ops);
+        let anim_op = entity.anim_op.take();
+        let attachments = entity.attachments.clone();
+        let (hidden, shown_to, solid) = (entity.hidden, entity.shown_to, entity.solid);
+        let collision_only = matches!(entity.kind, EntityKind::Missile(_));
+        let actor = entity.kind == EntityKind::Actor;
+        let origin = vector(runtime, object, "origin");
+        let angles = vector(runtime, object, "angles");
+        wanted.push(Wanted {
+            collision_only,
+            actor,
+            object,
+            presence,
+            origin,
+            angles,
+            model,
+            attachments,
+            hidden,
+            shown_to,
+            solid,
+            part_ops,
+            anim_op,
+        });
+    }
+    wanted
+}
+
 fn present(world: &mut World, now: i32) {
     let retired = std::mem::take(&mut world.resource_mut::<Runtime>().retired_presence);
     let wanted = collect_wanted(world);

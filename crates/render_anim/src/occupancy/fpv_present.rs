@@ -663,7 +663,11 @@ pub fn tick_fpv_viewmodel(
                 let id = local_shot_identity(life, 0, ps.weapon_shot_count, ps.weap_anim);
                 let edged = cursor.0.local_shot.observe(id);
                 let masked = ps.weap_anim as u32 & weapon_iw4::WEAP_ANIM_EVENT_MASK;
-                edged && is_predicted_fire_weap_anim(masked)
+                let fired = edged && is_predicted_fire_weap_anim(masked);
+                if fired {
+                    diag::shot_trace!("client viewmodel fire anim shot={}", ps.weapon_shot_count);
+                }
+                fired
             } else {
                 false
             };

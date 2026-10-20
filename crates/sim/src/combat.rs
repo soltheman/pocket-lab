@@ -724,7 +724,11 @@ pub(crate) fn advance_weapon_command(
                         continue;
                     };
                     apply_player_anim_event(world, *id, ANIM_ET_FIREWEAPON);
-                    let combat_seed = world.combat_rng_mut().next_u32();
+                    // The spread comes from the command itself (as IW's `BG_seedRandWithGameTime`
+                    // seeds it with the command time), so the shooter's predicted bullets go
+                    // where the authority's go. The match stream still advances, as before.
+                    let _ = world.combat_rng_mut().next_u32();
+                    let combat_seed = shot_spread_seed(id.0, cmd.server_time, fire_ordinal, _hand_i);
                     let origin = world
                         .client_meta(*id)
                         .and_then(|meta| meta.linked_weapon_view)
@@ -1161,6 +1165,22 @@ pub(crate) fn phase_emit(world: &FrameWorld, shots: &[AcceptedShot]) -> Vec<Emis
     out
 }
 
+/// A shot's spread seed from what the shooter's client and the authority both know of
+/// it: the shooter, the command's time, and which shot of the command and hand it is.
+fn shot_spread_seed(client: u32, command_time: i32, ordinal: u16, hand: impl Into<u32>) -> u32 {
+    let mut x = (command_time as u32)
+        ^ client.rotate_left(24)
+        ^ u32::from(ordinal).rotate_left(12)
+        ^ hand.into().rotate_left(20);
+    // A 32-bit finalizer (murmur3's), so neighbouring command times spread apart.
+    x ^= x >> 16;
+    x = x.wrapping_mul(0x85eb_ca6b);
+    x ^= x >> 13;
+    x = x.wrapping_mul(0xc2b2_ae35);
+    x ^= x >> 16;
+    x
+}
+
 fn segment_is_shield(collider: Option<ColliderId>) -> bool {
     matches!(
         collider,
@@ -1250,6 +1270,32 @@ pub(crate) fn phase_trace(
             },
             Some(&on_glass_hit),
         );
+        if diag::shot_trace_on()
+            && (world.publishes_snapshot() || world.lent_shot_targets().is_some())
+        {
+            diag::shot_trace!(
+                "{} trace tick={} from {:?} dir {:?} rows={} ({:?}) hits={:?}",
+                if world.publishes_snapshot() {
+                    "authority"
+                } else {
+                    "predicted"
+                },
+                tick.0,
+                em.origin,
+                em.direction,
+                query.entities.rows.len(),
+                query.entities.verdict,
+                segments
+                    .iter()
+                    .map(|segment| match segment.collider {
+                        Some(ColliderId::EntityDObjBone { owner, bone, .. }) =>
+                            format!("bone {owner:?}/{bone}"),
+                        Some(ColliderId::World { .. }) => "world".to_owned(),
+                        other => format!("{other:?}"),
+                    })
+                    .collect::<Vec<_>>()
+            );
+        }
         if std::env::var_os("IW4L_SHOT_DEBUG").is_some() {
             diag::info!(
                 Sim,
@@ -1364,6 +1410,16 @@ pub(crate) fn phase_trace(
                     }),
                 _ => None,
             };
+            // A listen client's own shot, predicted: the actors it borrowed from the
+            // authority are flesh where the authority's would be.
+            let actor_hit = actor_hit.or_else(|| match segment.collider {
+                Some(ColliderId::EntityDObjBone { owner, bone, .. })
+                    if !exit && !world.publishes_snapshot() =>
+                {
+                    world.lent_shot_targets()?.flesh_hit(owner, bone)
+                }
+                _ => None,
+            });
             let scaled = actor_hit.map_or(scaled, |(hitloc, _)| {
                 let scale = facts.location_scale(hitloc);
                 if std::env::var_os("IW4L_ACTOR_DEBUG").is_some() {
@@ -1462,6 +1518,7 @@ pub(crate) fn phase_trace(
                     ) => owner
                         .script_model()
                         .and_then(|id| world.gentity_number(id))
+                        .or_else(|| world.lent_shot_targets()?.actor_number(owner))
                         .unwrap_or(ENTITYNUM_NONE),
                     Some(ColliderId::Player { client, .. }) => client.0 as i32,
                     _ => ENTITYNUM_NONE,

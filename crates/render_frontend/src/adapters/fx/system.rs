@@ -2155,6 +2155,9 @@ fn publish_weapon_fire(
             ));
         }
         combat.last_fire_alias = Some(alias.to_owned());
+        if player_view {
+            diag::shot_trace!("client fire sound {alias}");
+        }
 
         let sound_origin = fire.event.payload.origin;
         sounds.write(audio::WeaponSound {
@@ -2289,8 +2292,18 @@ fn drain_weapon_fire_fx(
                     fx_world.view().as_ref().map(|s| s as &dyn FxScene),
                 ) {
                     occurrences.presented(&fire.event, FireFxOccurrence::Muzzle, msec);
+                    if player_view {
+                        diag::shot_trace!("client muzzle flash");
+                    }
                     cursor.muzzle_bolted = cursor.muzzle_bolted.saturating_add(1);
                 } else {
+                    if player_view {
+                        diag::shot_trace!(
+                            "client muzzle flash failed name={:?} target={}",
+                            muzzle_name.map(|n| n.name),
+                            flash_target.is_some()
+                        );
+                    }
                     muzzle_gap = muzzle_gap.saturating_add(1);
                 }
                 if muzzle_played > cursor.muzzle_played {
@@ -2298,6 +2311,11 @@ fn drain_weapon_fire_fx(
                 }
                 cursor.muzzle_played = muzzle_played;
                 cursor.muzzle_gap = muzzle_gap;
+            } else if player_view {
+                diag::shot_trace!(
+                    "client muzzle flash refused domain={:?} msec={msec}",
+                    fire.event.domain
+                );
             }
             let delayed_brass = weapons
                 .as_deref()

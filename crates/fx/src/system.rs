@@ -874,6 +874,29 @@ impl FxSystemHost {
         Some(idx as u8)
     }
 
+    /// A dead effect's bolt record goes back on the free list. Without this every bolted
+    /// effect (a muzzle flash, an ejected shell, `playFxOnTag`) used one of the 255 records
+    /// for good, and after a hundred-odd shots none could be played.
+    fn free_bolt_record(&mut self, bolt: u8) {
+        let index = usize::from(bolt);
+        if bolt == 0xff || index >= self.bolt_next.len() {
+            return;
+        }
+        self.bolt_next[index] = self.bolt_first_free;
+        self.bolt_first_free = i32::from(bolt);
+        self.bolted_warn_count = self.bolted_warn_count.saturating_sub(1);
+    }
+
+    pub fn bolt_records_free(&self) -> usize {
+        let mut count = 0;
+        let mut at = self.bolt_first_free;
+        while at != fx_iw4::FX_BOLT_FREE_NONE && count <= self.bolt_next.len() {
+            count += 1;
+            at = self.bolt_next.get(at as usize).copied().unwrap_or(fx_iw4::FX_BOLT_FREE_NONE);
+        }
+        count
+    }
+
     pub fn spawn_effect(
         &mut self,
         def_name: &str,
@@ -999,6 +1022,8 @@ impl FxSystemHost {
             self.set_handle_at_ring(active_index as u32, handle);
             active_index = active_index.wrapping_add(1);
             if let Some(slot) = handle_to_slot(handle) {
+                let bolt = self.effects[slot].bolt;
+                self.free_bolt_record(bolt);
                 self.effects[slot] = FxEffectSlot::default();
             }
         }
@@ -1102,4 +1127,26 @@ fn handle_to_slot(handle: u16) -> Option<usize> {
     }
     let slot = (byte_off / FX_EFFECT_SLOT_SIZE as u32) as usize;
     (slot < FX_EFFECT_POOL_CAPACITY as usize).then_some(slot)
+}
+
+#[cfg(test)]
+mod bolt_record_tests {
+    use super::*;
+
+    const IDENTITY: [[f32; 3]; 3] = [[1.0, 0.0, 0.0], [0.0, 1.0, 0.0], [0.0, 0.0, 1.0]];
+
+    /// A muzzle flash's life: bolted, released at once, collected when it is done.
+    #[test]
+    fn dead_bolted_effects_give_their_bolt_records_back() {
+        let mut host = FxSystemHost::new();
+        let free_at_start = host.bolt_records_free();
+        for shot in 0..1000 {
+            let handle = host
+                .spawn_effect("muzzle", [0.0; 3], IDENTITY, shot, 7, false, 0)
+                .unwrap_or_else(|why| panic!("shot {shot}: {why:?}"));
+            host.play_release_ownership(handle);
+            host.run_garbage_collection();
+        }
+        assert_eq!(host.bolt_records_free(), free_at_start);
+    }
 }

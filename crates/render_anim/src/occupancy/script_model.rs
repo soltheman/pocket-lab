@@ -385,6 +385,30 @@ fn apply_presented_script_model_dobjs(
             owner.current_model = asset_world::MapXModelAssetKey(base.model.clone());
         }
         if owner.dobj_state != *state {
+            if diag::shot_trace_on() {
+                let leaf = |s: &xmodel_runtime::DObjSemanticState| {
+                    s.tree
+                        .as_ref()
+                        .and_then(|tree| tree.nodes.last())
+                        .and_then(|leaf| leaf.clip.clone())
+                };
+                let models = |s: &xmodel_runtime::DObjSemanticState| s.composition.models.len();
+                if models(&owner.dobj_state) != models(state) {
+                    diag::shot_trace!(
+                        "client models {:?} {} -> {} ({})",
+                        authority_owner,
+                        models(&owner.dobj_state),
+                        models(state),
+                        base.model
+                    );
+                }
+                let (was, now) = (leaf(&owner.dobj_state), leaf(state));
+                if was != now
+                    && now.as_deref().is_some_and(|clip| clip.contains("death"))
+                {
+                    diag::shot_trace!("client death anim {:?} {:?}", authority_owner, now);
+                }
+            }
             owner.dobj_state = state.clone();
         }
 

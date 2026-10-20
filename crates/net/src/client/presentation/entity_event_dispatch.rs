@@ -167,6 +167,19 @@ pub struct EntityEventCursor {
     predicted_shots: u32,
     authority_shots: u32,
     deferred: VecDeque<DeferredEntityEvent>,
+    /// The local player's bullets whose flesh impact was predicted (and played): the
+    /// authority's own impacts for them are not played a second time.
+    predicted_flesh: VecDeque<((sim::FireCause, u16), Instant)>,
+}
+
+/// How long a predicted flesh impact waits for the authority's to stand in for it.
+const PREDICTED_FLESH_WAIT: std::time::Duration = std::time::Duration::from_secs(2);
+
+fn is_flesh_hit(record_event: EntityEventKind, payload: &EntityEventPayload) -> bool {
+    matches!(
+        entity_event_action(record_event),
+        Ok(EntityEventAction::BulletHit)
+    ) && payload.surf_type == weapon_iw4::SURF_TYPE_FLESH as u8
 }
 
 #[derive(Resource, Default, Debug, Clone, Copy, PartialEq, Eq)]
@@ -430,10 +443,23 @@ fn dispatch_entity_events(
             continue;
         }
         if !archived
+            && record.payload.number == local_number
+            && is_flesh_hit(record.event, &record.payload)
+            && let Some(cause) = record.payload.fire_cause
+            && cursor
+                .predicted_flesh
+                .iter()
+                .any(|(key, _)| *key == (cause, record.payload.pellet))
+        {
+            diag::shot_trace!("client authority flesh impact skipped (predicted)");
+            continue;
+        }
+        if !archived
             && retry.is_none()
             && record.payload.number == local_number
             && entity_event_action(record.event) == Ok(EntityEventAction::WeaponFire)
         {
+            diag::shot_trace!("client authority fire event tick={}", record.tick.0);
             cursor.authority_shots = cursor.authority_shots.wrapping_add(1);
             perf::owner_shot("authority", cursor.authority_shots, record.tick.0);
         }
@@ -551,7 +577,20 @@ fn dispatch_owner_events(
         }) {
             continue;
         }
+        if is_flesh_hit(record.event, &record.payload)
+            && let Some(cause) = record.payload.fire_cause
+        {
+            diag::shot_trace!("client predicted flesh impact");
+            let now = Instant::now();
+            cursor
+                .predicted_flesh
+                .retain(|(_, at)| now.duration_since(*at) < PREDICTED_FLESH_WAIT);
+            cursor
+                .predicted_flesh
+                .push_back(((cause, record.payload.pellet), now));
+        }
         if entity_event_action(record.event) == Ok(EntityEventAction::WeaponFire) {
+            diag::shot_trace!("client predicted fire tick={}", record.tick.0);
             cursor.predicted_shots = cursor.predicted_shots.wrapping_add(1);
             perf::owner_shot("predicted", cursor.predicted_shots, record.tick.0);
         }

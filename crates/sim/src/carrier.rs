@@ -270,6 +270,32 @@ impl SimWorld {
         Ok(number)
     }
 
+    /// What this (listen) authority lends its own client to trace a shot claiming
+    /// `sample` against: its actors' hit boxes where that client draws them.
+    pub fn shot_targets_for_sample(
+        &mut self,
+        sample: crate::bullet_collision::ShotSampleProvenance,
+        current: Tick,
+    ) -> crate::bullet_collision::LentShotTargets {
+        let rows = self.entity_rows_for_sample(sample, current);
+        let living = crate::script::host::actors::living_actor_presences(&mut self.ecs);
+        let actors = living
+            .into_iter()
+            .map(|(model, health)| crate::bullet_collision::LentActor {
+                model,
+                number: self.gentity_number(model),
+                health,
+                capability: self
+                    .entity_collision_capabilities()
+                    .iter()
+                    .find(|row| row.owner.script_model() == Some(model))
+                    .and_then(|row| row.dobj.as_ref())
+                    .and_then(|dobj| dobj.capability.clone()),
+            })
+            .collect();
+        crate::bullet_collision::LentShotTargets { rows, actors }
+    }
+
     pub fn gentity_number(&self, id: ScriptModelId) -> Option<i32> {
         self.script_mover_by_id(id).map(|mover| mover.state.number)
     }

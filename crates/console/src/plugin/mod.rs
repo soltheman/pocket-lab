@@ -1076,6 +1076,7 @@ fn handle_input_commands(
                         .unwrap_or(crate::PRESS_SECONDS)
                         .clamp(0.0, 60.0);
                     inputs.press(input, seconds);
+                    diag::shot_trace!("console press {input}");
                     console.echo(
                         format!("pressed: {input} ({seconds:.2}s)"),
                         settings.log_capacity,

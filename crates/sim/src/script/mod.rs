@@ -34,7 +34,7 @@ pub(crate) use host::players::{
     choose_default_class, disconnect_player, flashbang, force_death, give_killstreak, is_t5,
     note_team_answer, personal_class, player_damage, script_seats, set_profile, sync_players,
 };
-pub(crate) use host::presence::sync_presence;
+pub(crate) use host::presence::{sync_presence, sync_reshapes};
 pub use host::registry::{Native, NativeRegistry};
 pub(crate) use host::restart::restart_level;
 pub(crate) use host::weapons::sync_engine_events;
@@ -46,7 +46,8 @@ pub use profile::zombies_startup::{ZOMBIES_CALLBACKS, ZombiesStartup};
 pub use compiler::Census;
 pub use program::{ModuleIdentity, Program, Realm, Site};
 pub(crate) use runtime::{
-    advance_scheduler, copy_state, healthy, install, preflight, reset, start, take_signals,
+    advance_scheduler, copy_state, healthy, install, preflight, reset, run_woken_threads, start,
+    take_signals,
 };
 pub use source::{FileSources, SourceOrigin, SourceResolver, decode_source, normalize_module};
 pub(crate) use value::ArrayKey;

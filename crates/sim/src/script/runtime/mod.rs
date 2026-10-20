@@ -1351,6 +1351,14 @@ pub(crate) fn advance_scheduler(world: &mut World) {
         runtime.buckets.insert(now, current);
     }
     run_ready(world, &program, now);
+    retire_frame(world, now);
+    world.resource_mut::<Runtime>().loading = false;
+    collect_heap(world);
+}
+
+/// What a scheduler pass leaves for the frame's end: the entities scripts deleted, the
+/// fields of the ones that died, and the emptied bucket.
+fn retire_frame(world: &mut World, now: i64) {
     let deletes = std::mem::take(&mut world.resource_mut::<Runtime>().pending_deletes);
     for object in deletes {
         world.resource_mut::<Runtime>().delete_entity(object);
@@ -1364,8 +1372,43 @@ pub(crate) fn advance_scheduler(world: &mut World) {
     if runtime.buckets.get(&now).is_some_and(VecDeque::is_empty) {
         runtime.buckets.remove(&now);
     }
-    runtime.loading = false;
-    collect_heap(world);
+}
+
+/// The threads the players' commands woke (a zombie's `damage` and `death` waits: its
+/// gib, its points, its death animscript), run in the same frame. Black Ops runs a
+/// client's command as it arrives, before the server frame's scripts, so what a shot
+/// sets off is in the very next snapshot; here the commands run after the frame's
+/// scripts, and without this pass all of it waited a whole frame more.
+pub(crate) fn run_woken_threads(world: &mut World) {
+    let request = world.resource::<crate::step::StepRequest>();
+    if !request.reason.advances_authority_world() {
+        return;
+    }
+    let now = i64::from(request.tick.0) * i64::from(crate::MATCH_TICK_MS);
+    let runtime = world.resource::<Runtime>();
+    if runtime.fault.is_some() || runtime.last_tick != Some(request.tick) {
+        return;
+    }
+    let Some(program) = runtime.program.clone() else {
+        return;
+    };
+    let woken = !runtime.pending_notifies.is_empty()
+        || runtime.buckets.get(&now).is_some_and(|bucket| !bucket.is_empty())
+        || !runtime.spawned.is_empty();
+    if !woken {
+        return;
+    }
+    deliver_external(world, now);
+    {
+        let mut runtime = world.resource_mut::<Runtime>();
+        let spawned = std::mem::take(&mut runtime.spawned);
+        let bucket = runtime.buckets.entry(now).or_default();
+        for serial in spawned.into_iter().rev() {
+            bucket.push_front(serial);
+        }
+    }
+    run_ready(world, &program, now);
+    retire_frame(world, now);
 }
 
 fn run_ready(world: &mut World, program: &Program, now: i64) {

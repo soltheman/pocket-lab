@@ -101,6 +101,7 @@ fn register_implemented(registry: &mut NativeRegistry) {
     registry.register(Method, "gib", |world, receiver, args| {
         super::engine::entity_id(world, receiver)?;
         let now = super::super::players::now_ms(world);
+        diag::shot_trace!("authority gib {receiver:?} pieces={:?} level_ms={now}", args.get(1));
         crate::script::runtime::run_now(
             world,
             GIB_PIECES,

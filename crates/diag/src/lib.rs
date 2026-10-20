@@ -425,6 +425,33 @@ pub fn process_elapsed_ns() -> u128 {
         .unwrap_or(0)
 }
 
+/// IW4L_SHOT_TRACE=1: the shot timeline (fire press, predicted fire, the authority's
+/// hit, blood, gib, death) logged with the process clock, to measure what a shot waits on.
+pub fn shot_trace_on() -> bool {
+    static ON: OnceLock<bool> = OnceLock::new();
+    *ON.get_or_init(|| std::env::var_os("IW4L_SHOT_TRACE").is_some_and(|v| v != "0"))
+}
+
+/// Milliseconds since the process started, for [`shot_trace!`] lines.
+pub fn shot_trace_ms() -> f64 {
+    process_elapsed_ns() as f64 / 1.0e6
+}
+
+#[macro_export]
+macro_rules! shot_trace {
+    ($($arg:tt)*) => {{
+        if $crate::shot_trace_on() {
+            $crate::write_event(
+                $crate::Channel::Sim,
+                $crate::Level::Info,
+                &format!("shot trace {:.1} {}", $crate::shot_trace_ms(), format_args!($($arg)*)),
+                None,
+                None,
+            );
+        }
+    }};
+}
+
 pub fn lifecycle_boundary(name: &str, detail: &str) {
     controller_line("lifecycle", name, detail);
 }

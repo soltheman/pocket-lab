@@ -1680,6 +1680,28 @@ pub(crate) fn living(world: &mut World, team: Option<&str>) -> Vec<Value> {
         .collect()
 }
 
+/// The living actors' presences and health, for a listen client's predicted hits.
+pub(crate) fn living_actor_presences(world: &mut World) -> Vec<(crate::ScriptModelId, i32)> {
+    let mut runtime = world.resource_mut::<Runtime>();
+    let living: Vec<(u64, crate::ScriptModelId)> = runtime
+        .actors
+        .iter()
+        .filter(|(_, actor)| !actor.is_dead())
+        .filter_map(|(object, _)| Some((*object, runtime.entities.get(object)?.presence?)))
+        .collect();
+    living
+        .into_iter()
+        .map(|(object, presence)| {
+            let health = match runtime.object_field(object, "health") {
+                Value::Int(health) => health,
+                Value::Float(health) => health as i32,
+                _ => 0,
+            };
+            (presence, health)
+        })
+        .collect()
+}
+
 pub(crate) fn is_actor(world: &World, object: u64) -> bool {
     world.resource::<Runtime>().actors.contains_key(&object)
 }
@@ -1710,6 +1732,11 @@ pub(crate) fn damage(
             hit.means
         );
     }
+    diag::shot_trace!(
+        "authority damage actor={object} amount={} means={} part={part}",
+        hit.amount,
+        hit.means
+    );
     let hitloc = weapon_iw4::HITLOC_NAMES[usize::from(hitloc_for_bone(part))];
     let args = vec![
         attacker.clone(),
@@ -1988,6 +2015,7 @@ fn kill(world: &mut World, object: u64, args: &[Value], attacker: Value) {
         Value::Int(0),
     ];
     let _ = run_now(world, ACTOR_KILLED, Value::Object(object), killed, now);
+    diag::shot_trace!("authority death actor={object} level_ms={now}");
     raise(world, Value::Object(object), "death", vec![attacker]);
     // The death animscript: a zombie's `deathFunction` hands out the kill points there,
     // then it plays the death clip (`death_anim`).
